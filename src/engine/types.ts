@@ -377,8 +377,8 @@ export type NodeType = 'skirmish' | 'escape' | 'vault' | 'shop' | 'barn_rescue' 
 
 export interface SeasonNode {
   id: string;
-  stage: number; // 0..3
-  lane: number; // 0 = top/only, 1 = bottom
+  stage: number; // floor within the act (boss is the last floor)
+  lane: number; // column 0..MAX_LANES-1
   type: NodeType;
   name: string;
   subtitle: string;
@@ -416,6 +416,10 @@ export interface RunState {
   id: string;
   seasonId?: SeasonId;
   seasonName: string;
+  /** 0-based index into ACTS. Older saves lack it and are migrated on load. */
+  act: number;
+  /** Seed for the procedural map, so a run can be reproduced (e.g. a daily run). */
+  seed: number;
   nodes: SeasonNode[];
   currentNodeId: string | null;
   completedNodeIds: string[];

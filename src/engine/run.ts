@@ -1,7 +1,9 @@
 import { ALL_GRAFT_IDS, GRAFT_REGISTRY } from '../data/grafts';
 import { ALL_ITEM_IDS, ITEM_REGISTRY } from '../data/items';
 import { PRODUCE_BLUEPRINTS, RECRUITABLE_BLUEPRINT_IDS, STARTER_BLUEPRINT_IDS } from '../data/produce';
+import { MAP_TEMPLATES } from '../data/maps';
 import { ALL_RELIC_IDS } from '../data/relics';
+import { ACTS, actIndexForSeason, actRng, generateActNodes, randomSeed } from './mapgen';
 import type {
   BattleState,
   MarketOffer,
@@ -63,7 +65,7 @@ export function loadSavedRun(): RunState | null {
     if (typeof localStorage === 'undefined') return null;
     const raw = localStorage.getItem(RUN_STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as RunState;
+    return migrateSavedRun(JSON.parse(raw) as RunState);
   } catch {
     return null;
   }
@@ -151,149 +153,13 @@ export function createHeroFromBlueprint(blueprintId: string, bonusMaxHp = 0): Ro
   };
 }
 
-export function createMiniSeasonNodes(): SeasonNode[] {
-  return [
-    {
-      id: 'n0',
-      stage: 0,
-      lane: 0,
-      type: 'skirmish',
-      name: 'Sunlit Vegetable Patch',
-      subtitle: 'Defeat All — Break out of the garden beds',
-      mapId: 'vegetable_patch',
-      nextIds: ['n1a', 'n1b'],
-      completed: false,
-    },
-    {
-      id: 'n1a',
-      stage: 1,
-      lane: 0,
-      type: 'escape',
-      name: 'Garden Gate Breakout',
-      subtitle: 'Reach the Gate — Vault past foes for a Graft, Soil Relic & 16 Seeds',
-      mapId: 'patch_breakout',
-      nextIds: ['n2a', 'n2b'],
-      completed: false,
-    },
-    {
-      id: 'n1b',
-      stage: 1,
-      lane: 1,
-      type: 'vault',
-      name: 'Seed Vault & Compost',
-      subtitle: 'Safe Stop — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
-      nextIds: ['n2a', 'n2b'],
-      completed: false,
-    },
-    {
-      id: 'n2a',
-      stage: 2,
-      lane: 0,
-      type: 'barn_rescue',
-      name: 'Old Barn Rescue',
-      subtitle: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
-      mapId: 'barn_raid',
-      nextIds: ['n3'],
-      completed: false,
-    },
-    {
-      id: 'n2b',
-      stage: 2,
-      lane: 1,
-      type: 'elite',
-      name: 'Tool Shed Ambush',
-      subtitle: 'Elite Fight — High-stakes battle for rare Graft + Soil Relic',
-      mapId: 'tool_shed_ambush',
-      nextIds: ['n3'],
-      completed: false,
-    },
-    {
-      id: 'n3',
-      stage: 3,
-      lane: 0,
-      type: 'boss',
-      name: "Captain Scarecrow's Stand",
-      subtitle: 'Spring Season Boss — Topple the towering straw warden!',
-      mapId: 'scarecrow_stand',
-      nextIds: [],
-      completed: false,
-    },
-  ];
-}
-
-export function createSummerSeasonNodes(): SeasonNode[] {
-  return [
-    {
-      id: 'n0',
-      stage: 0,
-      lane: 0,
-      type: 'skirmish',
-      name: 'Sun-Baked Glasshouse',
-      subtitle: 'Defeat All — Use Sunbeams (+2 ATK) & Beehives to break the guard',
-      mapId: 'greenhouse_entry',
-      nextIds: ['n1a', 'n1b'],
-      completed: false,
-    },
-    {
-      id: 'n1a',
-      stage: 1,
-      lane: 0,
-      type: 'escape',
-      name: 'Sprinkler Alley Breakout',
-      subtitle: 'Reach the Gate — Blast Sprinklers & rush north for Graft + Relic',
-      mapId: 'irrigation_run',
-      nextIds: ['n2a', 'n2b'],
-      completed: false,
-    },
-    {
-      id: 'n1b',
-      stage: 1,
-      lane: 1,
-      type: 'shop',
-      name: "Farmer's Compost Market",
-      subtitle: 'Safe Market — Spend run Seeds on Grafts, Items, Healing & Recruits!',
-      nextIds: ['n2a', 'n2b'],
-      completed: false,
-    },
-    {
-      id: 'n2a',
-      stage: 2,
-      lane: 0,
-      type: 'barn_rescue',
-      name: 'Old Barn Rescue',
-      subtitle: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
-      mapId: 'barn_raid',
-      nextIds: ['n3'],
-      completed: false,
-    },
-    {
-      id: 'n2b',
-      stage: 2,
-      lane: 1,
-      type: 'elite',
-      name: 'Beehive Apiary Elite',
-      subtitle: 'Elite Fight — Chain-detonate Beehives for rare Graft + Soil Relic',
-      mapId: 'apiary_ambush',
-      nextIds: ['n3'],
-      completed: false,
-    },
-    {
-      id: 'n3',
-      stage: 3,
-      lane: 0,
-      type: 'boss',
-      name: "Baron Combine's Conservatory",
-      subtitle: 'Summer Season Boss — Topple the vintage red harvester tractor!',
-      mapId: 'combine_throne',
-      nextIds: [],
-      completed: false,
-    },
-  ];
-}
-
-export function createNewRun(meta: MetaProgress, seasonId: SeasonId = 'spring'): RunState {
+export function createNewRun(
+  meta: MetaProgress,
+  seasonId: SeasonId = 'spring',
+  seed: number = randomSeed()
+): RunState {
   const hpBonus = meta.unlocks.heirloomSoil ? 2 : 0;
-  // Starter squad: Stitch (cow), Crisphead (lettuce), Snap-Pea & Zestia active + Spudnik, Truffle Boar & Habanero on bench!
+  // Starter squad: Spudnik, Snap-Pea, Zestia & Truffle Boar active + Habanero on bench (swap anytime!)
   const roster = STARTER_BLUEPRINT_IDS.map((id) => createHeroFromBlueprint(id, hpBonus));
   const relicIds = meta.unlocks.starterRelic ? ['rich_loam'] : [];
   const items: Record<string, number> = {
@@ -301,29 +167,75 @@ export function createNewRun(meta: MetaProgress, seasonId: SeasonId = 'spring'):
     fertilizer_bomb: meta.unlocks.extraItemSatchel ? 2 : 1,
     honey_pot: 1,
   };
+  const act = actIndexForSeason(seasonId);
 
-  return {
+  const run: RunState = {
     id: `run_${Date.now()}`,
-    seasonId,
-    seasonName: seasonId === 'summer' ? 'Summer Greenhouse' : 'Spring Mini-Season',
-    nodes: seasonId === 'summer' ? createSummerSeasonNodes() : createMiniSeasonNodes(),
+    seasonId: ACTS[act].id,
+    seasonName: actTitle(act),
+    act,
+    seed: seed >>> 0,
+    nodes: [],
     currentNodeId: null,
     completedNodeIds: [],
     roster,
     activeSquadUids: roster.slice(0, 4).map((h) => h.uid),
     relicIds,
     items,
-    seeds: seasonId === 'summer' ? 8 : 0,
+    seeds: act > 0 ? 8 * act : 0,
     battlesWon: 0,
     enemiesDefeated: 0,
     pendingReward: null,
     status: 'map',
   };
+  run.nodes = generateActNodes(act, actRng(run.seed, act), mapDisplayName);
+  return run;
+}
+
+export function actTitle(act: number): string {
+  return `Act ${act + 1} · ${ACTS[act]?.name ?? ACTS[0].name}`;
+}
+
+function mapDisplayName(mapId: string): string {
+  return MAP_TEMPLATES[mapId]?.name ?? mapId;
+}
+
+export function isFinalAct(run: RunState): boolean {
+  return run.act >= ACTS.length - 1;
+}
+
+/** Move the run on to the next act's freshly generated map (after beating an act boss). */
+export function advanceToNextAct(run: RunState): void {
+  const next = Math.min(run.act + 1, ACTS.length - 1);
+  run.act = next;
+  run.seasonId = ACTS[next].id;
+  run.seasonName = actTitle(next);
+  run.nodes = generateActNodes(next, actRng(run.seed, next), mapDisplayName);
+  run.completedNodeIds = [];
+  run.currentNodeId = null;
+  // Breather between acts: patch up the surviving squad.
+  for (const hero of run.roster) {
+    if (!hero.harvested) {
+      hero.hp = Math.min(hero.maxHp, hero.hp + Math.ceil((hero.maxHp - hero.hp) / 2));
+    }
+  }
+}
+
+/** Bring a save from an older version up to the current RunState shape. */
+export function migrateSavedRun(run: RunState): RunState {
+  if (typeof run.act !== 'number') {
+    run.act = actIndexForSeason(run.seasonId);
+  }
+  if (typeof run.seed !== 'number') {
+    run.seed = randomSeed();
+  }
+  return run;
 }
 
 export function getAvailableNextNodeIds(run: RunState): string[] {
   if (run.completedNodeIds.length === 0) {
-    return ['n0'];
+    // Any first-floor node is a valid start.
+    return run.nodes.filter((n) => n.stage === 0).map((n) => n.id);
   }
   const lastId = run.completedNodeIds[run.completedNodeIds.length - 1];
   const lastNode = run.nodes.find((n) => n.id === lastId);
@@ -594,6 +506,20 @@ export function applyBattleOutcomeToRun(
     if (!hero.harvested) {
       hero.hp = Math.min(hero.maxHp, hero.hp + 3);
     }
+  }
+
+  if (node?.type === 'boss' && !isFinalAct(run)) {
+    // Act cleared: bank the boss reward, then continue on the next act's map.
+    const reward = generateRewardForNode(run, node);
+    run.seeds += reward.seedsEarned;
+    if (reward.itemGrant) {
+      run.items[reward.itemGrant.itemId] =
+        (run.items[reward.itemGrant.itemId] ?? 0) + reward.itemGrant.count;
+    }
+    advanceToNextAct(run);
+    run.pendingReward = reward;
+    run.status = 'reward';
+    return;
   }
 
   if (node?.type === 'boss') {

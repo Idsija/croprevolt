@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
 import { RELIC_REGISTRY } from '../data/relics';
+import { ACTS, FLOORS_PER_ACT, MAX_LANES } from '../engine/mapgen';
 import { getAvailableNextNodeIds } from '../engine/run';
 import type { SeasonNode } from '../engine/types';
 import {
@@ -20,20 +21,136 @@ const availableIds = computed(() => new Set(getAvailableNextNodeIds(run.value)))
 const mobileTab = ref<'trail' | 'squad'>('trail');
 const inspectedInfo = ref<{ title: string; desc: string } | null>(null);
 
-const stages = computed(() => {
-  const grouped: SeasonNode[][] = [[], [], [], []];
+const act = computed(() => ACTS[run.value.act] ?? ACTS[0]);
+
+/** Floors top-to-bottom for rendering: boss first, floor 0 last (the trail climbs upward). */
+const floors = computed(() => {
+  const grouped: SeasonNode[][] = Array.from({ length: FLOORS_PER_ACT + 1 }, () => []);
   for (const n of run.value.nodes) {
-    grouped[n.stage].push(n);
+    (grouped[n.stage] ??= []).push(n);
   }
-  return grouped;
+  return grouped
+    .map((nodes, floor) => ({ floor, nodes, isBoss: nodes.some((n) => n.type === 'boss') }))
+    .filter((row) => row.nodes.length > 0) // older saves have fewer floors
+    .reverse();
 });
+
+const completedIds = computed(() => new Set(run.value.completedNodeIds));
+
+// ---------- Selection (tap once to inspect, tap again or press Enter to go) ----------
+const selectedId = ref<string | null>(null);
+const hoveredId = ref<string | null>(null);
+const focusNode = computed(() => {
+  const id = hoveredId.value ?? selectedId.value;
+  return id ? run.value.nodes.find((n) => n.id === id) ?? null : null;
+});
+
+function onNodeClick(node: SeasonNode): void {
+  if (!availableIds.value.has(node.id)) {
+    selectedId.value = node.id;
+    return;
+  }
+  if (selectedId.value === node.id) {
+    enterSeasonNode(node.id);
+    return;
+  }
+  selectedId.value = node.id;
+}
+
+function enterSelected(): void {
+  if (selectedId.value && availableIds.value.has(selectedId.value)) {
+    enterSeasonNode(selectedId.value);
+  }
+}
+
+// ---------- Trail lines (SVG drawn between node cards) ----------
+const graphRef = ref<HTMLElement | null>(null);
+const nodeEls = new Map<string, HTMLElement>();
+const lines = ref<Array<{ key: string; d: string; state: 'done' | 'open' | 'idle' }>>([]);
+const graphSize = ref({ w: 0, h: 0 });
+
+function setNodeEl(id: string, el: unknown): void {
+  if (el instanceof HTMLElement) nodeEls.set(id, el);
+  else nodeEls.delete(id);
+}
+
+function anchor(el: HTMLElement, edge: 'top' | 'bottom'): { x: number; y: number } {
+  // offset* ignores CSS transforms, so the pulsing cards don't make the lines wobble.
+  return {
+    x: el.offsetLeft + el.offsetWidth / 2,
+    y: edge === 'top' ? el.offsetTop : el.offsetTop + el.offsetHeight,
+  };
+}
+
+function layoutLines(): void {
+  const graph = graphRef.value;
+  if (!graph) return;
+  graphSize.value = { w: graph.scrollWidth, h: graph.scrollHeight };
+  const lastDone = run.value.completedNodeIds[run.value.completedNodeIds.length - 1];
+  const out: typeof lines.value = [];
+  for (const node of run.value.nodes) {
+    const fromEl = nodeEls.get(node.id);
+    if (!fromEl) continue;
+    for (const nextId of node.nextIds) {
+      const toEl = nodeEls.get(nextId);
+      if (!toEl) continue;
+      // Lower floors sit below, so lines run from the top of a node to the bottom of the next.
+      const a = anchor(fromEl, 'top');
+      const b = anchor(toEl, 'bottom');
+      const midY = (a.y + b.y) / 2;
+      const state =
+        completedIds.value.has(node.id) && completedIds.value.has(nextId)
+          ? 'done'
+          : node.id === lastDone && availableIds.value.has(nextId)
+            ? 'open'
+            : 'idle';
+      out.push({
+        key: `${node.id}>${nextId}`,
+        d: `M ${a.x} ${a.y} C ${a.x} ${midY}, ${b.x} ${midY}, ${b.x} ${b.y}`,
+        state,
+      });
+    }
+  }
+  lines.value = out;
+}
+
+function scrollToCurrentFloor(): void {
+  const firstAvailable = [...availableIds.value].map((id) => nodeEls.get(id)).find(Boolean);
+  firstAvailable?.scrollIntoView({ block: 'center', inline: 'nearest' });
+}
+
+let resizeObserver: ResizeObserver | null = null;
+onMounted(async () => {
+  await nextTick();
+  layoutLines();
+  scrollToCurrentFloor();
+  if (typeof ResizeObserver !== 'undefined' && graphRef.value) {
+    resizeObserver = new ResizeObserver(() => layoutLines());
+    resizeObserver.observe(graphRef.value);
+  }
+});
+onBeforeUnmount(() => resizeObserver?.disconnect());
+
+watch(
+  () => [run.value.act, run.value.nodes.length, run.value.completedNodeIds.length],
+  async () => {
+    selectedId.value = null;
+    await nextTick();
+    layoutLines();
+    scrollToCurrentFloor();
+  }
+);
+
+function floorLabel(row: { floor: number; isBoss: boolean }): string {
+  return row.isBoss ? 'ACT BOSS' : `FLOOR ${row.floor + 1}`;
+}
 
 function nodeSprite(type: SeasonNode['type']): string {
   switch (type) {
     case 'skirmish':
-      return run.value.seasonId === 'summer' ? '/sprites/beehive.png' : '/sprites/digger.png';
+      return act.value.id === 'summer' ? '/sprites/beehive.png' : '/sprites/digger.png';
     case 'escape':
-      return run.value.seasonId === 'summer' ? '/sprites/sprinkler.png' : '/sprites/mower.png';
+      return act.value.id === 'summer' ? '/sprites/sprinkler.png' : '/sprites/mower.png';
     case 'vault':
       return '/sprites/carrot.png';
     case 'shop':
@@ -41,9 +158,9 @@ function nodeSprite(type: SeasonNode['type']): string {
     case 'barn_rescue':
       return '/sprites/cage.png';
     case 'elite':
-      return run.value.seasonId === 'summer' ? '/sprites/beehive.png' : '/sprites/sprayer.png';
+      return act.value.id === 'summer' ? '/sprites/beehive.png' : '/sprites/sprayer.png';
     case 'boss':
-      return run.value.seasonId === 'summer' ? '/sprites/tractor.png' : '/sprites/scarecrow.png';
+      return act.value.id === 'summer' ? '/sprites/tractor.png' : '/sprites/scarecrow.png';
   }
 }
 
@@ -62,7 +179,7 @@ function nodeTypeTag(type: SeasonNode['type']): string {
     case 'elite':
       return 'Elite Fight';
     case 'boss':
-      return 'Season Boss';
+      return 'Act Boss';
   }
 }
 
@@ -110,62 +227,85 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
       <!-- Illustrated Branching Parchment Garden Trail (outer shell prevents washi-tape clipping!) -->
       <section class="paper-card route-shell" :class="{ 'hide-mobile': mobileTab !== 'trail' }">
         <div class="washi-tape"></div>
-        <div class="route-board scroll-soft">
+        <div class="route-board">
           <div class="route-head">
-            <h3>{{ run.seasonId === 'summer' ? 'Summer Greenhouse Trail' : 'Garden Trail Map' }}</h3>
-            <small>
-              {{
-                run.seasonId === 'summer'
-                  ? 'Choose a glowing stop to storm Baron Combine in the Conservatory'
-                  : 'Choose a glowing stop to march toward Captain Scarecrow'
-              }}
-            </small>
+            <h3>{{ act.trailTitle }}</h3>
+            <small>{{ act.trailHint }}</small>
           </div>
 
-          <div class="stages-track">
-            <div v-for="(stageNodes, stageIdx) in stages" :key="stageIdx" class="stage-col">
-              <div class="stage-label">
-                {{ stageIdx === 3 ? 'FINAL BOSS' : `STAGE ${stageIdx + 1}` }}
+          <!-- Inspect strip: what the hovered / tapped stop is, with an explicit Enter button -->
+          <div class="node-detail" :class="{ empty: !focusNode }" aria-live="polite">
+            <template v-if="focusNode">
+              <img class="detail-sprite" :src="nodeSprite(focusNode.type)" alt="" />
+              <div class="detail-text">
+                <span class="type-tag">{{ nodeTypeTag(focusNode.type) }}</span>
+                <strong class="node-name">{{ focusNode.name }}</strong>
+                <small class="node-sub">{{ focusNode.subtitle }}</small>
               </div>
+              <button
+                v-if="selectedId === focusNode.id && availableIds.has(focusNode.id)"
+                class="paper-btn primary diecut enter-btn"
+                @click="enterSelected"
+              >
+                <CraftIcon name="play" :size="14" /> Go
+              </button>
+            </template>
+            <small v-else class="node-sub">Tap a glowing stop to see what's there, then tap it again to go.</small>
+          </div>
 
-              <div class="stage-nodes" :class="{ 'branch-pair': stageNodes.length > 1 }">
-                <button
-                  v-for="node in stageNodes"
-                  :key="node.id"
-                  class="seed-packet node-card"
-                  :class="{
-                    available: availableIds.has(node.id),
-                    completed: node.completed,
-                    boss: node.type === 'boss',
-                    vault: node.type === 'vault',
-                    shop: node.type === 'shop',
-                    rescue: node.type === 'barn_rescue',
-                  }"
-                  :disabled="!availableIds.has(node.id)"
-                  @click="enterSeasonNode(node.id)"
-                >
-                  <div class="node-art-row">
-                    <img class="node-sprite" :src="nodeSprite(node.type)" :alt="node.name" />
-                    <div class="node-badges">
-                      <span class="type-tag">{{ nodeTypeTag(node.type) }}</span>
-                      <span class="state-badge">
-                        <template v-if="node.completed">
-                          <CraftIcon name="check" :size="12" /> Cleared
-                        </template>
-                        <template v-else-if="availableIds.has(node.id)">
-                          <CraftIcon name="play" :size="11" /> Play
-                        </template>
-                        <template v-else>Locked</template>
-                      </span>
-                    </div>
-                  </div>
-                  <strong class="node-name">{{ node.name }}</strong>
-                  <small class="node-sub">{{ node.subtitle }}</small>
-                </button>
-              </div>
+          <div class="trail-scroll scroll-soft">
+            <div
+              ref="graphRef"
+              class="trail-graph"
+              :style="{ '--lanes': MAX_LANES }"
+            >
+              <svg
+                class="trail-lines"
+                :width="graphSize.w"
+                :height="graphSize.h"
+                :viewBox="`0 0 ${graphSize.w} ${graphSize.h}`"
+                aria-hidden="true"
+              >
+                <path v-for="l in lines" :key="l.key" :d="l.d" :class="['trail-line', l.state]" />
+              </svg>
 
-              <div v-if="stageIdx < 3" class="trail-connector">
-                <span class="conn-dots"></span>
+              <div
+                v-for="row in floors"
+                :key="row.floor"
+                class="floor-row"
+                :class="{ 'boss-row': row.isBoss }"
+              >
+                <div class="stage-label">{{ floorLabel(row) }}</div>
+                <div class="floor-lanes">
+                  <button
+                    v-for="node in row.nodes"
+                    :key="node.id"
+                    :ref="(el) => setNodeEl(node.id, el)"
+                    class="seed-packet node-card compact"
+                    :class="{
+                      available: availableIds.has(node.id),
+                      completed: node.completed,
+                      selected: selectedId === node.id,
+                      boss: node.type === 'boss',
+                      vault: node.type === 'vault',
+                      shop: node.type === 'shop',
+                      rescue: node.type === 'barn_rescue',
+                      elite: node.type === 'elite',
+                    }"
+                    :style="node.type === 'boss' ? undefined : { gridColumn: node.lane + 1 }"
+                    :aria-label="`${nodeTypeTag(node.type)}: ${node.name}`"
+                    :aria-disabled="!availableIds.has(node.id)"
+                    @click="onNodeClick(node)"
+                    @mouseenter="hoveredId = node.id"
+                    @mouseleave="hoveredId = null"
+                    @focus="hoveredId = node.id"
+                    @blur="hoveredId = null"
+                  >
+                    <img class="node-sprite" :src="nodeSprite(node.type)" alt="" />
+                    <span class="type-tag">{{ nodeTypeTag(node.type) }}</span>
+                    <span v-if="node.completed" class="done-mark"><CraftIcon name="check" :size="11" /></span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -401,20 +541,7 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
   font-size: 0.84rem;
 }
 
-.stages-track {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
-  gap: 14px;
-  align-items: center;
-}
 
-.stage-col {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: stretch;
-}
 
 .stage-label {
   text-align: center;
@@ -425,22 +552,170 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
   color: var(--ink-soft);
 }
 
-.stage-nodes {
+
+
+
+.route-board {
+  overflow: hidden;
+}
+
+.node-detail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 2px solid rgba(69, 42, 22, 0.28);
+  background: rgba(255, 251, 240, 0.86);
+  flex-shrink: 0;
+}
+
+.node-detail.empty {
+  border-style: dashed;
+  justify-content: center;
+  text-align: center;
+}
+
+.detail-sprite {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 3px rgba(42, 20, 6, 0.28));
+  flex-shrink: 0;
+}
+
+.detail-text {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.enter-btn {
+  flex-shrink: 0;
+  padding: 8px 14px;
+}
+
+.trail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 2px 10px;
+}
+
+.trail-graph {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 6px 4px;
+}
+
+.trail-lines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.trail-line {
+  fill: none;
+  stroke: rgba(112, 76, 47, 0.38);
+  stroke-width: 3;
+  stroke-dasharray: 2 7;
+  stroke-linecap: round;
+}
+
+.trail-line.done {
+  stroke: rgba(74, 122, 40, 0.75);
+  stroke-dasharray: none;
+  stroke-width: 3.5;
+}
+
+.trail-line.open {
+  stroke: #c2731c;
+  stroke-dasharray: 6 6;
+  stroke-width: 3.5;
+}
+
+.floor-row {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.floor-row .stage-label {
+  text-align: left;
+}
+
+.floor-lanes {
+  display: grid;
+  grid-template-columns: repeat(var(--lanes, 4), minmax(0, 1fr));
   gap: 12px;
 }
 
-.trail-connector {
-  display: none;
-  justify-content: center;
-  padding: 2px 0;
+.boss-row .floor-lanes {
+  grid-template-columns: 1fr;
+  justify-items: center;
 }
 
-.conn-dots {
-  width: 4px;
-  height: 18px;
-  border-left: 3px dashed rgba(112, 76, 47, 0.45);
+.node-card.compact {
+  position: relative;
+  z-index: 1;
+  align-items: center;
+  text-align: center;
+  gap: 3px;
+  padding: 9px 4px 7px;
+  min-width: 0;
+}
+
+.node-card.compact .type-tag {
+  font-size: 0.6rem;
+  line-height: 1.1;
+}
+
+.boss-row .node-card.compact {
+  width: min(180px, 60%);
+  padding: 10px 8px 8px;
+}
+
+.boss-row .node-card.compact .node-sprite {
+  width: 60px;
+  height: 60px;
+}
+
+.node-card.compact[aria-disabled='true'] {
+  opacity: 0.56;
+  cursor: default;
+}
+
+.node-card.compact[aria-disabled='true'].completed {
+  opacity: 0.88;
+}
+
+.node-card.compact.selected {
+  box-shadow: 0 0 0 3px #c2731c, var(--shadow-cutout);
+  animation: none;
+  transform: translateY(-2px);
+}
+
+.done-mark {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #e2f5cf;
+  border: 1.6px solid var(--ink);
 }
 
 .node-card {
@@ -801,21 +1076,8 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
     padding: 18px 14px 16px;
   }
 
-  .stages-track {
-    grid-template-columns: 1fr;
-    gap: 8px;
-    align-items: stretch;
-  }
 
-  .stage-nodes.branch-pair {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 9px;
-  }
 
-  .trail-connector {
-    display: flex;
-  }
 
   .season-title h2 {
     font-size: 0.96rem;
@@ -847,14 +1109,22 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
   }
 
   .node-sprite {
-    height: 38px;
-    width: 38px;
+    height: 34px;
+    width: 34px;
+  }
+
+  .floor-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .floor-lanes {
+    gap: 8px;
+  }
+
+  .trail-graph {
+    gap: 16px;
   }
 }
 
-@media (max-width: 390px) {
-  .stage-nodes.branch-pair {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

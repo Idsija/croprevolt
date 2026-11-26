@@ -211,7 +211,7 @@ describe('Crop Revolt! Tactical Engine', () => {
     expect(escapeBattle.status).toBe('victory');
     expect(posKey(runner.pos)).toBe('3,0');
 
-    run.currentNodeId = 'n1a';
+    run.currentNodeId = run.nodes.find((n) => n.stage === 0)!.id;
     applyBattleOutcomeToRun(run, escapeBattle, meta);
     expect(run.battlesWon).toBe(1);
     expect(run.status).toBe('reward');
@@ -656,7 +656,7 @@ describe('Crop Revolt! Tactical Engine', () => {
     run.seeds = 40;
     run.roster[1].harvested = true;
     run.roster[0].hp = 4;
-    expect(openVaultNode(run, 'n1b')).toBe(true);
+    expect(openVaultNode(run, run.nodes.find((n) => n.type === 'shop')!.id)).toBe(true);
     expect(run.status).toBe('shop');
     const offers = run.pendingReward?.marketOffers ?? [];
     expect(offers.length).toBeGreaterThanOrEqual(4);
