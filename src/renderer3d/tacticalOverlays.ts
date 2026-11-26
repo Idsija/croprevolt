@@ -410,16 +410,30 @@ export class TacticalOverlaySystem3D {
         );
       }
     } else if (snap.mode === 'ability') {
+      // Skills that pick a unit only light up valid units, so also draw the skill's whole reach
+      // faintly: the player can then see how far it goes even when nobody is in range yet.
+      const ab = snap.selectedUnit?.ability;
+      const picksUnit = ab?.targetType === 'enemy' || ab?.targetType === 'ally';
+      if (ab && picksUnit && snap.selectedUnit) {
+        const origin = snap.selectedUnit.pos;
+        for (let y = 0; y < b.height; y++) {
+          for (let x = 0; x < b.width; x++) {
+            if (Math.abs(x - origin.x) + Math.abs(y - origin.y) > ab.range) continue;
+            if (snap.abilityKeySet.has(`${x},${y}`)) continue;
+            this.addTilePlate(b, { x, y }, 0xb14cff, 0.1, 0xd9a6ff, 0.3, 0.026);
+          }
+        }
+      }
       for (const key of snap.abilityKeySet) {
         const [x, y] = key.split(',').map(Number);
         const isFocused = Boolean(snap.focusTile && snap.focusTile.x === x && snap.focusTile.y === y);
         this.addTilePlate(
           b,
           { x, y },
-          0x9f59d6,
-          isFocused ? 0.48 : 0.28,
-          0xe3b8ff,
-          isFocused ? 0.98 : 0.72,
+          0xb14cff,
+          isFocused ? 0.62 : picksUnit ? 0.52 : 0.4,
+          0xf0d4ff,
+          isFocused ? 1 : 0.9,
           0.028
         );
       }
@@ -430,10 +444,10 @@ export class TacticalOverlaySystem3D {
         this.addTilePlate(
           b,
           { x, y },
-          0x52bd5c,
-          isFocused ? 0.48 : 0.28,
-          0xbcf5bf,
-          isFocused ? 0.98 : 0.72,
+          0x2fd04a,
+          isFocused ? 0.62 : 0.4,
+          0xd6ffd9,
+          isFocused ? 1 : 0.9,
           0.028
         );
       }

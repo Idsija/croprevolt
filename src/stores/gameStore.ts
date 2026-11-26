@@ -30,7 +30,7 @@ import {
   hasAnyPlayerActionRemaining,
   unitHasMeaningfulAction,
 } from '../engine/combat';
-import { posKey, samePos, unitAt } from '../engine/grid';
+import { manhattan, posKey, samePos, unitAt } from '../engine/grid';
 import {
   computeDashOptions,
   computeMovableTiles,
@@ -162,6 +162,8 @@ export interface GameStoreState {
   enemyTurnProgress: { index: number; total: number } | null;
   /** The player tapped during the Farmer Turn: play the rest of it at top speed. */
   enemyHurry: boolean;
+  /** Short message for a tap that could not do anything ("Out of range"); id changes per message. */
+  boardHint: { text: string; id: number } | null;
   enemySpeedFast: boolean;
   muted: boolean;
   musicMuted: boolean;
@@ -195,6 +197,7 @@ export const gameStore = reactive<GameStoreState>({
   enemyTurnRunning: false,
   enemyTurnProgress: null,
   enemyHurry: false,
+  boardHint: null,
   enemySpeedFast: loadEnemySpeedFast(),
   muted: sfx.isMuted(),
   musicMuted: music.isMuted(),
@@ -763,6 +766,31 @@ export function triggerOverwatch(): boolean {
  * Instead, entering 'ability' mode previews the skill area/info and lets the player confirm or cancel.
  * Entering 'attack' mode automatically locks Aim Cam onto the highest-value target in range!
  */
+let boardHintSeq = 0;
+/** Tell the player why a tap did nothing. The battle screen shows it briefly. */
+export function showBoardHint(text: string): void {
+  boardHintSeq += 1;
+  gameStore.boardHint = { text, id: boardHintSeq };
+}
+
+/** Why the selected hero cannot act on this tile in the current targeting mode. */
+function explainNoTarget(selected: BattleUnit, pos: GridPos): string {
+  const dist = manhattan(selected.pos, pos);
+  if (gameStore.mode === 'ability' && selected.ability) {
+    return dist > selected.ability.range
+      ? `Out of range: ${selected.ability.name} reaches ${selected.ability.range} tiles.`
+      : `${selected.ability.name} cannot target that.`;
+  }
+  if (gameStore.mode === 'item' && gameStore.selectedItemId) {
+    const item = ITEM_REGISTRY[gameStore.selectedItemId];
+    if (item) return dist > item.range ? `Out of range: ${item.name} reaches ${item.range} tiles.` : `${item.name} cannot target that.`;
+  }
+  const w = selected.weapon;
+  if (dist > w.maxRange) return `Out of range: ${w.name} reaches ${w.maxRange} tiles. Move closer.`;
+  if (dist < w.minRange) return `Too close: ${w.name} needs ${w.minRange} tiles of distance.`;
+  return 'No clear shot: full cover is in the way. Flank it or break the cover.';
+}
+
 export function setInteractionMode(mode: InteractionMode, itemId?: string): void {
   if (gameStore.enemyTurnRunning || gameStore.battle?.prepPhase) return;
   if (mode === 'item' && gameStore.battle && gameStore.selectedUnitId) {
@@ -781,6 +809,8 @@ export function setInteractionMode(mode: InteractionMode, itemId?: string): void
     const targets = getAttackTargetsForSelected();
     if (targets.length > 0) {
       gameStore.previewTile = { ...targets[0].pos };
+    } else {
+      showBoardHint('No farmer in range. Red tiles show your reach: move closer first.');
     }
   }
 
@@ -1111,7 +1141,7 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
     if (selected && (gameStore.mode === 'ability' || gameStore.mode === 'item')) {
       const opts = getActionOptionsForTile(pos);
       if (opts.length > 0) {
-        if (isTouch && !(gameStore.previewTile && samePos(gameStore.previewTile, pos))) {
+        if (!(gameStore.previewTile && samePos(gameStore.previewTile, pos))) {
           sfx.click();
           gameStore.previewTile = { ...pos };
           return;
@@ -1156,6 +1186,12 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
 
   // 3A. Clicking an enemy unit
   if (clickedUnit && clickedUnit.team === 'enemy') {
+    if (opts.length === 0 && gameStore.mode !== 'move') {
+      // Aiming a weapon, skill or item at a farmer it cannot reach: say why, and keep aiming.
+      sfx.click();
+      showBoardHint(explainNoTarget(selected, pos));
+      return;
+    }
     if (opts.length === 0) {
       // Out of range / cannot act on this enemy -> toggle Threat Zone inspection cleanly!
       sfx.click();
@@ -1200,6 +1236,17 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
       return;
     }
 
+    // Skills and items always preview first (what they hit, and a Cast button), on every device.
+    if (
+      (gameStore.mode === 'ability' || gameStore.mode === 'item') &&
+      !(gameStore.previewTile && samePos(gameStore.previewTile, pos))
+    ) {
+      sfx.click();
+      gameStore.previewTile = { ...pos };
+      gameStore.inspectedEnemyId = null;
+      return;
+    }
+
     const preferred =
       gameStore.mode === 'attack'
         ? opts.find((o) => o.kind === 'attack') ?? opts[0]
@@ -1211,7 +1258,7 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
   // 3B. Clicking an empty tile, bridge, or cover
   if (opts.length > 0) {
     gameStore.inspectedEnemyId = null;
-    if (isTouch) {
+    if (isTouch || gameStore.mode === 'ability' || gameStore.mode === 'item') {
       if (gameStore.previewTile && samePos(gameStore.previewTile, pos)) {
         executePreviewOption(opts[0].kind, pos);
         return;
@@ -1232,13 +1279,18 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
     return;
   }
   if (gameStore.mode === 'attack' || gameStore.mode === 'ability' || gameStore.mode === 'item') {
+    // A tile the weapon, skill or item cannot reach: explain, and stay in the targeting mode.
+    // Cancel (or the Move button) leaves it.
     sfx.click();
-    gameStore.mode = 'move';
-    gameStore.selectedItemId = null;
+    showBoardHint(explainNoTarget(selected, pos));
     gameStore.previewTile = null;
     gameStore.inspectedEnemyId = null;
   } else {
-    deselectAll(true);
+    // A tile the hero cannot walk to: keep the hero selected. Tapping the hero again, or the
+    // table outside the board, is what deselects.
+    sfx.click();
+    gameStore.inspectedEnemyId = null;
+    if (!selected.actions.hasMoved) showBoardHint('Too far to walk this turn. Blue tiles are in reach.');
   }
 }
 

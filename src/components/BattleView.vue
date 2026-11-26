@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue';
+import { getAbilityTargetTiles } from '../engine/battle';
 import { bondStatuses, type BondStatus } from '../engine/bonds';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
@@ -507,13 +508,10 @@ function requestEndTurn(): void {
     return;
   }
   showItemsMenu.value = false;
+  // Heroes can still act: ask once, and keep asking until the player answers. The question
+  // goes away only when they confirm, decline, or do something else.
   if (readyHeroesCount.value > 0 && !endConfirmPending.value) {
     endConfirmPending.value = true;
-    if (endConfirmTimer !== null) clearTimeout(endConfirmTimer);
-    endConfirmTimer = setTimeout(() => {
-      endConfirmPending.value = false;
-      endConfirmTimer = null;
-    }, 2800);
     return;
   }
   clearEndConfirm();
@@ -688,6 +686,49 @@ function syncHudInsets(): void {
   const measured = bottomHudRef.value?.offsetHeight ?? 0;
   activeRenderer?.setHudInsets?.(84, prep ? Math.max(260, measured) : 200);
 }
+
+watch(
+  () => [gameStore.selectedUnitId, gameStore.mode, gameStore.previewTile, gameStore.battle?.turn, gameStore.battle?.phase],
+  () => clearEndConfirm()
+);
+
+/** What to tap while a skill or item is armed, in words that match what is glowing. */
+const skillTargetPrompt = computed(() => {
+  const u = selectedUnit.value;
+  const verb = gameStore.isTouchMode ? 'Tap' : 'Click';
+  if (!u) return `${verb} a glowing tile`;
+  if (gameStore.mode === 'ability' && u.ability) {
+    const count = getAbilityTargetTiles(battle.value, u).length;
+    if (u.ability.targetType === 'enemy') {
+      return count > 0 ? `${verb} a glowing farmer` : `No farmer within ${u.ability.range} tiles. Move closer.`;
+    }
+    if (u.ability.targetType === 'ally') return `${verb} a glowing ally`;
+    return `${verb} a glowing purple tile`;
+  }
+  return `${verb} a glowing green tile`;
+});
+
+// Notes and hints are short-lived: they close on their own and never sit over the board.
+let noteTimer: ReturnType<typeof setTimeout> | null = null;
+watch(inspectedNote, (note) => {
+  if (noteTimer !== null) clearTimeout(noteTimer);
+  noteTimer = note ? setTimeout(() => (inspectedNote.value = null), 6000) : null;
+});
+watch(
+  () => [gameStore.battle?.prepPhase, gameStore.battle?.phase, gameStore.battle?.turn],
+  () => (inspectedNote.value = null)
+);
+const boardHintText = ref<string | null>(null);
+let hintTimer: ReturnType<typeof setTimeout> | null = null;
+watch(
+  () => gameStore.boardHint?.id,
+  () => {
+    if (!gameStore.boardHint) return;
+    boardHintText.value = gameStore.boardHint.text;
+    if (hintTimer !== null) clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => (boardHintText.value = null), 2600);
+  }
+);
 
 const objectiveLine = computed(() => {
   const b = battle.value;
@@ -902,7 +943,16 @@ function onKeyDown(e: KeyboardEvent): void {
     triggerUndoMove();
   } else if ((e.key === 'Enter' || e.key === ' ') && previewOptions.value.length > 0) {
     e.preventDefault();
-    executePreviewOption(previewOptions.value[0].kind);
+    // While aiming, Enter always fires; it never picks the Dash that may sit beside FIRE.
+    const opts = previewOptions.value;
+    const pick = gameStore.mode === 'attack' ? (opts.find((o) => o.kind === 'attack') ?? opts[0]) : opts[0];
+    executePreviewOption(pick.kind);
+  } else if (e.key === 'Enter') {
+    // Nothing to confirm on the board: Enter asks to end the turn, and a second Enter confirms.
+    e.preventDefault();
+    requestEndTurn();
+  } else if (e.key === 'Escape' && endConfirmPending.value) {
+    clearEndConfirm();
   }
 }
 
@@ -1432,6 +1482,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- Why a tap did nothing -->
+    <transition name="hint-pop">
+      <div v-if="boardHintText" :key="boardHintText" class="board-hint" role="status" aria-live="polite">
+        {{ boardHintText }}
+      </div>
+    </transition>
+
     <!-- Tap-to-Inspect Toast -->
     <div v-if="inspectedNote" class="paper-card inspect-toast craft-fold" @click="inspectedNote = null">
       <strong>{{ inspectedNote.title }}</strong>
@@ -1659,6 +1716,22 @@ onBeforeUnmount(() => {
             class="auto-bar-fill"
             :style="{ animationDuration: `${AUTO_END_GRACE_MS}ms` }"
           ></div>
+        </div>
+      </div>
+
+      <!-- End Turn question: stays until answered -->
+      <div v-if="endConfirmPending && !gameStore.autoEndPending" class="paper-card auto-end-banner end-confirm-banner" role="alertdialog" aria-label="End the turn?">
+        <div class="auto-top-row">
+          <div class="auto-copy">
+            <CraftIcon name="end_turn" :size="15" />
+            <span>
+              End the turn? {{ readyHeroesCount }} hero{{ readyHeroesCount === 1 ? '' : 'es' }} can still act.
+            </span>
+          </div>
+          <div class="auto-btns">
+            <button class="paper-btn mini-act" @click="clearEndConfirm">Keep playing</button>
+            <button class="paper-btn danger mini-act" @click="requestEndTurn">End Turn</button>
+          </div>
         </div>
       </div>
 
@@ -2077,7 +2150,7 @@ onBeforeUnmount(() => {
                     <span>{{ opt.label }}</span>
                   </button>
                 </template>
-                <div v-else class="target-prompt-pill">Click a highlighted 3D tile</div>
+                <div v-else class="target-prompt-pill">{{ skillTargetPrompt }}</div>
                 <button class="paper-btn cancel-btn-wide" @click="setInteractionMode('move')">
                   <CraftIcon name="close" :size="15" />
                   <span>Cancel</span>
@@ -4688,6 +4761,48 @@ onBeforeUnmount(() => {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+}
+
+.end-confirm-banner {
+  border-color: #b23a2a;
+  align-self: center;
+}
+.end-confirm-banner .auto-copy span {
+  font-weight: 700;
+}
+
+.board-hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(232px + var(--safe-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 31;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 7px 14px;
+  border-radius: 14px;
+  border: 2px solid var(--ink);
+  background: #fff6d8;
+  color: var(--ink);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 3px 0 rgba(60, 40, 20, 0.35);
+  pointer-events: none;
+}
+.hint-pop-enter-active,
+.hint-pop-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.hint-pop-enter-from,
+.hint-pop-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(6px);
+}
+@media (min-width: 768px) {
+  .board-hint {
+    bottom: calc(120px + var(--safe-bottom, 0px));
   }
 }
 </style>
