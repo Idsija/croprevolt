@@ -46,6 +46,7 @@ import {
   claimWeaponReward,
   clearSavedRun,
   createDailyRun,
+  rerollGraftChoices,
   createNewRun,
   equipHeroWeapon,
   finishRewardsAndReturnToMap,
@@ -1359,6 +1360,16 @@ export function finalizeBattleAndProceed(): void {
     gameStore.savedRunAvailable = false;
   }
   syncAdaptiveMusic();
+}
+
+export function rerollGrafts(): boolean {
+  if (!gameStore.run) return false;
+  const ok = rerollGraftChoices(gameStore.run);
+  if (ok) {
+    sfx.click();
+    saveRun(gameStore.run);
+  }
+  return ok;
 }
 
 export function graftHero(heroUid: string, graftId: string): boolean {

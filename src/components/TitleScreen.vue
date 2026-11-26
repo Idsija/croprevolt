@@ -115,11 +115,7 @@ const currentHeat = computed(() =>
 );
 const currentHeatInfo = computed(() => HARVEST_HEAT_LEVELS[currentHeat.value] ?? HARVEST_HEAT_LEVELS[0]);
 
-const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
-  'extraItemSatchel',
-  'heirloomSoil',
-  'starterRelic',
-];
+const unlockKeys = Object.keys(META_UNLOCK_COSTS) as Array<keyof MetaProgress['unlocks']>;
 
 watch([activeModal, scoreTab, scoreScope], refreshOnlineBoard);
 
