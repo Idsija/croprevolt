@@ -437,6 +437,31 @@ export function drawUnitStandee(
     ctx.fill();
   }
 
+  // Veteran pin: small die-cut paper star badge at the right end of the HP bar (shield sits on the left).
+  if (unit.isVeteran) {
+    const vx = barW / 2 + 8 * s;
+    const vy = barY + barH / 2;
+    ctx.fillStyle = PAPER_RIM;
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.4 * s;
+    ctx.beginPath();
+    ctx.arc(vx, vy, 7 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e8a91c';
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = (i % 2 === 0 ? 5 : 2.2) * s;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      if (i === 0) ctx.moveTo(vx + Math.cos(a) * r, vy + Math.sin(a) * r);
+      else ctx.lineTo(vx + Math.cos(a) * r, vy + Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.lineWidth = 0.9 * s;
+    ctx.stroke();
+  }
+
   // Die-cut bouncing paper pointer chevron above active hero or inspected enemy!
   if (opts.isSelected || opts.isInspectedEnemy) {
     const arrowBounce = Math.abs(Math.sin(time * 5.2)) * 5.5 * s;

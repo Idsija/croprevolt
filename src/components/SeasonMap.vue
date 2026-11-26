@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
 import { RELIC_REGISTRY } from '../data/relics';
+import { threatFor } from '../engine/difficulty';
 import { ACTS, FLOORS_PER_ACT, MAX_LANES } from '../engine/mapgen';
 import { getAvailableNextNodeIds } from '../engine/run';
 import type { SeasonNode } from '../engine/types';
@@ -238,7 +239,10 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
             <template v-if="focusNode">
               <img class="detail-sprite" :src="nodeSprite(focusNode.type)" alt="" />
               <div class="detail-text">
-                <span class="type-tag">{{ nodeTypeTag(focusNode.type) }}</span>
+                <span class="type-tag">
+                  {{ nodeTypeTag(focusNode.type) }}
+                  <span v-if="focusNode.mapId" class="threat-tag">· Threat {{ threatFor(run.act, focusNode.stage) }}</span>
+                </span>
                 <strong class="node-name">{{ focusNode.name }}</strong>
                 <small class="node-sub">{{ focusNode.subtitle }}</small>
               </div>
@@ -591,6 +595,10 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
   gap: 2px;
   min-width: 0;
   flex: 1;
+}
+
+.threat-tag {
+  color: #a3341f;
 }
 
 .enter-btn {

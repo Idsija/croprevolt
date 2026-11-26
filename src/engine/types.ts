@@ -241,6 +241,8 @@ export interface BattleUnit {
   visualKind: ProduceBlueprint['species'] | EnemyVisualKind;
   family: UnitFamily;
   isBoss?: boolean;
+  /** Elite-fight promotion: tougher, hits harder, starts shielded. */
+  isVeteran?: boolean;
   pos: GridPos;
   facing: 'left' | 'right';
   hp: number;
