@@ -672,6 +672,23 @@ function inspectRelic(rid: string): void {
   inspectedNote.value = { title: `${r.icon} ${r.name}`, desc: r.description };
 }
 
+/**
+ * On phones the bottom deck covers a third of the screen, so tell the 3D camera to frame the
+ * board in the space above it. The inset is fixed per phase (the taller deployment deck, then
+ * the normal command deck) so the board never slides while the player is tapping tiles.
+ */
+const bottomHudRef = ref<HTMLElement | null>(null);
+function syncHudInsets(): void {
+  if (typeof window === 'undefined') return;
+  if (window.innerWidth >= 768 || !gameStore.battle) {
+    activeRenderer?.setHudInsets?.(0, 0);
+    return;
+  }
+  const prep = Boolean(gameStore.battle.prepPhase);
+  const measured = bottomHudRef.value?.offsetHeight ?? 0;
+  activeRenderer?.setHudInsets?.(84, prep ? Math.max(260, measured) : 200);
+}
+
 const objectiveLine = computed(() => {
   const b = battle.value;
   const foes = aliveEnemiesCount.value;
@@ -999,6 +1016,9 @@ watch(
 onMounted(() => {
   mountActiveRenderer();
 
+  nextTick(syncHudInsets);
+  window.addEventListener('resize', syncHudInsets);
+
   unsubscribeEvents = subscribeBattleEvents((events) => {
     activeRenderer?.consumeEvents(events);
   });
@@ -1016,7 +1036,13 @@ onMounted(() => {
   window.addEventListener('keydown', onKeyDown);
 });
 
+watch(
+  () => [gameStore.battle?.prepPhase, gameStore.rendererKind],
+  () => nextTick(syncHudInsets)
+);
+
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncHudInsets);
   unsubscribeEvents?.();
   unsubscribeFocus?.();
   unsubscribeUndoReset?.();
@@ -1608,7 +1634,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Mario + Rabbids Bottom HUD Stage (Bottom-Left Squad Cards + Bottom-Center Command Deck!) -->
-    <footer v-if="battle.status === 'ongoing'" class="mr-bottom-hud">
+    <footer v-if="battle.status === 'ongoing'" ref="bottomHudRef" class="mr-bottom-hud">
       <!-- Auto-End Turn Grace Strip -->
       <div v-if="gameStore.autoEndPending" class="paper-card auto-end-banner">
         <div class="auto-top-row">
@@ -4614,5 +4640,54 @@ onBeforeUnmount(() => {
   padding: 8px 20px;
   font-size: 0.92rem;
   font-weight: 900;
+}
+
+/* Phones: keep the deployment deck short so the squad and its spawn tiles stay in view. */
+@media (max-width: 767px) {
+  .deck-prep {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .prep-title-copy small,
+  .prep-selected-pill {
+    display: none;
+  }
+  .prep-title-copy strong {
+    font-size: 0.8rem;
+  }
+  .prep-bench-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .prep-bench-row::-webkit-scrollbar {
+    display: none;
+  }
+  .prep-bench-row > * {
+    flex-shrink: 0;
+  }
+  .prep-actions > .paper-btn {
+    flex: 1;
+  }
+}
+
+/* Phones: the turn-1 tips are a slim note, not a card over the farmers. */
+@media (max-width: 767px) {
+  .coach-note {
+    padding: 6px 8px 6px 12px;
+    gap: 6px;
+  }
+  .coach-copy strong {
+    font-size: 0.74rem;
+  }
+  .coach-copy small {
+    font-size: 0.66rem;
+    line-height: 1.2;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 }
 </style>

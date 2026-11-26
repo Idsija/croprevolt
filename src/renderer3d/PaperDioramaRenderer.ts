@@ -564,6 +564,10 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     return this.cameraCtrl.getMode();
   }
 
+  public setHudInsets(topPx: number, bottomPx: number): void {
+    this.cameraCtrl.setHudInsets(topPx, bottomPx);
+  }
+
   public focusOnGrid(pos: GridPos): void {
     const state = this.hooks.getState();
     if (!state) return;

@@ -17,6 +17,10 @@ const TACTICAM_PITCH = 1.3; // ~74.5 deg high tactical overview
 
 export class TacticalCameraController {
   public readonly camera: THREE.PerspectiveCamera;
+  private viewW = 0;
+  private viewH = 0;
+  private hudShiftDesired = 0;
+  private hudShiftCur = 0;
 
   private mode: CameraMode3D = 'tactical';
   private baseDistance = 13.5;
@@ -85,10 +89,29 @@ export class TacticalCameraController {
     this.updateDesiredFromMode();
   }
 
+  /**
+   * Tell the camera how much of the screen the HUD covers. The picture is shifted so the
+   * point the camera looks at lands in the middle of the uncovered area, eased over a few frames.
+   */
+  public setHudInsets(topPx: number, bottomPx: number): void {
+    this.hudShiftDesired = (Math.max(0, bottomPx) - Math.max(0, topPx)) / 2;
+  }
+
+  private applyHudShift(): void {
+    if (Math.abs(this.hudShiftCur) < 0.5 || this.viewW < 2 || this.viewH < 2) {
+      if (this.camera.view?.enabled) this.camera.clearViewOffset();
+      return;
+    }
+    this.camera.setViewOffset(this.viewW, this.viewH, 0, this.hudShiftCur, this.viewW, this.viewH);
+  }
+
   public resize(width: number, height: number): void {
     const aspect = Math.max(0.2, width / Math.max(1, height));
+    this.viewW = width;
+    this.viewH = height;
     this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();
+    this.applyHudShift();
     this.setBoardBounds(this.boardHalfX * 2, this.boardHalfZ * 2, aspect);
   }
 
@@ -289,6 +312,12 @@ export class TacticalCameraController {
       }
     } else {
       this.shakeOffset.set(0, 0, 0);
+    }
+
+    if (Math.abs(this.hudShiftDesired - this.hudShiftCur) > 0.25) {
+      this.hudShiftCur = THREE.MathUtils.lerp(this.hudShiftCur, this.hudShiftDesired, smooth);
+      if (Math.abs(this.hudShiftDesired - this.hudShiftCur) <= 0.25) this.hudShiftCur = this.hudShiftDesired;
+      this.applyHudShift();
     }
 
     this.applyCameraTransform(false);
