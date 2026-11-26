@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { META_UNLOCK_COSTS } from '../engine/run';
 import type { MetaProgress } from '../engine/types';
+import { TitleBackdropRenderer } from '../renderer3d/TitleBackdropRenderer';
 import {
   buyMetaUnlock,
   continueSavedRun,
@@ -13,16 +14,39 @@ import CraftIcon from './CraftIcon.vue';
 import CropRevoltLogo from './CropRevoltLogo.vue';
 
 const activeModal = ref<'none' | 'shed' | 'guide'>('none');
+const backdropCanvasRef = ref<HTMLCanvasElement | null>(null);
+const webglReady = ref(false);
+let backdropRenderer: TitleBackdropRenderer | null = null;
 
 const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
   'extraItemSatchel',
   'heirloomSoil',
   'starterRelic',
 ];
+
+onMounted(() => {
+  if (!backdropCanvasRef.value) return;
+  try {
+    backdropRenderer = new TitleBackdropRenderer(backdropCanvasRef.value);
+    webglReady.value = true;
+  } catch (err) {
+    console.warn('3D Title Diorama WebGL unavailable, using classic 2D showcase:', err);
+    webglReady.value = false;
+  }
+});
+
+onBeforeUnmount(() => {
+  backdropRenderer?.destroy();
+  backdropRenderer = null;
+});
 </script>
 
 <template>
-  <div class="title-stage">
+  <div class="title-stage" :class="{ 'has-3d': webglReady }">
+    <!-- Live Orbiting 3D Paper Mario Diorama Canvas -->
+    <canvas ref="backdropCanvasRef" class="title-webgl-bg"></canvas>
+    <div v-if="webglReady" class="title-vignette"></div>
+
     <!-- Top floating audio & seed pills -->
     <div class="top-bar">
       <button class="paper-pill seed-badge" @click="activeModal = 'shed'">
@@ -35,7 +59,7 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
     </div>
 
     <!-- Main Centered Paper-Craft Game Cover -->
-    <main class="cover-card corrugated-slab pinned-card">
+    <main class="cover-card corrugated-slab pinned-card" :class="{ 'compact-3d': webglReady }">
       <div class="washi-tape"></div>
       <span class="brass-pin tl"></span>
       <span class="brass-pin tr"></span>
@@ -43,12 +67,12 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
       <div class="title-lockup">
         <CropRevoltLogo />
         <p class="tagline">
-          Vertical paper-craft tactical roguelite — produce vs. farmers
+          3D Paper-Craft Tactical Roguelite — Produce vs. Farmers
         </p>
       </div>
 
-      <!-- Mini Live Paper-Craft Diorama Strip -->
-      <div class="diorama-showcase">
+      <!-- Classic 2D Mini Diorama Strip (only shown if WebGL is unavailable) -->
+      <div v-if="!webglReady" class="diorama-showcase">
         <div class="standee-row">
           <div class="team-left">
             <img class="st st-1" src="/sprites/lettuce.png" alt="Crisphead" />
@@ -252,6 +276,33 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
   -webkit-overflow-scrolling: touch;
 }
 
+.title-stage.has-3d {
+  justify-content: flex-end;
+  padding-bottom: calc(28px + var(--safe-bottom));
+}
+
+.title-webgl-bg {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.title-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 50% 42%,
+    rgba(30, 14, 4, 0) 35%,
+    rgba(28, 12, 4, 0.45) 100%
+  );
+}
+
 .top-bar {
   position: fixed;
   top: calc(10px + var(--safe-top));
@@ -283,6 +334,8 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
 }
 
 .cover-card {
+  position: relative;
+  z-index: 5;
   width: 100%;
   max-width: 490px;
   padding: 22px 20px 18px;
@@ -291,6 +344,14 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
   align-items: center;
   gap: 14px;
   text-align: center;
+}
+
+.cover-card.compact-3d {
+  max-width: 430px;
+  padding: 16px 18px 15px;
+  gap: 11px;
+  background: rgba(248, 236, 208, 0.94);
+  backdrop-filter: blur(4px);
 }
 
 .title-lockup {

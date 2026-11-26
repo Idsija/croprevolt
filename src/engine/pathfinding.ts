@@ -1,6 +1,7 @@
 import {
+  canStepElevation,
   getNeighbors,
-  getTerrainMoveCost,
+  getStepMoveCost,
   isTileWalkable,
   manhattan,
   posKey,
@@ -12,6 +13,7 @@ import {
   getEffectiveDashDamage,
   getEffectiveJumpRange,
   getEffectiveMoveRange,
+  getMaxDashesForUnit,
   hasGraft,
   hasStatus,
 } from './hooks';
@@ -24,8 +26,8 @@ export interface ReachableNode {
 }
 
 /**
- * Computes all tiles a unit can traverse/stop on using Dijkstra over terrain move costs.
- * Allies can be passed through, enemies and cover block traversal.
+ * Computes all tiles a unit can traverse/stop on using Dijkstra over terrain + elevation move costs.
+ * Allies can be passed through; enemies, cover, water/lava, and sheer 2-level cliffs block walking.
  */
 export function computeReachableMap(state: BattleState, unit: BattleUnit): Map<string, ReachableNode> {
   const result = new Map<string, ReachableNode>();
@@ -48,10 +50,14 @@ export function computeReachableMap(state: BattleState, unit: BattleUnit): Map<s
     const currentBest = result.get(posKey(current.pos));
     if (currentBest && current.cost > currentBest.cost) continue;
 
+    const currentTile = tileAt(state, current.pos);
+    if (!currentTile) continue;
+
     for (const nextPos of getNeighbors(state, current.pos)) {
       if (!isTileWalkable(state, nextPos, unit.team, false)) continue;
       const t = tileAt(state, nextPos)!;
-      const stepCost = unit.ignoresMud ? 1 : getTerrainMoveCost(t.terrain);
+      if (!canStepElevation(currentTile, t)) continue;
+      const stepCost = getStepMoveCost(currentTile, t, Boolean(unit.ignoresMud));
       const nextCost = current.cost + stepCost;
       if (nextCost > maxMove) continue;
 
@@ -90,11 +96,14 @@ export function computeMovableTiles(state: BattleState, unit: BattleUnit): Map<s
 
 /**
  * Enemies the unit can Dash-bonk during its Move phase (before finishing movement).
- * Player or enemy can Dash an adjacent/reachable opponent once per turn!
+ * Supports Multi-Dash (double_dash perk) to bonk up to 2 different enemies in one turn!
  */
 export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOption[] {
-  if (unit.actions.hasDashed || unit.actions.hasMoved || hasStatus(unit, 'rooted')) return [];
+  const dashesUsed = unit.actions.dashesUsed ?? (unit.actions.hasDashed ? 1 : 0);
+  const maxDashes = getMaxDashesForUnit(unit);
+  if (dashesUsed >= maxDashes || unit.actions.hasMoved || hasStatus(unit, 'rooted')) return [];
 
+  const alreadyDashed = new Set(unit.actions.dashedEnemyIds ?? []);
   const reachable = computeReachableMap(state, unit);
   const options: DashOption[] = [];
   const dashBonus = hasStatus(unit, 'boosted') ? 2 : 0;
@@ -104,13 +113,16 @@ export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOp
 
   for (const target of state.units) {
     if (!target.alive || target.team === unit.team) continue;
+    if (alreadyDashed.has(target.id)) continue;
 
-    // Find best valid stop tile adjacent to the target that the unit can stand on
+    const targetTile = tileAt(state, target.pos);
+    // Find best valid stop tile adjacent to the target (within 1 elevation step)
     let bestNode: ReachableNode | null = null;
     for (const adj of getNeighbors(state, target.pos)) {
       const node = reachable.get(posKey(adj));
       if (!node) continue;
-      // Either stay at current pos or land on an empty walkable tile
+      const adjTile = tileAt(state, adj);
+      if (targetTile && adjTile && !canStepElevation(adjTile, targetTile)) continue;
       if (!samePos(adj, unit.pos) && !isTileWalkable(state, adj, unit.team, true)) continue;
       if (!bestNode || node.cost < bestNode.cost) {
         bestNode = node;

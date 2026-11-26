@@ -6,14 +6,25 @@ export type UnitFamily = ProduceFamily | ToolFamily | 'neutral';
 
 export type MatchupResult = 'advantage' | 'neutral' | 'disadvantage';
 
-export type TerrainType = 'grass' | 'soil' | 'mud' | 'compost' | 'gate' | 'barn_floor' | 'sunbeam';
+export type TerrainType =
+  | 'grass'
+  | 'soil'
+  | 'mud'
+  | 'compost'
+  | 'gate'
+  | 'barn_floor'
+  | 'sunbeam'
+  | 'water'
+  | 'bridge'
+  | 'lava'
+  | 'ramp';
 
 export type CoverKind = 'none' | 'crate' | 'haystack' | 'stone' | 'thorns' | 'cage' | 'beehive' | 'sprinkler';
 export type CoverLevel = 'none' | 'half' | 'full';
 
 export type WeaponArc = 'direct' | 'lobbed' | 'melee' | 'pierce';
 
-export type StatusKind = 'burn' | 'rooted' | 'acid' | 'shield' | 'boosted' | 'feared';
+export type StatusKind = 'burn' | 'rooted' | 'acid' | 'shield' | 'boosted' | 'feared' | 'overwatch';
 
 export type PromotionTier = 'seedling' | 'ripe' | 'heirloom';
 
@@ -46,6 +57,8 @@ export interface Tile {
   x: number;
   y: number;
   terrain: TerrainType;
+  /** Stepped diorama height: 0 = ground/river, 1 = raised terrace, 2 = high bluff. */
+  elevation: number;
   cover: CoverObject | null;
 }
 
@@ -215,6 +228,10 @@ export interface RosterHero {
   weapon: WeaponDef;
   ability: AbilityDef;
   graftIds: string[];
+  level: number;
+  xp: number;
+  skillPoints: number;
+  perkIds: string[];
   tier: PromotionTier;
   harvested: boolean; // Bagged by farmers until rescued at Barn Raid!
   color: string;
@@ -224,9 +241,12 @@ export interface RosterHero {
 export interface UnitActions {
   hasMoved: boolean;
   hasDashed: boolean;
+  dashesUsed?: number;
+  dashedEnemyIds?: string[];
   hasJumped: boolean;
   hasAttacked: boolean;
   hasUsedSkill: boolean;
+  overwatchCharges?: number;
 }
 
 export type EnemyVisualKind = EnemyBlueprint['archetype'] | 'digger_heavy';
@@ -256,6 +276,8 @@ export interface BattleUnit {
   ability?: AbilityDef;
   abilityCooldown: number;
   graftIds: string[];
+  level?: number;
+  perkIds?: string[];
   isAnimal?: boolean;
   coopPassive?: string;
   ignoresMud?: boolean;
@@ -284,6 +306,10 @@ export interface CombatForecast {
   isLethal: boolean;
   knockbackDir?: GridPos;
   knockbackWillBump?: boolean;
+  knockbackHazard?: 'bump' | 'water' | 'lava' | 'drop';
+  elevationDiff?: number;
+  highGroundBonus?: number;
+  isCriticalFlank?: boolean;
   appliesStatus?: StatusKind;
   canAttack: boolean;
   reason?: string;
@@ -309,7 +335,10 @@ export type BattleEvent =
   | { type: 'move'; unitId: string; path: GridPos[] }
   | { type: 'dash'; unitId: string; targetId: string; from: GridPos; to: GridPos; targetPos: GridPos; damage: number; status?: StatusKind }
   | { type: 'jump'; unitId: string; allyPos: GridPos; from: GridPos; to: GridPos; coopBoost?: string }
+  | { type: 'stomp'; unitId: string; pos: GridPos; damage: number; hitIds: string[] }
+  | { type: 'overwatch_shot'; attackerId: string; attackerKind: string; targetId: string; from: GridPos; to: GridPos; damage: number }
   | { type: 'knockback'; unitId: string; from: GridPos; to: GridPos; bumped: boolean; bumpDamage?: number; bumpedUnitId?: string }
+  | { type: 'terrain_hazard'; kind: 'water' | 'lava' | 'drop'; unitId: string; pos: GridPos; damage: number }
   | { type: 'hazard'; kind: 'beehive' | 'sprinkler'; pos: GridPos; damage: number }
   | { type: 'attack'; attackerId: string; attackerKind: string; from: GridPos; to: GridPos; arc: WeaponArc; hit: boolean; damage: number; targetId?: string; matchup: MatchupResult; coverHitPos?: GridPos; coverDestroyed?: boolean; status?: StatusKind }
   | { type: 'ability'; unitId: string; abilityName: string; from: GridPos; to: GridPos; affectedIds: string[]; heal?: number; damage?: number; status?: StatusKind; coverSpawned?: GridPos }
@@ -336,6 +365,7 @@ export interface MapTemplate {
     x: number;
     y: number;
     terrain?: TerrainType;
+    elevation?: number;
     cover?: Exclude<CoverKind, 'none'>;
   }>;
   playerSpawns: GridPos[];
@@ -401,8 +431,22 @@ export interface MarketOffer {
   purchased: boolean;
 }
 
+export interface HeroLevelUpSummary {
+  heroUid: string;
+  heroName: string;
+  blueprintId: string;
+  species?: HeroSpecies;
+  oldLevel: number;
+  newLevel: number;
+  skillPointsGained: number;
+  bonusHp: number;
+  bonusAttack: number;
+}
+
 export interface RewardBundle {
   seedsEarned: number;
+  xpEarned?: number;
+  levelUps?: HeroLevelUpSummary[];
   graftChoices: string[];
   relicChoices: string[];
   recruitChoices: string[];

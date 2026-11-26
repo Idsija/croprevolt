@@ -9,8 +9,14 @@ import {
   getWeaponRangeTiles,
   unitHasMeaningfulAction,
 } from '../engine/combat';
-import { getAdjacentCoverBadges, posKey, tileAt, unitAt } from '../engine/grid';
-import { getFamilyLabel, getMatchup, hasRelic } from '../engine/hooks';
+import { getAdjacentCoverBadges, posKey, samePos, tileAt, unitAt } from '../engine/grid';
+import {
+  getFamilyLabel,
+  getMatchup,
+  getMaxDashesForUnit,
+  getMaxOverwatchCharges,
+  hasRelic,
+} from '../engine/hooks';
 import { computeDashOptions, computeTeamJumpOptions } from '../engine/pathfinding';
 import type { StatusKind } from '../engine/types';
 import { type InteractionMode, PaperCraftRenderer } from '../renderer/canvas';
@@ -26,11 +32,13 @@ import {
   cancelPreviewAction,
   clearAutoEndTimer,
   clearFocusOnTabAway,
+  cycleAimTarget,
   deselectAll,
   endPlayerTurn,
   executePreviewOption,
   finalizeBattleAndProceed,
   gameStore,
+  getAttackTargetsForSelected,
   getPreviewActionOptions,
   handleBattleTileTap,
   handleOffBoardTap,
@@ -48,23 +56,24 @@ import {
   toggleBoardViewMode,
   toggleInspectEnemy,
   toggleRendererKind,
+  triggerOverwatch,
   triggerUndoMove,
 } from '../stores/gameStore';
 import CraftIcon, { type CraftIconName } from './CraftIcon.vue';
 
-const COACH_STORAGE_KEY = 'crop_revolt_coach_3d_v1';
+const COACH_STORAGE_KEY = 'crop_revolt_coach_3d_v2';
 const COACH_TIPS = [
   {
-    title: '1/3 · Paper Mario 3D Diorama',
-    body: 'Right-drag (or Q / E) to orbit the 3D garden, scroll to zoom, and press T for Tacticam top-down overview!',
+    title: '1/3 · High Ground, Bridges & Hazards',
+    body: 'Climb ramps onto cliffs for +2 DMG High Ground & cover bypass! Knock farmers into Water (-3), Lava (-4 + Burn), or off cliffs (-2)!',
   },
   {
     title: '2/3 · Move, Dash & Team-Jump',
-    body: 'Hover blue tiles to preview 3D Cover Shields & live attack reach. Dash orange foes mid-move or Team-Jump gold tiles over allies!',
+    body: 'Dash orange foes mid-move (twice with Multi-Dash!), Team-Jump gold tiles over allies, or hold ground with Hero Sight Overwatch (O)!',
   },
   {
-    title: '3/3 · Aim Cam, Cover & Hazards',
-    body: 'Switch to Weapon (or press 2) for Over-the-Shoulder Aim Cam! 100% Open · 50% Half · 0% Full Cover — lob mortars over haystacks & trigger Beehives!',
+    title: '3/3 · Aim Cam & Target Cycling',
+    body: 'Tap Weapon (or press F) for Over-the-Shoulder Aim Cam — cycle targets with ◀ / ▶ (or A/D) and hit FIRE! Right-drag or Q/E orbits 3D.',
   },
 ] as const;
 
@@ -219,7 +228,9 @@ const moveDestinationSummary = computed(() => {
     ).length;
   }
 
-  const destTerrain = tileAt(battle.value, dest)?.terrain ?? 'grass';
+  const destTile = tileAt(battle.value, dest);
+  const destTerrain = destTile?.terrain ?? 'grass';
+  const destElev = destTile?.elevation ?? 0;
   const terrainNote =
     destTerrain === 'sunbeam'
       ? '☀ Sunbeam (+2 ATK)'
@@ -229,14 +240,33 @@ const moveDestinationSummary = computed(() => {
           ? '💧 Mud (2 Move cost)'
           : destTerrain === 'gate'
             ? '▲ Exit Gate (Win!)'
-            : null;
+            : destTerrain === 'bridge'
+              ? '🪵 Bridge Crossing'
+              : destTerrain === 'ramp'
+                ? '↗ Ramp (No climb penalty)'
+                : destElev > 0
+                  ? `▲ High Ground Lv.${destElev} (+2 DMG!)`
+                  : null;
 
   return {
     isJump,
     bestCover,
     projectedFoes,
     terrainNote,
+    destElev,
   };
+});
+
+const aimTargets = computed(() => {
+  void gameStore.eventQueueVersion;
+  void gameStore.selectedUnitId;
+  void battle.value.turn;
+  return getAttackTargetsForSelected();
+});
+
+const activeAimTargetIndex = computed(() => {
+  if (!gameStore.previewTile || aimTargets.value.length === 0) return -1;
+  return aimTargets.value.findIndex((t) => samePos(t.pos, gameStore.previewTile!));
 });
 
 const activeForecast = computed(() => {
@@ -282,21 +312,37 @@ const worldForecastStyle = computed(() => {
   if (!focusAnchor.value) return {};
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
-  const cx = Math.max(126, Math.min(vw - 126, focusAnchor.value.x));
+  const cx = Math.max(134, Math.min(vw - 134, focusAnchor.value.x));
   const cy = Math.max(96, Math.min(vh - 210, focusAnchor.value.y - 16));
   return {
     transform: `translate3d(${cx}px, ${cy}px, 0) translate(-50%, -100%)`,
   };
 });
 
+function hazardBonusDamage(haz?: 'bump' | 'water' | 'lava' | 'drop'): number {
+  if (haz === 'lava') return 4;
+  if (haz === 'water') return 3;
+  if (haz === 'drop' || haz === 'bump') return 2;
+  return 0;
+}
+
+function hazardTagLabel(haz?: 'bump' | 'water' | 'lava' | 'drop'): string {
+  if (haz === 'lava') return '🔥 LAVA +4';
+  if (haz === 'water') return '🌊 SPLASH +3';
+  if (haz === 'drop') return '↓ DROP +2';
+  if (haz === 'bump') return '⇄ BUMP +2';
+  return '⇄ Push';
+}
+
 const forecastHpBars = computed(() => {
   const fc = activeForecast.value;
   if (focusedUnit.value) {
     const max = Math.max(1, focusedUnit.value.maxHp);
     const cur = Math.max(0, focusedUnit.value.hp);
-    const dmg = fc?.canAttack
-      ? fc.finalDamage + (fc.knockbackWillBump ? 2 : 0)
-      : (previewDashDamage.value ?? 0);
+    const extraHaz = fc?.canAttack
+      ? hazardBonusDamage(fc.knockbackHazard ?? (fc.knockbackWillBump ? 'bump' : undefined))
+      : 0;
+    const dmg = fc?.canAttack ? fc.finalDamage + extraHaz : (previewDashDamage.value ?? 0);
     const rem = Math.max(0, cur - dmg);
     return {
       currentPct: (cur / max) * 100,
@@ -346,6 +392,11 @@ const STATUS_META: Record<StatusKind, { short: string; title: string; desc: stri
   feared: { short: 'Fear', title: 'Feared', desc: 'Rattled by crows — Move range reduced by 2 tiles.' },
   shield: { short: 'Shld', title: 'Shield', desc: 'Braced — takes 2 less damage from incoming attacks.' },
   boosted: { short: 'Bst', title: 'Boosted', desc: 'Fired up — deals +2 Attack and +2 Dash damage.' },
+  overwatch: {
+    short: 'Watch',
+    title: 'Hero Sight',
+    desc: 'Overwatch — automatically fires a reaction shot when an enemy moves into weapon range!',
+  },
 };
 
 function inspectStatus(kind: StatusKind, turns: number): void {
@@ -562,6 +613,23 @@ function onVisibilityChange(): void {
   }
 }
 
+const remainingDashesForSelected = computed(() => {
+  const u = selectedUnit.value;
+  if (!u) return 0;
+  const used = u.actions.dashesUsed ?? (u.actions.hasDashed ? 1 : 0);
+  return Math.max(0, getMaxDashesForUnit(u) - used);
+});
+
+const overwatchChargesForSelected = computed(() =>
+  selectedUnit.value ? getMaxOverwatchCharges(selectedUnit.value) : 1
+);
+
+function handleTriggerOverwatch(): void {
+  showItemsMenu.value = false;
+  clearEndConfirm();
+  triggerOverwatch();
+}
+
 function onKeyDown(e: KeyboardEvent): void {
   if (gameStore.enemyTurnRunning || battle.value.status !== 'ongoing') return;
 
@@ -595,6 +663,17 @@ function onKeyDown(e: KeyboardEvent): void {
   }
 
   const lower = e.key.toLowerCase();
+  // Aim Cam target cycling with A/D or Left/Right!
+  if (
+    gameStore.mode === 'attack' &&
+    aimTargets.value.length > 0 &&
+    (lower === 'a' || lower === 'd' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+  ) {
+    e.preventDefault();
+    cycleAimTarget(lower === 'a' || e.key === 'ArrowLeft' ? -1 : 1);
+    return;
+  }
+
   if (lower === 'q') {
     rotate3DCamera(-1);
   } else if (lower === 'e') {
@@ -603,6 +682,19 @@ function onKeyDown(e: KeyboardEvent): void {
     handleToggleTacticam();
   } else if (lower === 'r') {
     recenterBoard();
+  } else if (lower === 'f' && selectedUnit.value && !selectedUnit.value.actions.hasAttacked) {
+    toggleMode('attack');
+  } else if (lower === 'o' && selectedUnit.value && !selectedUnit.value.actions.hasAttacked) {
+    handleTriggerOverwatch();
+  } else if (
+    lower === 's' &&
+    selectedUnit.value?.ability &&
+    !selectedUnit.value.actions.hasUsedSkill &&
+    selectedUnit.value.abilityCooldown === 0
+  ) {
+    toggleMode('ability');
+  } else if (lower === 'm' && selectedUnit.value) {
+    setInteractionMode('move');
   } else if (lower === 'z' && battle.value.undoSnapshot) {
     triggerUndoMove();
   } else if ((e.key === 'Enter' || e.key === ' ') && previewOptions.value.length > 0) {
@@ -829,15 +921,27 @@ onBeforeUnmount(() => {
               <span v-else-if="activeForecast && !activeForecast.canAttack" class="wf-blocked-chip">
                 BLOCKED (Full Cover)
               </span>
+              <span v-if="activeForecast?.highGroundBonus" class="wf-high-chip">
+                ▲ HIGH +{{ activeForecast.highGroundBonus }}
+              </span>
+              <span v-if="activeForecast?.isCriticalFlank" class="wf-crit-chip">
+                ★ FLANK CRIT
+              </span>
               <span v-if="previewDashDamage !== null" class="wf-dash-chip">
                 ⚡ Dash -{{ previewDashDamage }}
               </span>
               <span
                 v-if="activeForecast?.knockbackDir"
                 class="wf-kb-chip"
-                :class="{ bump: activeForecast.knockbackWillBump }"
+                :class="[
+                  activeForecast.knockbackHazard ?? (activeForecast.knockbackWillBump ? 'bump' : ''),
+                ]"
               >
-                {{ activeForecast.knockbackWillBump ? '⇄ +2 BUMP!' : '⇄ Push' }}
+                {{
+                  hazardTagLabel(
+                    activeForecast.knockbackHazard ?? (activeForecast.knockbackWillBump ? 'bump' : undefined)
+                  )
+                }}
               </span>
             </div>
           </div>
@@ -1163,7 +1267,11 @@ onBeforeUnmount(() => {
             <span class="mr-hotkey desktop-only">{{ idx + 1 }}</span>
             <div class="mr-portrait-box">
               <img class="mr-portrait-img" :src="`/sprites/${u.visualKind}.png`" :alt="u.name" />
-              <span v-if="u.alive && isHeroDone(u.id)" class="mr-done-seal">
+              <span v-if="u.alive && (u.level ?? 1) > 1" class="mr-lvl-chip">L{{ u.level }}</span>
+              <span v-if="u.alive && u.statuses.some((s) => s.kind === 'overwatch')" class="mr-watch-seal" title="Hero Sight Overwatch Active">
+                👁
+              </span>
+              <span v-else-if="u.alive && isHeroDone(u.id)" class="mr-done-seal">
                 <CraftIcon name="check" :size="11" />
               </span>
             </div>
@@ -1264,7 +1372,7 @@ onBeforeUnmount(() => {
               'deck-aim': gameStore.mode === 'attack',
             }"
           >
-            <!-- STATE 1: Combat Preview Confirm Strip (Dash / Attack choice pills) -->
+            <!-- STATE 1: Mario + Rabbids Aim Cam & Combat Confirm Deck (with ◀/▶ Target Cycling & FIRE!) -->
             <template v-if="isCombatPreview && selectedUnit">
               <div class="morph-head">
                 <div class="mh-left">
@@ -1281,9 +1389,27 @@ onBeforeUnmount(() => {
                     :alt="focusedCover.kind"
                   />
                   <div class="mh-copy">
-                    <strong>{{ focusedUnit ? focusedUnit.name : focusedCover?.kind.toUpperCase() }}</strong>
+                    <div class="mh-title-row">
+                      <strong>{{ focusedUnit ? focusedUnit.name : focusedCover?.kind.toUpperCase() }}</strong>
+                      <span v-if="activeForecast?.highGroundBonus" class="deck-bonus-tag high">
+                        ▲ HIGH +{{ activeForecast.highGroundBonus }}
+                      </span>
+                      <span v-if="activeForecast?.isCriticalFlank" class="deck-bonus-tag crit">
+                        ★ CRIT
+                      </span>
+                      <span
+                        v-if="activeForecast?.knockbackHazard"
+                        class="deck-bonus-tag"
+                        :class="activeForecast.knockbackHazard"
+                      >
+                        {{ hazardTagLabel(activeForecast.knockbackHazard) }}
+                      </span>
+                    </div>
                     <small v-if="focusedUnit">
                       HP {{ focusedUnit.hp }}/{{ focusedUnit.maxHp }} · {{ getFamilyLabel(focusedUnit.family) }}
+                      <template v-if="gameStore.mode === 'attack' && aimTargets.length > 1 && activeAimTargetIndex >= 0">
+                        · Target {{ activeAimTargetIndex + 1 }}/{{ aimTargets.length }}
+                      </template>
                     </small>
                     <small v-else-if="focusedCover">
                       {{ focusedCover.hp }}/{{ focusedCover.maxHp }} Cover HP
@@ -1316,14 +1442,34 @@ onBeforeUnmount(() => {
               </div>
               <div class="confirm-strip">
                 <button
+                  v-if="gameStore.mode === 'attack' && aimTargets.length > 1"
+                  class="paper-btn aim-cycle-btn"
+                  title="Previous Target (A / ◀)"
+                  aria-label="Previous target"
+                  @click="cycleAimTarget(-1)"
+                >
+                  ◀
+                </button>
+                <button
                   v-for="opt in previewOptions"
                   :key="opt.kind"
                   class="paper-btn confirm-btn"
-                  :class="opt.tone"
+                  :class="[opt.tone, { 'fire-cta': opt.kind === 'attack' }]"
                   @click="executePreviewOption(opt.kind)"
                 >
                   <CraftIcon :name="optionIcon(opt.kind)" :size="16" />
-                  <span>{{ opt.label }}</span>
+                  <span>
+                    {{ opt.kind === 'attack' && focusedUnit ? `FIRE! ${opt.label.replace(/^Attack /, '')}` : opt.label }}
+                  </span>
+                </button>
+                <button
+                  v-if="gameStore.mode === 'attack' && aimTargets.length > 1"
+                  class="paper-btn aim-cycle-btn"
+                  title="Next Target (D / ▶)"
+                  aria-label="Next target"
+                  @click="cycleAimTarget(1)"
+                >
+                  ▶
                 </button>
                 <button class="paper-btn cancel-btn" aria-label="Cancel" @click="cancelPreviewAction">
                   <CraftIcon name="close" :size="16" />
@@ -1464,6 +1610,7 @@ onBeforeUnmount(() => {
               <div class="mr-deck-header">
                 <button class="hero-id-btn" title="Hero details" @click="inspectSelectedHeroSummary">
                   <strong>{{ selectedUnit.name }}</strong>
+                  <span class="lvl-tag">Lv.{{ selectedUnit.level ?? 1 }}</span>
                   <span class="family-tag">{{ getFamilyLabel(selectedUnit.family) }}</span>
                   <span class="weapon-mini desktop-only">
                     {{ selectedUnit.weapon.name }} · {{ selectedUnit.weapon.damage }} DMG · R{{ selectedUnit.weapon.minRange }}-{{ selectedUnit.weapon.maxRange }}
@@ -1508,20 +1655,20 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <!-- 5 Mario + Rabbids Action Buttons: Move / Weapon / Technique / Satchel / End Turn -->
-              <div class="mr-action-bar">
+              <!-- 6 Mario + Rabbids Action Buttons: Move / Weapon / Hero Sight Watch / Skill / Bag / End -->
+              <div class="mr-action-bar six-col">
                 <button
                   class="paper-btn sky mr-act-btn"
                   :class="{ 'is-active': gameStore.mode === 'move' && !selectedUnit.actions.hasMoved }"
                   :disabled="selectedUnit.actions.hasMoved && dashHintCount === 0 && jumpHintCount === 0"
-                  title="Move, Dash enemies, or Team-Jump allies"
+                  title="Move, Dash enemies, or Team-Jump allies (M)"
                   @click="setInteractionMode('move')"
                 >
-                  <CraftIcon name="move" :size="16" />
+                  <CraftIcon name="move" :size="15" />
                   <div class="act-copy">
                     <span class="act-title">{{ selectedUnit.actions.hasMoved ? 'Moved' : 'Move' }}</span>
                     <small v-if="dashHintCount > 0 || jumpHintCount > 0" class="act-sub">
-                      {{ dashHintCount > 0 ? `⚡${dashHintCount}` : '' }}
+                      {{ dashHintCount > 0 ? `⚡${remainingDashesForSelected}` : '' }}
                       {{ jumpHintCount > 0 ? `★${jumpHintCount}` : '' }}
                     </small>
                   </div>
@@ -1534,14 +1681,30 @@ onBeforeUnmount(() => {
                     'pulse-ready': enemiesInAttackRange > 0 && !selectedUnit.actions.hasAttacked,
                   }"
                   :disabled="selectedUnit.actions.hasAttacked || battle.phase !== 'player' || gameStore.enemyTurnRunning"
-                  :title="`${selectedUnit.weapon.name} (${selectedUnit.weapon.damage} dmg) — Aim Cam`"
+                  :title="`${selectedUnit.weapon.name} (${selectedUnit.weapon.damage} dmg) — Aim Cam (F)`"
                   @click="toggleMode('attack')"
                 >
                   <span v-if="enemiesInAttackRange > 0" class="tab-badge">{{ enemiesInAttackRange }}</span>
-                  <CraftIcon name="attack" :size="16" />
+                  <CraftIcon name="attack" :size="15" />
                   <div class="act-copy">
                     <span class="act-title">{{ gameStore.mode === 'attack' ? 'Aiming' : 'Weapon' }}</span>
                     <small class="act-sub desktop-only">{{ selectedUnit.weapon.damage }} DMG</small>
+                  </div>
+                </button>
+
+                <button
+                  class="paper-btn watch-btn mr-act-btn"
+                  :class="{
+                    'is-active': selectedUnit.statuses.some((s) => s.kind === 'overwatch'),
+                  }"
+                  :disabled="selectedUnit.actions.hasAttacked || battle.phase !== 'player' || gameStore.enemyTurnRunning"
+                  :title="`Hero Sight Overwatch (O) — Intercepts moving foes with ${overwatchChargesForSelected} reaction shot(s)`"
+                  @click="handleTriggerOverwatch"
+                >
+                  <span class="watch-glyph">👁</span>
+                  <div class="act-copy">
+                    <span class="act-title">Watch</span>
+                    <small class="act-sub">×{{ overwatchChargesForSelected }}</small>
                   </div>
                 </button>
 
@@ -1555,10 +1718,10 @@ onBeforeUnmount(() => {
                     battle.phase !== 'player' ||
                     gameStore.enemyTurnRunning
                   "
-                  :title="selectedUnit.ability ? `${selectedUnit.ability.name}: ${selectedUnit.ability.description}` : 'No skill'"
+                  :title="selectedUnit.ability ? `${selectedUnit.ability.name} (S): ${selectedUnit.ability.description}` : 'No skill'"
                   @click="toggleMode('ability')"
                 >
-                  <CraftIcon name="skill" :size="16" />
+                  <CraftIcon name="skill" :size="15" />
                   <div class="act-copy">
                     <span class="act-title">
                       {{ selectedUnit.abilityCooldown > 0 ? `CD ${selectedUnit.abilityCooldown}` : 'Skill' }}
@@ -1581,7 +1744,7 @@ onBeforeUnmount(() => {
                   title="Garden Satchel (shares Skill slot)"
                   @click="showItemsMenu = !showItemsMenu"
                 >
-                  <CraftIcon name="bag" :size="16" />
+                  <CraftIcon name="bag" :size="15" />
                   <div class="act-copy">
                     <span class="act-title">Bag</span>
                     <small class="act-sub">×{{ totalItemsLeft }}</small>
@@ -1597,7 +1760,7 @@ onBeforeUnmount(() => {
                   :disabled="battle.phase !== 'player' || gameStore.enemyTurnRunning || battle.status !== 'ongoing'"
                   @click="requestEndTurn"
                 >
-                  <CraftIcon name="end_turn" :size="16" />
+                  <CraftIcon name="end_turn" :size="15" />
                   <div class="act-copy">
                     <span class="act-title">
                       {{ endConfirmPending ? 'End?' : readyHeroesCount === 0 ? 'End!' : 'End' }}
@@ -3277,5 +3440,149 @@ onBeforeUnmount(() => {
   .mr-hp-txt {
     font-size: 0.68rem;
   }
+}
+
+/* ===== New Phase 3 Tactical HUD Badges & Controls ===== */
+.wf-high-chip,
+.wf-crit-chip,
+.deck-bonus-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  border: 1.5px solid var(--ink);
+  white-space: nowrap;
+}
+
+.wf-high-chip,
+.deck-bonus-tag.high {
+  background: #e2f5ff;
+  color: #10557c;
+}
+
+.wf-crit-chip,
+.deck-bonus-tag.crit {
+  background: #fff0a8;
+  color: #7c3f00;
+}
+
+.wf-kb-chip.lava,
+.deck-bonus-tag.lava {
+  background: #ffd4b8;
+  color: #8f1d00;
+}
+
+.wf-kb-chip.water,
+.deck-bonus-tag.water {
+  background: #d2f3ff;
+  color: #0b5170;
+}
+
+.wf-kb-chip.drop,
+.deck-bonus-tag.drop {
+  background: #ffe8c2;
+  color: #7a3e00;
+}
+
+.mr-lvl-chip {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  background: #4e321a;
+  color: #ffea9c;
+  border: 1.5px solid #fbf3df;
+  border-radius: 6px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  padding: 0 3px;
+  line-height: 1.3;
+  z-index: 3;
+}
+
+.mr-watch-seal {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #f5b82e;
+  border: 1.5px solid var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  box-shadow: 0 2px 0 rgba(56, 32, 14, 0.4);
+}
+
+.lvl-tag {
+  background: #4e321a;
+  color: #ffe99e;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.mr-action-bar.six-col {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mr-action-bar.six-col .mr-act-btn {
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.mr-action-bar.six-col .act-copy {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.mr-action-bar.six-col .act-sub {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-btn {
+  background: linear-gradient(180deg, #ffe285 0%, #efb432 100%);
+  color: #3f2200;
+}
+
+.watch-btn.is-active {
+  background: linear-gradient(180deg, #ffb824 0%, #d98212 100%);
+  color: #fffef5;
+  box-shadow: 0 0 0 2px #fff2a6, 0 3px 0 var(--ink);
+}
+
+.watch-glyph {
+  font-size: 0.92rem;
+  line-height: 1;
+}
+
+.aim-cycle-btn {
+  min-width: 40px;
+  padding: 6px 10px;
+  font-weight: 900;
+  background: #f8edd6;
+  color: var(--ink);
+}
+
+.fire-cta {
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.status-chip.overwatch {
+  background: #f5b82e;
+  color: #3b2100;
 }
 </style>

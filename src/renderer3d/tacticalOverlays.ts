@@ -10,7 +10,7 @@ import type {
   GridPos,
   JumpOption,
 } from '../engine/types';
-import { getTerrainSurfaceY } from './diorama';
+import { getTileSurfaceY } from './diorama';
 import type { CraftTextureLibrary } from './textures';
 import { gridToWorld3D, TILE_SIZE_3D } from './types';
 
@@ -155,7 +155,7 @@ export class TacticalOverlaySystem3D {
         snap.focusTile.y,
         b.width,
         b.height,
-        t ? getTerrainSurfaceY(t.terrain) : 0
+        t ? getTileSurfaceY(t) : 0
       );
       this.cursorGroup.position.set(wp.x, wp.y, wp.z);
       this.cursorGroup.visible = true;
@@ -173,7 +173,7 @@ export class TacticalOverlaySystem3D {
 
   private tilePosY(battle: BattleState, pos: GridPos, lift = 0.032): THREE.Vector3 {
     const t = tileAt(battle, pos);
-    const wp = gridToWorld3D(pos.x, pos.y, battle.width, battle.height, (t ? getTerrainSurfaceY(t.terrain) : 0) + lift);
+    const wp = gridToWorld3D(pos.x, pos.y, battle.width, battle.height, (t ? getTileSurfaceY(t) : 0) + lift);
     return new THREE.Vector3(wp.x, wp.y, wp.z);
   }
 
@@ -492,12 +492,21 @@ export class TacticalOverlaySystem3D {
         this.addParabolicArc(fromPt, toPt, 0.16, lineColor, 0.044, fc.hitChance < 100);
       }
 
-      // Knockback direction preview arrow!
+      // Knockback direction preview arrow (color-coded for Lava, Water, Cliff Drop, or Bump!)
       if (fc.knockbackDir && fc.canAttack) {
         const startKb = this.tilePosY(b, fc.targetPos, 0.25);
         const dirVec = new THREE.Vector3(fc.knockbackDir.x, 0, fc.knockbackDir.y).normalize();
-        const arrowLen = fc.knockbackWillBump ? 0.82 : 1.05;
-        const arrowCol = fc.knockbackWillBump ? 0xff4b3a : 0xffd147;
+        const arrowLen = fc.knockbackWillBump ? 0.86 : 1.08;
+        const arrowCol =
+          fc.knockbackHazard === 'lava'
+            ? 0xff521b
+            : fc.knockbackHazard === 'water'
+              ? 0x2ec4f1
+              : fc.knockbackHazard === 'drop'
+                ? 0xffa62b
+                : fc.knockbackWillBump
+                  ? 0xff4b3a
+                  : 0xffd147;
         const arrow = new THREE.ArrowHelper(dirVec, startKb, arrowLen, arrowCol, 0.34, 0.26);
         this.ribbonLayer.add(arrow);
       }

@@ -61,6 +61,10 @@ export function hasGraft(unit: Pick<BattleUnit, 'graftIds'>, effect: GraftEffect
   return getUnitGrafts(unit).some((g) => g.effect === effect);
 }
 
+export function hasPerk(unit: Pick<BattleUnit, 'perkIds'>, perkId: string): boolean {
+  return Boolean(unit.perkIds?.includes(perkId));
+}
+
 export function hasStatus(unit: Pick<BattleUnit, 'statuses'>, kind: StatusKind): boolean {
   return unit.statuses.some((s) => s.kind === kind && s.turns > 0);
 }
@@ -79,12 +83,20 @@ export function getEffectiveJumpRange(unit: BattleUnit, springboardAlly?: Battle
   return unit.jumpRange + launchBonus;
 }
 
+export function getMaxDashesForUnit(unit: BattleUnit): number {
+  return hasPerk(unit, 'double_dash') ? 2 : 1;
+}
+
+export function getMaxOverwatchCharges(unit: BattleUnit): number {
+  return hasPerk(unit, 'hero_sight') ? 2 : 1;
+}
+
 export function getEffectiveDashDamage(unit: BattleUnit): number {
-  return unit.dashDamage;
+  return unit.dashDamage + (hasPerk(unit, 'double_dash') ? 1 : 0);
 }
 
 export function getEffectiveCoverDamage(unit: BattleUnit): number {
-  return unit.weapon.coverDamage;
+  return unit.weapon.coverDamage + (hasPerk(unit, 'cover_buster') ? 4 : 0);
 }
 
 export function applyStatusToUnit(unit: BattleUnit, kind: StatusKind, turns: number): boolean {
@@ -124,9 +136,18 @@ export function getFamilyLabel(family: UnitFamily): string {
   }
 }
 
-export function getCooldownForUnit(state: BattleState, baseCooldown: number, team: 'player' | 'enemy'): number {
+export function getCooldownForUnit(
+  state: BattleState,
+  baseCooldown: number,
+  team: 'player' | 'enemy',
+  unit?: Pick<BattleUnit, 'perkIds'>
+): number {
+  let cd = baseCooldown;
   if (team === 'player' && hasRelic(state.relicIds, 'heirloom_fertilizer')) {
-    return Math.max(1, baseCooldown - 1);
+    cd -= 1;
   }
-  return baseCooldown;
+  if (unit && hasPerk(unit, 'quick_bloom')) {
+    cd -= 1;
+  }
+  return Math.max(1, cd);
 }

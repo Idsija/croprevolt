@@ -81,7 +81,7 @@ export class TacticalCameraController {
     const fitH = (boardH * 0.72) / Math.tan(vFovRad / 2);
     const widthMargin = aspect < 0.85 ? 0.92 : 0.72;
     const fitW = (boardW * widthMargin) / Math.tan(hFovRad / 2);
-    this.baseDistance = THREE.MathUtils.clamp(Math.max(fitH, fitW) + 2.4, 10.5, 27.5);
+    this.baseDistance = THREE.MathUtils.clamp(Math.max(fitH, fitW) + 2.4, 10.5, 32.0);
     this.updateDesiredFromMode();
   }
 

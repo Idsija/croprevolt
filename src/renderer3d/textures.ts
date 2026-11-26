@@ -142,6 +142,7 @@ export class CraftTextureLibrary {
   public readonly woodDeskMap: THREE.Texture;
   public readonly shieldHalfMap: THREE.Texture;
   public readonly shieldFullMap: THREE.Texture;
+  public readonly cliffSideMap: THREE.Texture;
 
   constructor() {
     this.paperBump = this.track(this.buildPaperBump());
@@ -157,6 +158,7 @@ export class CraftTextureLibrary {
     this.beehiveMap = this.track(this.buildBeehiveTexture());
     this.shieldHalfMap = this.track(this.buildShieldBadgeTexture('half'));
     this.shieldFullMap = this.track(this.buildShieldBadgeTexture('full'));
+    this.cliffSideMap = this.track(this.buildCliffSideTexture());
 
     this.woodDeskMap = this.track(
       this.loader.load('/ui/wood-desk.jpg', (tex) => {
@@ -342,6 +344,14 @@ export class CraftTextureLibrary {
           : '#b5804d';
     } else if (terrain === 'sunbeam') {
       base = checker ? '#f6de72' : '#efcf58';
+    } else if (terrain === 'water') {
+      base = checker ? '#2d93b8' : '#2687ab';
+    } else if (terrain === 'bridge') {
+      base = checker ? '#b87d46' : '#ae743f';
+    } else if (terrain === 'lava') {
+      base = checker ? '#b83214' : '#a4280e';
+    } else if (terrain === 'ramp') {
+      base = checker ? '#bd8f56' : '#b2834b';
     }
 
     ctx.fillStyle = base;
@@ -481,15 +491,161 @@ export class CraftTextureLibrary {
       g.addColorStop(1, 'rgba(252, 214, 72, 0)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
+    } else if (terrain === 'water') {
+      // Sparkling Paper Mario azure creek with painted ripples & foam crescents
+      const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 8, s * 0.5, s * 0.5, s * 0.65);
+      g.addColorStop(0, 'rgba(92, 210, 238, 0.48)');
+      g.addColorStop(1, 'rgba(16, 78, 114, 0.45)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, s, s);
+
+      ctx.strokeStyle = 'rgba(224, 250, 255, 0.58)';
+      ctx.lineWidth = 4.5;
+      ctx.lineCap = 'round';
+      for (let row = 0; row < 4; row++) {
+        const wy = 42 + row * 56;
+        ctx.beginPath();
+        ctx.moveTo(22, wy);
+        ctx.quadraticCurveTo(s * 0.32, wy - 14, s * 0.52, wy);
+        ctx.quadraticCurveTo(s * 0.72, wy + 14, s - 22, wy - 4);
+        ctx.stroke();
+      }
+    } else if (terrain === 'bridge') {
+      // Sturdy cross-plank wooden bridge decking with dark ink seams & bolt heads
+      for (let i = 0; i < 5; i++) {
+        const py = i * (s / 5);
+        ctx.fillStyle = i % 2 === 0 ? '#c98e52' : '#b77b40';
+        ctx.fillRect(6, py + 3, s - 12, s / 5 - 6);
+        ctx.strokeStyle = '#4a2a14';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(6, py + 3, s - 12, s / 5 - 6);
+        // Iron rivets
+        ctx.fillStyle = '#3d2412';
+        ctx.beginPath();
+        ctx.arc(24, py + s / 10, 4.5, 0, Math.PI * 2);
+        ctx.arc(s - 24, py + s / 10, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Side stringer rails
+      ctx.fillStyle = '#824d23';
+      ctx.fillRect(0, 0, 14, s);
+      ctx.fillRect(s - 14, 0, 14, s);
+    } else if (terrain === 'lava') {
+      // Glowing molten magma rivers threading through dark basalt crusts
+      const lg = ctx.createRadialGradient(s * 0.5, s * 0.5, 10, s * 0.5, s * 0.5, s * 0.55);
+      lg.addColorStop(0, '#ffe052');
+      lg.addColorStop(0.45, '#ff6d1f');
+      lg.addColorStop(1, '#7a1608');
+      ctx.fillStyle = lg;
+      ctx.fillRect(0, 0, s, s);
+
+      // Floating dark volcanic crust islands
+      ctx.fillStyle = 'rgba(46, 18, 12, 0.78)';
+      for (let i = 0; i < 6; i++) {
+        ctx.beginPath();
+        ctx.ellipse(
+          34 + rng() * 188,
+          34 + rng() * 188,
+          18 + rng() * 24,
+          12 + rng() * 16,
+          rng() * Math.PI,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+      // Hot yellow magma veins
+      ctx.strokeStyle = 'rgba(255, 240, 140, 0.8)';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(20, s * 0.25);
+      ctx.quadraticCurveTo(s * 0.5, s * 0.45, s - 20, s * 0.3);
+      ctx.moveTo(28, s * 0.75);
+      ctx.quadraticCurveTo(s * 0.55, s * 0.6, s - 26, s * 0.78);
+      ctx.stroke();
+    } else if (terrain === 'ramp') {
+      // Sloped timber step-boards with subtle climb treads
+      for (let i = 0; i < 6; i++) {
+        const py = i * (s / 6);
+        ctx.fillStyle = i % 2 === 0 ? '#cfa062' : '#bf8e52';
+        ctx.fillRect(10, py + 2, s - 20, s / 6 - 4);
+        ctx.fillStyle = 'rgba(64, 34, 14, 0.35)';
+        ctx.fillRect(10, py + s / 6 - 5, s - 20, 4);
+      }
+      // Subtle painted upward climb chevron so ramp direction reads clearly
+      ctx.strokeStyle = 'rgba(255, 248, 224, 0.55)';
+      ctx.lineWidth = 7;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(s * 0.32, s * 0.62);
+      ctx.lineTo(s * 0.5, s * 0.38);
+      ctx.lineTo(s * 0.68, s * 0.62);
+      ctx.stroke();
     }
 
     // Crisp warm hand-inked paper tile bevel border
-    ctx.strokeStyle = 'rgba(72, 42, 18, 0.34)';
+    ctx.strokeStyle = terrain === 'lava' ? 'rgba(255, 190, 80, 0.45)' : 'rgba(72, 42, 18, 0.34)';
     ctx.lineWidth = 6;
     ctx.strokeRect(3, 3, s - 6, s - 6);
-    ctx.strokeStyle = 'rgba(255, 250, 230, 0.34)';
+    ctx.strokeStyle = terrain === 'water' ? 'rgba(220, 252, 255, 0.35)' : 'rgba(255, 250, 230, 0.34)';
     ctx.lineWidth = 3;
     ctx.strokeRect(8, 8, s - 16, s - 16);
+
+    return finalizeTexture(canvas);
+  }
+
+  private buildCliffSideTexture(): THREE.CanvasTexture {
+    const w = 256;
+    const h = 256;
+    const { canvas, ctx } = makeCanvas(w, h);
+
+    // Rich layered earth-and-stone Paper Mario terrace cliff face
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#9c6c3f');
+    grad.addColorStop(0.45, '#865730');
+    grad.addColorStop(1, '#684020');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Layered cardboard/strata bands
+    ctx.fillStyle = 'rgba(54, 28, 12, 0.22)';
+    ctx.fillRect(0, 68, w, 16);
+    ctx.fillRect(0, 146, w, 20);
+    ctx.fillRect(0, 212, w, 14);
+
+    // Embedded cobblestones
+    const rng = mulberry(7741);
+    for (let i = 0; i < 14; i++) {
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(182, 152, 118, 0.42)' : 'rgba(92, 64, 42, 0.42)';
+      ctx.beginPath();
+      ctx.ellipse(24 + rng() * 208, 46 + rng() * 185, 14 + rng() * 14, 9 + rng() * 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(56, 32, 16, 0.38)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+
+    // Scalloped grassy turf overhang lip along top edge!
+    ctx.fillStyle = '#6f9c37';
+    ctx.fillRect(0, 0, w, 24);
+    for (let x = 0; x < w; x += 32) {
+      ctx.beginPath();
+      ctx.arc(x + 16, 24, 16, 0, Math.PI);
+      ctx.fill();
+    }
+    ctx.strokeStyle = '#3f2412';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(0, 26);
+    ctx.lineTo(w, 26);
+    ctx.stroke();
+
+    paintPaperGrain(ctx, w, h, 8821, 0.08);
+    ctx.strokeStyle = 'rgba(66, 36, 16, 0.45)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, w - 6, h - 6);
 
     return finalizeTexture(canvas);
   }

@@ -15,6 +15,7 @@ import {
   createCover,
   getNeighbors,
   inBounds,
+  isHazardLiquid,
   manhattan,
   posKey,
   samePos,
@@ -24,7 +25,10 @@ import {
 import {
   applyStatusToUnit,
   getCooldownForUnit,
+  getMaxDashesForUnit,
+  getMaxOverwatchCharges,
   hasGraft,
+  hasPerk,
   hasRelic,
   hasStatus,
 } from './hooks';
@@ -91,7 +95,7 @@ function varyEnemySpawns(map: MapTemplate, setup: BattleSetup): MapTemplate['ene
   if (extra === 0) return spawns;
 
   const blocked = new Set<string>([
-    ...map.tiles.filter((t) => t.cover).map((t) => posKey(t)),
+    ...map.tiles.filter((t) => t.cover || (t.terrain && isHazardLiquid(t.terrain))).map((t) => posKey(t)),
     ...spawns.map((sp) => posKey(sp)),
     ...map.playerSpawns.map(posKey),
     ...(map.gateTiles ?? []).map(posKey),
@@ -134,9 +138,12 @@ function emptyActions() {
   return {
     hasMoved: false,
     hasDashed: false,
+    dashesUsed: 0,
+    dashedEnemyIds: [] as string[],
     hasJumped: false,
     hasAttacked: false,
     hasUsedSkill: false,
+    overwatchCharges: 0,
   };
 }
 
@@ -168,6 +175,8 @@ export function createBattleUnitFromHero(hero: RosterHero, pos: GridPos): Battle
     ability: { ...hero.ability, appliesStatus: hero.ability.appliesStatus ? { ...hero.ability.appliesStatus } : undefined },
     abilityCooldown: 0,
     graftIds: [...hero.graftIds],
+    level: hero.level ?? 1,
+    perkIds: [...(hero.perkIds ?? [])],
     tier: hero.tier,
     statuses: [],
     actions: emptyActions(),
@@ -178,6 +187,9 @@ export function createBattleUnitFromHero(hero: RosterHero, pos: GridPos): Battle
   };
   if (hero.livingHalfCover) {
     applyStatusToUnit(unit, 'shield', 1);
+  }
+  if (hasPerk(unit, 'hardy_husk')) {
+    applyStatusToUnit(unit, 'shield', 2);
   }
   return unit;
 }
@@ -243,7 +255,7 @@ export function createBattleFromMap(
   for (let y = 0; y < map.height; y++) {
     const row: Tile[] = [];
     for (let x = 0; x < map.width; x++) {
-      row.push({ x, y, terrain: 'grass', cover: null });
+      row.push({ x, y, terrain: 'grass', elevation: 0, cover: null });
     }
     tiles.push(row);
   }
@@ -252,6 +264,7 @@ export function createBattleFromMap(
     if (spec.y < 0 || spec.y >= map.height || spec.x < 0 || spec.x >= map.width) continue;
     const tile = tiles[spec.y][spec.x];
     if (spec.terrain) tile.terrain = spec.terrain;
+    if (spec.elevation !== undefined) tile.elevation = spec.elevation;
     if (spec.cover) {
       const captiveId =
         spec.cover === 'cage'
@@ -444,13 +457,43 @@ export function applyKnockback(
   if (!target.alive) return;
   if (dir.x === 0 && dir.y === 0) return;
 
+  const curTile = tileAt(state, target.pos);
   const nextPos: GridPos = { x: target.pos.x + dir.x, y: target.pos.y + dir.y };
   const inGrid = inBounds(state, nextPos);
   const nextTile = inGrid ? tileAt(state, nextPos) : null;
   const blockerUnit = inGrid ? unitAt(state, nextPos) : undefined;
 
+  // Environmental Liquid Hazards (Water Splash / Lava Plunge — bounces back onto the rim!)
+  if (inGrid && nextTile && isHazardLiquid(nextTile.terrain)) {
+    const isLava = nextTile.terrain === 'lava';
+    const hazDmg = isLava ? 4 : 3;
+    target.hp -= hazDmg;
+    if (isLava) {
+      applyStatusToUnit(target, 'burn', 2);
+    } else {
+      target.statuses = target.statuses.filter((s) => s.kind !== 'burn');
+    }
+    state.pendingEvents.push({
+      type: 'terrain_hazard',
+      kind: isLava ? 'lava' : 'water',
+      unitId: target.id,
+      pos: { ...nextPos },
+      damage: hazDmg,
+    });
+    pushLog(
+      state,
+      isLava
+        ? `LAVA PLUNGE! ${target.name} scorched in molten lava (-${hazDmg} HP + Burn)!`
+        : `SPLASH! ${target.name} dunked in deep water (-${hazDmg} HP)!`
+    );
+    handleUnitKO(state, target);
+    return;
+  }
+
   if (inGrid && nextTile && !nextTile.cover && !blockerUnit) {
     const from = { ...target.pos };
+    const fromElev = curTile?.elevation ?? 0;
+    const toElev = nextTile.elevation ?? 0;
     target.pos = { ...nextPos };
     state.pendingEvents.push({
       type: 'knockback',
@@ -459,7 +502,21 @@ export function applyKnockback(
       to: { ...nextPos },
       bumped: false,
     });
-    pushLog(state, `${target.name} was knocked back!`);
+    if (fromElev > toElev) {
+      const dropDmg = 2;
+      target.hp -= dropDmg;
+      state.pendingEvents.push({
+        type: 'terrain_hazard',
+        kind: 'drop',
+        unitId: target.id,
+        pos: { ...nextPos },
+        damage: dropDmg,
+      });
+      pushLog(state, `CLIFF DROP! ${target.name} tumbled off high ground (-${dropDmg} HP)!`);
+      handleUnitKO(state, target);
+    } else {
+      pushLog(state, `${target.name} was knocked back!`);
+    }
     return;
   }
 
@@ -649,6 +706,10 @@ function damageCoverAt(
         weapon: bp.weapon,
         ability: bp.ability,
         graftIds: [],
+        level: 1,
+        xp: 0,
+        skillPoints: 1,
+        perkIds: [],
         tier: 'seedling',
         harvested: false,
         color: bp.color,
@@ -661,6 +722,74 @@ function damageCoverAt(
     }
   }
 
+  return true;
+}
+
+/**
+ * Mario + Rabbids Hero Sight (Overwatch):
+ * Whenever an opposing unit moves/dashes into range of an Overwatching hero,
+ * the hero automatically interrupts and fires a reaction shot!
+ */
+function triggerOverwatchInterrupts(state: BattleState, mover: BattleUnit): void {
+  if (!mover.alive || state.status !== 'ongoing') return;
+
+  for (const watcher of state.units) {
+    if (!mover.alive || state.status !== 'ongoing') break;
+    if (!watcher.alive || watcher.team === mover.team) continue;
+    const charges = watcher.actions.overwatchCharges ?? 0;
+    if (charges <= 0 || !hasStatus(watcher, 'overwatch')) continue;
+
+    const fc = forecastAttack(state, watcher, mover.pos, true);
+    if (!fc.canAttack) continue;
+
+    const watchBonus = hasPerk(watcher, 'hero_sight') ? 2 : 0;
+    const dmg = fc.finalDamage + watchBonus;
+    watcher.actions.overwatchCharges = charges - 1;
+    if (watcher.actions.overwatchCharges <= 0) {
+      watcher.statuses = watcher.statuses.filter((s) => s.kind !== 'overwatch');
+    }
+    if (mover.pos.x !== watcher.pos.x) {
+      watcher.facing = mover.pos.x > watcher.pos.x ? 'right' : 'left';
+    }
+
+    mover.hp -= dmg;
+    state.pendingEvents.push({
+      type: 'overwatch_shot',
+      attackerId: watcher.id,
+      attackerKind: watcher.visualKind,
+      targetId: mover.id,
+      from: { ...watcher.pos },
+      to: { ...mover.pos },
+      damage: dmg,
+    });
+    pushLog(state, `HERO SIGHT! ${watcher.name} intercepted ${mover.name} for ${dmg} dmg!`);
+    handleUnitKO(state, mover);
+  }
+}
+
+export function executeOverwatch(state: BattleState, unitId: string): boolean {
+  if (state.status !== 'ongoing' || state.phase !== 'player') return false;
+  const unit = getUnitById(state, unitId);
+  if (!unit || !unit.alive || unit.team !== 'player' || unit.actions.hasAttacked) return false;
+
+  saveUndoSnapshot(state);
+  unit.actions.hasAttacked = true;
+  unit.actions.overwatchCharges = getMaxOverwatchCharges(unit);
+  applyStatusToUnit(unit, 'overwatch', 1);
+
+  state.pendingEvents.push({
+    type: 'ability',
+    unitId: unit.id,
+    abilityName: `Hero Sight (×${unit.actions.overwatchCharges})`,
+    from: { ...unit.pos },
+    to: { ...unit.pos },
+    affectedIds: [unit.id],
+    status: 'overwatch',
+  });
+  pushLog(
+    state,
+    `${unit.name} entered HERO SIGHT Overwatch (${unit.actions.overwatchCharges} reaction shot${unit.actions.overwatchCharges > 1 ? 's' : ''})!`
+  );
   return true;
 }
 
@@ -689,6 +818,7 @@ export function executeMove(state: BattleState, unitId: string, dest: GridPos): 
     path: node.path.map((p) => ({ ...p })),
   });
 
+  triggerOverwatchInterrupts(state, unit);
   checkBattleEnd(state);
   return true;
 }
@@ -696,7 +826,10 @@ export function executeMove(state: BattleState, unitId: string, dest: GridPos): 
 export function executeDash(state: BattleState, unitId: string, targetEnemyId: string): boolean {
   if (state.status !== 'ongoing') return false;
   const unit = getUnitById(state, unitId);
-  if (!unit || !unit.alive || unit.actions.hasDashed || unit.actions.hasMoved) return false;
+  const dashesUsed = unit?.actions.dashesUsed ?? (unit?.actions.hasDashed ? 1 : 0);
+  if (!unit || !unit.alive || dashesUsed >= getMaxDashesForUnit(unit) || unit.actions.hasMoved) {
+    return false;
+  }
 
   const options = computeDashOptions(state, unit);
   const opt = options.find((o) => o.enemyId === targetEnemyId);
@@ -714,9 +847,12 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
     unit.facing = target.pos.x > unit.pos.x ? 'right' : 'left';
   }
 
-  // Move to stopPos adjacent to enemy; hero can STILL finish normal Move or Team-Jump afterwards!
+  // Move to stopPos adjacent to enemy; hero can STILL Multi-Dash, Move, or Team-Jump afterwards!
   unit.pos = { ...opt.stopPos };
-  unit.actions.hasDashed = true;
+  const nextDashes = dashesUsed + 1;
+  unit.actions.dashesUsed = nextDashes;
+  unit.actions.dashedEnemyIds = [...(unit.actions.dashedEnemyIds ?? []), target.id];
+  unit.actions.hasDashed = nextDashes >= getMaxDashesForUnit(unit);
 
   let dmg = opt.damage;
   if (hasStatus(target, 'acid')) dmg += 2;
@@ -746,6 +882,7 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
   if (target.alive && opt.knockback && opt.knockback > 0) {
     applyKnockback(state, target, computePushDirection(opt.stopPos, target.pos));
   }
+  triggerOverwatchInterrupts(state, unit);
   checkBattleEnd(state);
   return true;
 }
@@ -778,12 +915,20 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
     pushLog(state, `Bouncy Mulch energized ${unit.name} (+2 Attack this turn)!`);
   }
 
-  // Barnyard Co-op: Team-Jumping off Cluck Norris launches +2 tiles & grants +2 Attack (stacked jump bonus caps at +3)!
+  // Barnyard Co-op: Team-Jumping off Cluck Norris launches +2 tiles & grants +2 Attack!
   const springboardAlly = getUnitById(state, opt.allyId);
   if (springboardAlly?.launchpadCoop) {
     unit.tempAttackBonus = Math.min(3, unit.tempAttackBonus + 2);
     coopBoost = `CLUCK LAUNCH +${unit.tempAttackBonus} ATK!`;
     pushLog(state, `CO-OP LAUNCH! ${springboardAlly.name} boosted ${unit.name} (+${unit.tempAttackBonus} Attack this turn)!`);
+  }
+
+  // Squad Rally Perk (vanguard_aura): Jumping off this ally boosts BOTH heroes!
+  if (springboardAlly && hasPerk(springboardAlly, 'vanguard_aura')) {
+    applyStatusToUnit(unit, 'boosted', 1);
+    applyStatusToUnit(springboardAlly, 'boosted', 1);
+    coopBoost = 'SQUAD RALLY +2 ATK!';
+    pushLog(state, `SQUAD RALLY! ${springboardAlly.name} & ${unit.name} fired up (+2 ATK)!`);
   }
 
   state.pendingEvents.push({
@@ -795,6 +940,30 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
     coopBoost,
   });
   pushLog(state, `${unit.name} Team-Jumped across the garden!`);
+
+  // Jump Stomp Perk (stomp_landing): AoE 2 dmg to adjacent enemies on landing +2 ATK!
+  if (hasPerk(unit, 'stomp_landing')) {
+    unit.tempAttackBonus = Math.min(4, unit.tempAttackBonus + 2);
+    const hitIds: string[] = [];
+    for (const adj of getNeighbors(state, dest)) {
+      const foe = unitAt(state, adj);
+      if (foe && foe.team !== unit.team && foe.alive) {
+        foe.hp -= 2;
+        hitIds.push(foe.id);
+        handleUnitKO(state, foe);
+      }
+    }
+    state.pendingEvents.push({
+      type: 'stomp',
+      unitId: unit.id,
+      pos: { ...dest },
+      damage: 2,
+      hitIds,
+    });
+    if (hitIds.length > 0) {
+      pushLog(state, `JUMP STOMP! ${unit.name} slammed ${hitIds.length} nearby foe(s) for 2 dmg!`);
+    }
+  }
 
   checkBattleEnd(state);
   return true;
@@ -931,8 +1100,9 @@ export function executeAttack(
 
   handleUnitKO(state, defender);
 
-  // Weapon Knockback (e.g. Spudnik, Billy Batter, Corn-elius, Baron Combine)
-  if (defender.alive && attacker.weapon.knockback && attacker.weapon.knockback > 0) {
+  // Weapon Knockback (e.g. Spudnik, Billy Batter, Corn-elius, Baron Combine, or Cover Buster perk!)
+  const totalKnockback = (attacker.weapon.knockback ?? 0) + (hasPerk(attacker, 'cover_buster') ? 1 : 0);
+  if (defender.alive && totalKnockback > 0) {
     const pushDir = fc.knockbackDir ?? computePushDirection(attacker.pos, defender.pos);
     applyKnockback(state, defender, pushDir, rosterLookup);
   }
@@ -1064,7 +1234,7 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
 
   state.undoSnapshot = null;
   unit.actions.hasUsedSkill = true;
-  unit.abilityCooldown = getCooldownForUnit(state, ab.cooldown, unit.team);
+  unit.abilityCooldown = getCooldownForUnit(state, ab.cooldown, unit.team, unit);
 
   const affectedIds: string[] = [];
 
@@ -1126,6 +1296,19 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
         }
       }
     }
+  }
+
+  // Quick Bloom perk: casting any skill restores +2 HP to caster!
+  if (hasPerk(unit, 'quick_bloom') && unit.alive && unit.hp < unit.maxHp) {
+    const bloomHeal = Math.min(2, unit.maxHp - unit.hp);
+    unit.hp += bloomHeal;
+    state.pendingEvents.push({
+      type: 'heal',
+      unitId: unit.id,
+      pos: { ...unit.pos },
+      amount: bloomHeal,
+      source: 'Quick Bloom',
+    });
   }
 
   state.pendingEvents.push({
@@ -1305,10 +1488,10 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
 
     if (!unit.alive) continue;
 
-    // Start-of-phase duration ticks for Burn (post-tick) and self/ally buffs (shield, boosted)
+    // Start-of-phase duration ticks for Burn (post-tick), Overwatch expiry, and self/ally buffs
     unit.statuses = unit.statuses
       .map((s) =>
-        s.kind === 'burn' || s.kind === 'shield' || s.kind === 'boosted'
+        s.kind === 'burn' || s.kind === 'shield' || s.kind === 'boosted' || s.kind === 'overwatch'
           ? { ...s, turns: s.turns - 1 }
           : s
       )
@@ -1341,6 +1524,17 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
         source: 'Sweet Nectar',
       });
       pushLog(state, `${unit.name} regenerated +${heal} HP from Sweet Nectar!`);
+    }
+  }
+
+  // Squad Rally perk (vanguard_aura): Start-of-turn Boosted (+2 ATK) to orthogonally adjacent allies!
+  for (const unit of state.units) {
+    if (!unit.alive || unit.team !== nextPhase || !hasPerk(unit, 'vanguard_aura')) continue;
+    for (const adj of getNeighbors(state, unit.pos)) {
+      const ally = unitAt(state, adj);
+      if (ally && ally.alive && ally.team === unit.team) {
+        applyStatusToUnit(ally, 'boosted', 1);
+      }
     }
   }
 

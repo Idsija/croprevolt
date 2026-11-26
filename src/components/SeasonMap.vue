@@ -1,1163 +1,766 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { GRAFT_REGISTRY } from '../data/grafts';
-import { ITEM_REGISTRY } from '../data/items';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RELIC_REGISTRY } from '../data/relics';
-import { threatFor } from '../engine/difficulty';
-import { ACTS, FLOORS_PER_ACT, MAX_LANES } from '../engine/mapgen';
+import { ACTS, FLOORS_PER_ACT } from '../engine/mapgen';
 import { getAvailableNextNodeIds } from '../engine/run';
-import type { SeasonNode } from '../engine/types';
+import type { BoardTheme, NodeType, SeasonNode } from '../engine/types';
+import { OverworldMapRenderer } from '../renderer3d/OverworldMapRenderer';
 import {
   enterSeasonNode,
   gameStore,
   returnToTitle,
-  toggleAudioMute,
-  toggleSquadMember,
 } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
+import HeroBuildModal from './HeroBuildModal.vue';
 
 const run = computed(() => gameStore.run!);
+const actDef = computed(() => ACTS[run.value.act] ?? ACTS[0]);
+const actTheme = computed<BoardTheme>(() =>
+  run.value.act === 1 ? 'greenhouse' : run.value.act === 2 ? 'autumn' : 'spring'
+);
+
+const webglCanvasRef = ref<HTMLCanvasElement | null>(null);
+const overlayCanvasRef = ref<HTMLCanvasElement | null>(null);
+const webglFailed = ref(false);
+
+const selectedNodeId = ref<string | null>(null);
+const hoveredNodeId = ref<string | null>(null);
+const showBuildModal = ref(false);
+const buildModalHeroUid = ref<string | null>(null);
+const showRelicsPopover = ref(false);
+
+let mapRenderer: OverworldMapRenderer | null = null;
+
 const availableIds = computed(() => new Set(getAvailableNextNodeIds(run.value)));
-
-const mobileTab = ref<'trail' | 'squad'>('trail');
-const inspectedInfo = ref<{ title: string; desc: string } | null>(null);
-
-const act = computed(() => ACTS[run.value.act] ?? ACTS[0]);
-
-/** Floors top-to-bottom for rendering: boss first, floor 0 last (the trail climbs upward). */
-const floors = computed(() => {
-  const grouped: SeasonNode[][] = Array.from({ length: FLOORS_PER_ACT + 1 }, () => []);
-  for (const n of run.value.nodes) {
-    (grouped[n.stage] ??= []).push(n);
-  }
-  return grouped
-    .map((nodes, floor) => ({ floor, nodes, isBoss: nodes.some((n) => n.type === 'boss') }))
-    .filter((row) => row.nodes.length > 0) // older saves have fewer floors
-    .reverse();
-});
-
 const completedIds = computed(() => new Set(run.value.completedNodeIds));
 
-// ---------- Selection (tap once to inspect, tap again or press Enter to go) ----------
-const selectedId = ref<string | null>(null);
-const hoveredId = ref<string | null>(null);
-const focusNode = computed(() => {
-  const id = hoveredId.value ?? selectedId.value;
-  return id ? run.value.nodes.find((n) => n.id === id) ?? null : null;
+const availableNodes = computed(() =>
+  run.value.nodes
+    .filter((n) => availableIds.value.has(n.id))
+    .sort((a, b) => a.lane - b.lane)
+);
+
+const activeHeroes = computed(() =>
+  run.value.activeSquadUids
+    .map((uid) => run.value.roster.find((h) => h.uid === uid))
+    .filter((h): h is NonNullable<typeof h> => Boolean(h))
+);
+
+const totalUnspentSp = computed(() =>
+  run.value.roster.reduce((sum, h) => sum + (h.harvested ? 0 : h.skillPoints), 0)
+);
+
+const currentFloorDisplay = computed(() => {
+  if (run.value.completedNodeIds.length === 0) return 1;
+  const last = run.value.nodes.find(
+    (n) => n.id === run.value.completedNodeIds[run.value.completedNodeIds.length - 1]
+  );
+  return Math.min(FLOORS_PER_ACT + 1, (last?.stage ?? 0) + 2);
 });
 
-function onNodeClick(node: SeasonNode): void {
-  if (!availableIds.value.has(node.id)) {
-    selectedId.value = node.id;
-    return;
-  }
-  if (selectedId.value === node.id) {
-    enterSeasonNode(node.id);
-    return;
-  }
-  selectedId.value = node.id;
-}
+const leadHeroKind = computed(() => {
+  const first = activeHeroes.value[0] ?? run.value.roster[0];
+  return first?.species ?? 'cow';
+});
 
-function enterSelected(): void {
-  if (selectedId.value && availableIds.value.has(selectedId.value)) {
-    enterSeasonNode(selectedId.value);
-  }
-}
+const bossKind = computed(() => {
+  if (run.value.act === 1) return 'tractor';
+  if (run.value.act === 2) return 'harvester';
+  return 'scarecrow';
+});
 
-// ---------- Trail lines (SVG drawn between node cards) ----------
-const graphRef = ref<HTMLElement | null>(null);
-const nodeEls = new Map<string, HTMLElement>();
-const lines = ref<Array<{ key: string; d: string; state: 'done' | 'open' | 'idle' }>>([]);
-const graphSize = ref({ w: 0, h: 0 });
-
-function setNodeEl(id: string, el: unknown): void {
-  if (el instanceof HTMLElement) nodeEls.set(id, el);
-  else nodeEls.delete(id);
-}
-
-function anchor(el: HTMLElement, edge: 'top' | 'bottom'): { x: number; y: number } {
-  // offset* ignores CSS transforms, so the pulsing cards don't make the lines wobble.
-  return {
-    x: el.offsetLeft + el.offsetWidth / 2,
-    y: edge === 'top' ? el.offsetTop : el.offsetTop + el.offsetHeight,
-  };
-}
-
-function layoutLines(): void {
-  const graph = graphRef.value;
-  if (!graph) return;
-  graphSize.value = { w: graph.scrollWidth, h: graph.scrollHeight };
-  const lastDone = run.value.completedNodeIds[run.value.completedNodeIds.length - 1];
-  const out: typeof lines.value = [];
-  for (const node of run.value.nodes) {
-    const fromEl = nodeEls.get(node.id);
-    if (!fromEl) continue;
-    for (const nextId of node.nextIds) {
-      const toEl = nodeEls.get(nextId);
-      if (!toEl) continue;
-      // Lower floors sit below, so lines run from the top of a node to the bottom of the next.
-      const a = anchor(fromEl, 'top');
-      const b = anchor(toEl, 'bottom');
-      const midY = (a.y + b.y) / 2;
-      const state =
-        completedIds.value.has(node.id) && completedIds.value.has(nextId)
-          ? 'done'
-          : node.id === lastDone && availableIds.value.has(nextId)
-            ? 'open'
-            : 'idle';
-      out.push({
-        key: `${node.id}>${nextId}`,
-        d: `M ${a.x} ${a.y} C ${a.x} ${midY}, ${b.x} ${midY}, ${b.x} ${b.y}`,
-        state,
-      });
+// Auto-pick the first reachable stop whenever available stops change!
+watch(
+  availableNodes,
+  (list) => {
+    if (!selectedNodeId.value || !run.value.nodes.some((n) => n.id === selectedNodeId.value)) {
+      selectedNodeId.value = list[0]?.id ?? run.value.nodes[0]?.id ?? null;
+    } else if (list.length > 0 && !availableIds.value.has(selectedNodeId.value)) {
+      selectedNodeId.value = list[0].id;
     }
-  }
-  lines.value = out;
-}
+  },
+  { immediate: true }
+);
 
-function scrollToCurrentFloor(): void {
-  const firstAvailable = [...availableIds.value].map((id) => nodeEls.get(id)).find(Boolean);
-  firstAvailable?.scrollIntoView({ block: 'center', inline: 'nearest' });
-}
-
-let resizeObserver: ResizeObserver | null = null;
-onMounted(async () => {
-  await nextTick();
-  layoutLines();
-  scrollToCurrentFloor();
-  if (typeof ResizeObserver !== 'undefined' && graphRef.value) {
-    resizeObserver = new ResizeObserver(() => layoutLines());
-    resizeObserver.observe(graphRef.value);
-  }
+const selectedNode = computed<SeasonNode | null>(() => {
+  const id = selectedNodeId.value;
+  if (!id) return availableNodes.value[0] ?? null;
+  return run.value.nodes.find((n) => n.id === id) ?? availableNodes.value[0] ?? null;
 });
-onBeforeUnmount(() => resizeObserver?.disconnect());
+
+const isSelectedAvailable = computed(() =>
+  Boolean(selectedNode.value && availableIds.value.has(selectedNode.value.id))
+);
+
+const isSelectedCompleted = computed(() =>
+  Boolean(selectedNode.value && completedIds.value.has(selectedNode.value.id))
+);
+
+const NODE_META: Record<NodeType, { label: string; icon: string; tone: string }> = {
+  skirmish: { label: 'Battle', icon: '⚔️', tone: 'battle' },
+  escape: { label: 'Breakout', icon: '🏃', tone: 'sky' },
+  barn_rescue: { label: 'Barn Rescue', icon: '🔓', tone: 'gold' },
+  elite: { label: 'Elite Fight', icon: '💀', tone: 'elite' },
+  shop: { label: 'Market', icon: '🛒', tone: 'green' },
+  vault: { label: 'Seed Vault', icon: '🌱', tone: 'gold' },
+  event: { label: 'Mystery', icon: '❓', tone: 'plum' },
+  boss: { label: 'Act Boss', icon: '👑', tone: 'boss' },
+};
+
+function syncRenderer(): void {
+  if (!mapRenderer) return;
+  mapRenderer.sync({
+    actIndex: run.value.act,
+    theme: actTheme.value,
+    nodes: run.value.nodes,
+    completedIds: completedIds.value,
+    availableIds: availableIds.value,
+    currentNodeId: run.value.currentNodeId,
+    selectedNodeId: selectedNode.value?.id ?? null,
+    leadHeroKind: leadHeroKind.value,
+    bossKind: bossKind.value,
+  });
+}
+
+function selectStop(nodeId: string, enterIfReady = false): void {
+  selectedNodeId.value = nodeId;
+  mapRenderer?.focusNode(nodeId);
+  syncRenderer();
+  if (enterIfReady && availableIds.value.has(nodeId)) {
+    enterSeasonNode(nodeId);
+  }
+}
+
+function enterSelectedStop(): void {
+  if (!selectedNode.value || !isSelectedAvailable.value) return;
+  enterSeasonNode(selectedNode.value.id);
+}
+
+function openHeroBuilds(uid?: string): void {
+  buildModalHeroUid.value = uid ?? activeHeroes.value[0]?.uid ?? null;
+  showBuildModal.value = true;
+}
+
+function recenterMap(): void {
+  mapRenderer?.recenter(false);
+}
 
 watch(
-  () => [run.value.act, run.value.nodes.length, run.value.completedNodeIds.length],
-  async () => {
-    selectedId.value = null;
-    await nextTick();
-    layoutLines();
-    scrollToCurrentFloor();
+  [
+    () => run.value.act,
+    () => run.value.completedNodeIds.length,
+    () => run.value.currentNodeId,
+    selectedNodeId,
+    leadHeroKind,
+  ],
+  () => {
+    syncRenderer();
   }
 );
 
-function floorLabel(row: { floor: number; isBoss: boolean }): string {
-  return row.isBoss ? 'ACT BOSS' : `FLOOR ${row.floor + 1}`;
-}
-
-function nodeSprite(type: SeasonNode['type']): string {
-  switch (type) {
-    case 'skirmish':
-      return act.value.id === 'summer' ? '/sprites/beehive.png' : '/sprites/digger.png';
-    case 'escape':
-      return act.value.id === 'summer' ? '/sprites/sprinkler.png' : '/sprites/mower.png';
-    case 'vault':
-      return '/sprites/carrot.png';
-    case 'shop':
-      return '/sprites/corn.png';
-    case 'event':
-      return '';
-    case 'barn_rescue':
-      return '/sprites/cage.png';
-    case 'elite':
-      return act.value.id === 'summer' ? '/sprites/beehive.png' : '/sprites/sprayer.png';
-    case 'boss':
-      return act.value.id === 'autumn'
-        ? '/sprites/harvester.png'
-        : act.value.id === 'summer'
-          ? '/sprites/tractor.png'
-          : '/sprites/scarecrow.png';
+onMounted(() => {
+  if (!webglCanvasRef.value) return;
+  try {
+    mapRenderer = new OverworldMapRenderer(webglCanvasRef.value, overlayCanvasRef.value, {
+      onHoverNode: (id) => {
+        hoveredNodeId.value = id;
+      },
+      onSelectNode: (id, alreadySelected) => {
+        selectStop(id, alreadySelected);
+      },
+    });
+    syncRenderer();
+  } catch (err) {
+    console.warn('3D Overworld WebGL unavailable, using compact trail fallback:', err);
+    webglFailed.value = true;
   }
-}
+});
 
-function nodeTypeTag(type: SeasonNode['type']): string {
-  switch (type) {
-    case 'skirmish':
-      return 'Skirmish';
-    case 'escape':
-      return 'Breakout';
-    case 'vault':
-      return 'Safe Vault';
-    case 'shop':
-      return 'Compost Market';
-    case 'event':
-      return 'Mystery';
-    case 'barn_rescue':
-      return 'Barn Rescue';
-    case 'elite':
-      return 'Elite Fight';
-    case 'boss':
-      return 'Act Boss';
-  }
-}
-
-function showDetail(title: string, desc?: string): void {
-  if (!desc) return;
-  inspectedInfo.value = { title, desc };
-}
-
-const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested).length);
+onBeforeUnmount(() => {
+  mapRenderer?.destroy();
+  mapRenderer = null;
+});
 </script>
 
 <template>
-  <div class="map-page">
-    <!-- Top Kraft Ribbon Header -->
-    <header class="map-topbar kraft-ribbon pinned-card">
-      <span class="brass-pin tl"></span>
-      <span class="brass-pin tr"></span>
-      <div class="brand-left">
-        <div class="season-title">
-          <CraftIcon name="map" :size="20" />
-          <h2>{{ run.seasonName }}</h2>
+  <div class="overworld-shell">
+    <!-- Full-Viewport Interactive 3D Paper Mario Act Diorama -->
+    <template v-if="!webglFailed">
+      <canvas ref="webglCanvasRef" class="overworld-canvas"></canvas>
+      <canvas ref="overlayCanvasRef" class="overworld-overlay"></canvas>
+    </template>
+
+    <!-- Graceful Compact Fallback if WebGL unavailable -->
+    <div v-else class="fallback-stage">
+      <div class="corrugated-slab fallback-card">
+        <h3>{{ run.seasonName }}</h3>
+        <p>{{ actDef.trailHint }}</p>
+        <div class="fallback-list">
+          <button
+            v-for="node in availableNodes"
+            :key="node.id"
+            class="paper-btn gold"
+            @click="enterSeasonNode(node.id)"
+          >
+            {{ NODE_META[node.type].icon }} {{ node.name }} →
+          </button>
         </div>
-        <div class="top-pills">
-          <span class="paper-pill seed-pill">
-            <CraftIcon name="seed" :size="14" /> {{ run.seeds }}
-          </span>
-          <span class="paper-pill">
-            <CraftIcon name="trophy" :size="14" /> {{ run.battlesWon }}
-          </span>
-          <span v-if="harvestedCount > 0" class="paper-pill bagged-pill">
-            <CraftIcon name="bag" :size="14" /> {{ harvestedCount }} Bagged
-          </span>
+      </div>
+    </div>
+
+    <!-- Minimal Floating Top Bar -->
+    <header class="ow-top-bar">
+      <div class="kraft-ribbon ow-act-pill">
+        <span class="act-stamp">ACT {{ run.act + 1 }}/3</span>
+        <div class="act-copy">
+          <strong>{{ actDef.name }}</strong>
+          <small>Stop {{ currentFloorDisplay }}/{{ FLOORS_PER_ACT + 1 }} · Drag to explore · Click a lit stop</small>
         </div>
       </div>
 
-      <div class="brand-right">
-        <button class="paper-btn icon-btn" aria-label="Toggle Sound" @click="toggleAudioMute">
-          <CraftIcon :name="gameStore.muted ? 'sound_off' : 'sound_on'" :size="18" />
+      <div class="ow-top-right">
+        <span class="paper-pill ow-seed-pill">
+          <CraftIcon name="seed" :size="14" /> {{ run.seeds }}
+        </span>
+
+        <button
+          v-if="run.relicIds.length > 0"
+          class="paper-pill ow-relic-btn"
+          @click="showRelicsPopover = !showRelicsPopover"
+        >
+          🏅 {{ run.relicIds.length }} Relic{{ run.relicIds.length > 1 ? 's' : '' }}
         </button>
-        <button class="paper-btn" @click="returnToTitle">← Title</button>
+
+        <button
+          v-if="!webglFailed"
+          class="paper-btn icon-tool"
+          title="Recenter Camera"
+          aria-label="Recenter camera"
+          @click="recenterMap"
+        >
+          <CraftIcon name="center" :size="15" />
+        </button>
+
+        <button class="paper-btn icon-tool" title="Save & Return to Title" @click="returnToTitle">
+          <span>Title</span>
+        </button>
       </div>
     </header>
 
-    <div class="map-layout">
-      <!-- Illustrated Branching Parchment Garden Trail (outer shell prevents washi-tape clipping!) -->
-      <section class="paper-card route-shell" :class="{ 'hide-mobile': mobileTab !== 'trail' }">
-        <div class="washi-tape"></div>
-        <div class="route-board">
-          <div class="route-head">
-            <h3>{{ act.trailTitle }}</h3>
-            <small>{{ act.trailHint }}</small>
-          </div>
-
-          <!-- Inspect strip: what the hovered / tapped stop is, with an explicit Enter button -->
-          <div class="node-detail" :class="{ empty: !focusNode }" aria-live="polite">
-            <template v-if="focusNode">
-              <span v-if="focusNode.type === 'event'" class="mystery-glyph detail-sprite">?</span>
-              <img v-else class="detail-sprite" :src="nodeSprite(focusNode.type)" alt="" />
-              <div class="detail-text">
-                <span class="type-tag">
-                  {{ nodeTypeTag(focusNode.type) }}
-                  <span v-if="focusNode.mapId" class="threat-tag">· Threat {{ threatFor(run.act, focusNode.stage) }}</span>
-                </span>
-                <strong class="node-name">{{ focusNode.name }}</strong>
-                <small class="node-sub">{{ focusNode.subtitle }}</small>
-              </div>
-              <button
-                v-if="selectedId === focusNode.id && availableIds.has(focusNode.id)"
-                class="paper-btn primary diecut enter-btn"
-                @click="enterSelected"
-              >
-                <CraftIcon name="play" :size="14" /> Go
-              </button>
-            </template>
-            <small v-else class="node-sub">Tap a glowing stop to see what's there, then tap it again to go.</small>
-          </div>
-
-          <div class="trail-scroll scroll-soft">
-            <div
-              ref="graphRef"
-              class="trail-graph"
-              :style="{ '--lanes': MAX_LANES }"
-            >
-              <svg
-                class="trail-lines"
-                :width="graphSize.w"
-                :height="graphSize.h"
-                :viewBox="`0 0 ${graphSize.w} ${graphSize.h}`"
-                aria-hidden="true"
-              >
-                <path v-for="l in lines" :key="l.key" :d="l.d" :class="['trail-line', l.state]" />
-              </svg>
-
-              <div
-                v-for="row in floors"
-                :key="row.floor"
-                class="floor-row"
-                :class="{ 'boss-row': row.isBoss }"
-              >
-                <div class="stage-label">{{ floorLabel(row) }}</div>
-                <div class="floor-lanes">
-                  <button
-                    v-for="node in row.nodes"
-                    :key="node.id"
-                    :ref="(el) => setNodeEl(node.id, el)"
-                    class="seed-packet node-card compact"
-                    :class="{
-                      available: availableIds.has(node.id),
-                      completed: node.completed,
-                      selected: selectedId === node.id,
-                      boss: node.type === 'boss',
-                      vault: node.type === 'vault',
-                      shop: node.type === 'shop',
-                      rescue: node.type === 'barn_rescue',
-                      elite: node.type === 'elite',
-                    }"
-                    :style="node.type === 'boss' ? undefined : { gridColumn: node.lane + 1 }"
-                    :aria-label="`${nodeTypeTag(node.type)}: ${node.name}`"
-                    :aria-disabled="!availableIds.has(node.id)"
-                    @click="onNodeClick(node)"
-                    @mouseenter="hoveredId = node.id"
-                    @mouseleave="hoveredId = null"
-                    @focus="hoveredId = node.id"
-                    @blur="hoveredId = null"
-                  >
-                    <span v-if="node.type === 'event'" class="mystery-glyph node-sprite">?</span>
-                    <img v-else class="node-sprite" :src="nodeSprite(node.type)" alt="" />
-                    <span class="type-tag">{{ nodeTypeTag(node.type) }}</span>
-                    <span v-if="node.completed" class="done-mark"><CraftIcon name="check" :size="11" /></span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Squad, Relics, Satchel Panel -->
-      <aside class="sidebar" :class="{ 'hide-mobile': mobileTab !== 'squad' }">
-        <div class="paper-card squad-panel scroll-soft">
-          <div class="panel-head">
-            <h3>Revolt Squad ({{ run.activeSquadUids.length }}/4 Active)</h3>
-            <small v-if="run.roster.length > 4">Tap a hero to swap Active / Bench</small>
-          </div>
-
-          <div class="hero-list">
-            <div
-              v-for="hero in run.roster"
-              :key="hero.uid"
-              class="hero-row"
-              :class="{
-                active: run.activeSquadUids.includes(hero.uid),
-                harvested: hero.harvested,
-                clickable: !hero.harvested && run.roster.length > 4,
-              }"
-              @click="!hero.harvested && run.roster.length > 4 && toggleSquadMember(hero.uid)"
-            >
-              <div class="hero-avatar">
-                <img :src="`/sprites/${hero.species}.png`" :alt="hero.name" />
-              </div>
-              <div class="hero-meta">
-                <div class="hero-name-line">
-                  <strong>{{ hero.name }}</strong>
-                  <span class="tier-tag" :class="hero.tier">{{ hero.tier }}</span>
-                  <button
-                    v-if="hero.coopPassive"
-                    class="coop-tag"
-                    @click.stop="showDetail(`${hero.name} Co-op Trait`, hero.coopPassive)"
-                  >
-                    Barnyard Co-op
-                  </button>
-                  <span v-if="hero.harvested" class="bag-tag">Bagged!</span>
-                  <span v-else-if="run.roster.length > 4" class="bench-tag">
-                    {{ run.activeSquadUids.includes(hero.uid) ? 'Active' : 'Bench' }}
-                  </span>
-                </div>
-                <div class="hp-row">
-                  <div class="hp-track">
-                    <div
-                      class="hp-fill"
-                      :style="{ width: `${Math.round((hero.hp / hero.maxHp) * 100)}%` }"
-                    ></div>
-                  </div>
-                  <small>{{ hero.hp }}/{{ hero.maxHp }} HP · {{ hero.weapon.damage }} ATK</small>
-                </div>
-                <div v-if="hero.graftIds.length > 0" class="graft-row">
-                  <button
-                    v-for="gid in hero.graftIds"
-                    :key="gid"
-                    class="graft-chip"
-                    @click.stop="
-                      showDetail(
-                        `${GRAFT_REGISTRY[gid]?.badgeIcon} ${GRAFT_REGISTRY[gid]?.name}`,
-                        GRAFT_REGISTRY[gid]?.description
-                      )
-                    "
-                  >
-                    {{ GRAFT_REGISTRY[gid]?.badgeIcon }} {{ GRAFT_REGISTRY[gid]?.name }}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="paper-card inventory-panel">
-          <div v-if="inspectedInfo" class="tap-detail" @click="inspectedInfo = null">
-            <strong>{{ inspectedInfo.title }}</strong>
-            <small>{{ inspectedInfo.desc }}</small>
-          </div>
-
-          <div class="inv-block">
-            <h4>Soil Relics <small class="tap-hint">(tap to inspect)</small></h4>
-            <div v-if="run.relicIds.length === 0" class="empty-note">
-              None yet — clear Breakout, Seed Vault, Barn Rescue, or Elite stops!
-            </div>
-            <div v-else class="pill-wrap">
-              <button
-                v-for="rid in run.relicIds"
-                :key="rid"
-                class="paper-pill pill-btn"
-                @click="
-                  showDetail(
-                    `${RELIC_REGISTRY[rid]?.icon} ${RELIC_REGISTRY[rid]?.name}`,
-                    RELIC_REGISTRY[rid]?.description
-                  )
-                "
-              >
-                {{ RELIC_REGISTRY[rid]?.icon }} {{ RELIC_REGISTRY[rid]?.name }}
-              </button>
-            </div>
-          </div>
-
-          <div class="inv-block">
-            <h4>Garden Satchel</h4>
-            <div class="pill-wrap">
-              <button
-                v-for="(count, iid) in run.items"
-                :key="iid"
-                class="paper-pill pill-btn"
-                :class="{ zero: count <= 0 }"
-                @click="
-                  showDetail(
-                    `${ITEM_REGISTRY[iid]?.icon} ${ITEM_REGISTRY[iid]?.name}`,
-                    ITEM_REGISTRY[iid]?.description
-                  )
-                "
-              >
-                {{ ITEM_REGISTRY[iid]?.icon }} {{ ITEM_REGISTRY[iid]?.name }} ×{{ count }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </aside>
+    <!-- Optional Compact Relics Popover -->
+    <div v-if="showRelicsPopover && run.relicIds.length > 0" class="corrugated-slab relics-pop">
+      <div class="rp-head">
+        <strong>Active Soil Relics</strong>
+        <button class="mini-x" @click="showRelicsPopover = false">✕</button>
+      </div>
+      <div v-for="rid in run.relicIds" :key="rid" class="rp-row">
+        <span>{{ RELIC_REGISTRY[rid]?.icon }} <strong>{{ RELIC_REGISTRY[rid]?.name }}</strong></span>
+        <small>{{ RELIC_REGISTRY[rid]?.description }}</small>
+      </div>
     </div>
 
-    <!-- Bottom Sticky Corrugated Thumb Tab Switcher on Mobile -->
-    <nav class="mobile-bottom-nav corrugated-slab">
-      <button
-        class="paper-btn nav-tab"
-        :class="{ gold: mobileTab === 'trail' }"
-        @click="mobileTab = 'trail'"
-      >
-        <CraftIcon name="map" :size="18" />
-        <span>Garden Trail</span>
-      </button>
-      <button
-        class="paper-btn nav-tab"
-        :class="{ gold: mobileTab === 'squad' }"
-        @click="mobileTab = 'squad'"
-      >
-        <CraftIcon name="squad" :size="18" />
-        <span>Squad ({{ run.activeSquadUids.length }}/4) &amp; Bag</span>
-      </button>
-    </nav>
+    <!-- Floating Bottom Dock: Left Squad Strip + Center Selected Stop Card -->
+    <footer class="ow-bottom-dock">
+      <!-- Compact Bottom-Left Squad & Skill Tree Bar -->
+      <div class="ow-squad-dock">
+        <button
+          v-for="hero in activeHeroes"
+          :key="hero.uid"
+          class="ow-hero-chip"
+          :title="`${hero.name} (Lv.${hero.level}) — Open Skill Tree & Squad`"
+          @click="openHeroBuilds(hero.uid)"
+        >
+          <div class="ow-hero-img-wrap">
+            <img :src="`/sprites/${hero.species}.png`" :alt="hero.name" />
+            <span class="ow-lvl">L{{ hero.level }}</span>
+            <span v-if="hero.skillPoints > 0" class="ow-sp">+{{ hero.skillPoints }}</span>
+          </div>
+          <div class="ow-hp-mini">
+            <div
+              class="ow-hp-mini-fill"
+              :style="{ width: `${Math.max(4, Math.round((hero.hp / Math.max(1, hero.maxHp)) * 100))}%` }"
+            ></div>
+          </div>
+        </button>
+
+        <button
+          class="paper-btn ow-builds-btn"
+          :class="{ gold: totalUnspentSp > 0 }"
+          @click="openHeroBuilds()"
+        >
+          <span>★ Builds</span>
+          <span v-if="totalUnspentSp > 0" class="sp-count-pill">{{ totalUnspentSp }} SP</span>
+        </button>
+      </div>
+
+      <!-- Crisp Floating Selected Stop Card -->
+      <div v-if="selectedNode" class="corrugated-slab ow-stop-card">
+        <!-- Quick switcher pills when multiple next stops are available -->
+        <div v-if="availableNodes.length > 1" class="next-tabs">
+          <button
+            v-for="opt in availableNodes"
+            :key="opt.id"
+            class="next-tab"
+            :class="{ active: selectedNode.id === opt.id }"
+            @click="selectStop(opt.id, false)"
+          >
+            {{ NODE_META[opt.type].icon }} {{ NODE_META[opt.type].label }}
+          </button>
+        </div>
+
+        <div class="stop-main-row">
+          <div class="stop-copy">
+            <div class="stop-title-row">
+              <span class="stop-type-pill" :class="NODE_META[selectedNode.type].tone">
+                {{ NODE_META[selectedNode.type].icon }} {{ NODE_META[selectedNode.type].label }}
+              </span>
+              <strong>{{ selectedNode.name }}</strong>
+            </div>
+            <small>{{ selectedNode.subtitle }}</small>
+          </div>
+
+          <button
+            v-if="isSelectedAvailable"
+            class="paper-btn primary stop-go-btn"
+            @click="enterSelectedStop"
+          >
+            <span>Go →</span>
+          </button>
+          <span v-else-if="isSelectedCompleted" class="paper-pill stop-state done">
+            ✓ Cleared
+          </span>
+          <span v-else class="paper-pill stop-state locked">
+            Ahead
+          </span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Hero Level-Up & 3-Branch Skill Tree Drawer -->
+    <HeroBuildModal
+      v-if="showBuildModal"
+      :initial-hero-uid="buildModalHeroUid"
+      @close="showBuildModal = false"
+    />
   </div>
 </template>
 
 <style scoped>
-.map-page {
+.overworld-shell {
   width: 100%;
   height: 100dvh;
+  position: relative;
+  overflow: hidden;
+  background: #6a4424;
+}
+
+.overworld-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+.overworld-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.fallback-stage {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.fallback-card {
+  max-width: 460px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: calc(10px + var(--safe-top)) calc(12px + var(--safe-right))
-    calc(18px + var(--safe-bottom)) calc(12px + var(--safe-left));
 }
 
-.map-topbar {
-  padding: 7px 12px;
+.fallback-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ===== Minimal Floating Top Bar ===== */
+.ow-top-bar {
+  position: fixed;
+  top: calc(10px + var(--safe-top));
+  left: calc(12px + var(--safe-left));
+  right: calc(12px + var(--safe-right));
+  z-index: 15;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  flex-shrink: 0;
+  gap: 10px;
+  pointer-events: none;
 }
 
-.brand-left,
-.brand-right {
+.ow-act-pill,
+.ow-top-right {
+  pointer-events: auto;
+}
+
+.ow-act-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 10px;
+  padding: 7px 12px;
 }
 
-.season-title {
+.act-stamp {
+  background: #4e321a;
+  color: #ffe891;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 4px 8px;
+  border-radius: 8px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.act-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.act-copy strong {
+  font-size: 0.96rem;
+  color: var(--ink);
+}
+
+.act-copy small {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.ow-top-right {
   display: flex;
   align-items: center;
   gap: 7px;
 }
 
-.season-title h2 {
-  font-size: 1.2rem;
-}
-
-.top-pills {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.seed-pill {
-  background: #fde89b;
-}
-
-.bagged-pill {
-  background: #fde2d9;
-  color: #8f2418;
-}
-
-.icon-btn {
-  min-width: 40px;
-  padding: 7px;
-}
-
-.map-layout {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: 14px;
-}
-
-.route-shell {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: visible;
-  margin-top: 6px;
-}
-
-.route-board {
-  flex: 1;
-  min-height: 0;
-  padding: 20px 18px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.route-head small {
-  color: var(--ink-soft);
-  font-size: 0.84rem;
-}
-
-
-
-.stage-label {
-  text-align: center;
-  font-family: 'Fredoka', sans-serif;
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.9px;
-  color: var(--ink-soft);
-}
-
-
-
-
-.route-board {
-  overflow: hidden;
-}
-
-.node-detail {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 64px;
-  padding: 8px 12px;
-  border-radius: 12px;
-  border: 2px solid rgba(69, 42, 22, 0.28);
-  background: rgba(255, 251, 240, 0.86);
-  flex-shrink: 0;
-}
-
-.node-detail.empty {
-  border-style: dashed;
-  justify-content: center;
-  text-align: center;
-}
-
-.detail-sprite {
-  width: 44px;
-  height: 44px;
-  object-fit: contain;
-  filter: drop-shadow(0 3px 3px rgba(42, 20, 6, 0.28));
-  flex-shrink: 0;
-}
-
-.detail-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.mystery-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Fredoka', sans-serif;
+.ow-seed-pill {
+  background: #fff2b8;
   font-weight: 800;
-  font-size: 1.7rem;
-  line-height: 1;
-  color: #7a3fb0;
-  background: rgba(244, 232, 255, 0.92);
-  border: 2px solid var(--ink);
-  border-radius: 999px;
-  box-shadow: 0 2px 0 rgba(48, 28, 12, 0.25);
 }
 
-.threat-tag {
-  color: #a3341f;
+.ow-relic-btn {
+  cursor: pointer;
+  background: #f8edd6;
+  font-weight: 800;
 }
 
-.enter-btn {
-  flex-shrink: 0;
-  padding: 8px 14px;
+.icon-tool {
+  padding: 7px 11px;
+  min-height: 36px;
+  font-size: 0.8rem;
 }
 
-.trail-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  padding: 4px 2px 10px;
-}
-
-.trail-graph {
-  position: relative;
+.relics-pop {
+  position: fixed;
+  top: calc(60px + var(--safe-top));
+  right: calc(14px + var(--safe-right));
+  width: min(310px, calc(100vw - 28px));
+  padding: 12px;
+  z-index: 22;
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding: 6px 4px;
-}
-
-.trail-lines {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  overflow: visible;
-}
-
-.trail-line {
-  fill: none;
-  stroke: rgba(112, 76, 47, 0.38);
-  stroke-width: 3;
-  stroke-dasharray: 2 7;
-  stroke-linecap: round;
-}
-
-.trail-line.done {
-  stroke: rgba(74, 122, 40, 0.75);
-  stroke-dasharray: none;
-  stroke-width: 3.5;
-}
-
-.trail-line.open {
-  stroke: #c2731c;
-  stroke-dasharray: 6 6;
-  stroke-width: 3.5;
-}
-
-.floor-row {
-  display: grid;
-  grid-template-columns: 62px 1fr;
-  align-items: center;
   gap: 8px;
 }
 
-.floor-row .stage-label {
-  text-align: left;
-}
-
-.floor-lanes {
-  display: grid;
-  grid-template-columns: repeat(var(--lanes, 4), minmax(0, 1fr));
-  gap: 12px;
-}
-
-.boss-row .floor-lanes {
-  grid-template-columns: 1fr;
-  justify-items: center;
-}
-
-.node-card.compact {
-  position: relative;
-  z-index: 1;
+.rp-head {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  text-align: center;
-  gap: 3px;
-  padding: 9px 4px 7px;
-  min-width: 0;
 }
 
-.node-card.compact .type-tag {
-  font-size: 0.6rem;
-  line-height: 1.1;
+.mini-x {
+  background: none;
+  border: none;
+  font-weight: 900;
+  cursor: pointer;
+  color: var(--ink);
 }
 
-.boss-row .node-card.compact {
-  width: min(180px, 60%);
-  padding: 10px 8px 8px;
-}
-
-.boss-row .node-card.compact .node-sprite {
-  width: 60px;
-  height: 60px;
-}
-
-.node-card.compact[aria-disabled='true'] {
-  opacity: 0.56;
-  cursor: default;
-}
-
-.node-card.compact[aria-disabled='true'].completed {
-  opacity: 0.88;
-}
-
-.node-card.compact.selected {
-  box-shadow: 0 0 0 3px #c2731c, var(--shadow-cutout);
-  animation: none;
-  transform: translateY(-2px);
-}
-
-.done-mark {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  background: #e2f5cf;
-  border: 1.6px solid var(--ink);
-}
-
-.node-card {
-  text-align: left;
-  padding: 15px 11px 11px;
+.rp-row {
   display: flex;
   flex-direction: column;
+  font-size: 0.8rem;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(74, 44, 23, 0.28);
+}
+
+.rp-row small {
+  color: var(--ink-soft);
+  font-size: 0.73rem;
+}
+
+/* ===== Floating Bottom Dock ===== */
+.ow-bottom-dock {
+  position: fixed;
+  left: calc(12px + var(--safe-left));
+  right: calc(12px + var(--safe-right));
+  bottom: calc(12px + var(--safe-bottom));
+  z-index: 15;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.ow-squad-dock,
+.ow-stop-card {
+  pointer-events: auto;
+}
+
+.ow-squad-dock {
+  display: flex;
+  align-items: center;
   gap: 6px;
-  color: var(--ink);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-  touch-action: manipulation;
+  background: rgba(251, 243, 223, 0.94);
+  border: 2.5px solid var(--ink);
+  border-radius: 15px;
+  padding: 6px 8px;
+  box-shadow: 0 4px 0 var(--ink), 0 10px 22px rgba(24, 12, 4, 0.35);
 }
 
-.node-card:disabled {
-  opacity: 0.56;
-  cursor: default;
-}
-
-.node-card.available {
-  opacity: 1;
+.ow-hero-chip {
+  background: #f2e3c3;
+  border: 2px solid var(--ink);
+  border-radius: 11px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
   cursor: pointer;
-  background:
-    linear-gradient(180deg, rgba(255, 252, 232, 0.92) 0%, rgba(250, 228, 158, 0.92) 100%),
-    var(--tex-paper) center / 300px 300px repeat;
-  border-color: #964410;
-  box-shadow: 0 0 0 2.5px rgba(246, 204, 82, 0.62), var(--shadow-cutout);
-  animation: pulseCard 2.2s infinite ease-in-out;
+  transition: transform 0.12s ease;
 }
 
-.node-card.available:hover {
+.ow-hero-chip:hover {
   transform: translateY(-2px);
+  background: #fff4d4;
 }
 
-@keyframes pulseCard {
-  0%, 100% {
-    transform: translateY(0) scale(1);
-  }
-  50% {
-    transform: translateY(-2px) scale(1.015);
-  }
+.ow-hero-img-wrap {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.node-card.completed {
-  background:
-    linear-gradient(180deg, rgba(240, 250, 228, 0.92) 0%, rgba(222, 240, 204, 0.92) 100%),
-    var(--tex-paper) center / 300px 300px repeat;
-  opacity: 0.88;
+.ow-hero-img-wrap img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
 }
 
-.node-card.boss.available {
-  background:
-    linear-gradient(180deg, rgba(255, 240, 222, 0.92) 0%, rgba(245, 192, 148, 0.94) 100%),
-    var(--tex-paper) center / 300px 300px repeat;
+.ow-lvl {
+  position: absolute;
+  bottom: -3px;
+  left: -4px;
+  background: #4a2c17;
+  color: #ffe891;
+  font-size: 0.56rem;
+  font-weight: 900;
+  padding: 0 3px;
+  border-radius: 4px;
 }
 
-.node-card.shop.available {
-  background:
-    linear-gradient(180deg, rgba(255, 250, 214, 0.94) 0%, rgba(248, 218, 122, 0.94) 100%),
-    var(--tex-paper) center / 300px 300px repeat;
+.ow-sp {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: #e89b14;
+  color: #fffef5;
+  border: 1.5px solid var(--ink);
+  font-size: 0.6rem;
+  font-weight: 900;
+  padding: 0 4px;
+  border-radius: 999px;
 }
 
-.node-art-row {
+.ow-hp-mini {
+  width: 34px;
+  height: 4px;
+  border-radius: 999px;
+  background: #cfbe9c;
+  overflow: hidden;
+}
+
+.ow-hp-mini-fill {
+  height: 100%;
+  background: #58b842;
+}
+
+.ow-builds-btn {
+  padding: 8px 11px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sp-count-pill {
+  background: #4a2c17;
+  color: #ffe891;
+  font-size: 0.68rem;
+  font-weight: 900;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+/* Crisp Selected Stop Floating Card */
+.ow-stop-card {
+  width: min(460px, 100%);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.next-tabs {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.next-tab {
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  background: #f5e6c8;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.next-tab.active {
+  background: #ffe066;
+  box-shadow: 0 2px 0 var(--ink);
+}
+
+.stop-main-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-}
-
-.node-sprite {
-  height: 46px;
-  width: 46px;
-  object-fit: contain;
-  filter: drop-shadow(0 3px 3px rgba(42, 20, 6, 0.28));
-}
-
-.node-badges {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
-
-.type-tag {
-  font-size: 0.68rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-}
-
-.state-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-family: 'Fredoka', sans-serif;
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(255, 252, 240, 0.88);
-  border: 1.6px solid var(--ink);
-}
-
-.node-name {
-  font-family: 'Fredoka', sans-serif;
-  font-size: 0.94rem;
-  line-height: 1.15;
-}
-
-.node-sub {
-  font-size: 0.74rem;
-  color: var(--ink-soft);
-  line-height: 1.28;
-}
-
-.sidebar {
-  display: flex;
-  flex-direction: column;
   gap: 12px;
-  min-height: 0;
 }
 
-.squad-panel {
-  flex: 1;
-  padding: 14px 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.panel-head small {
-  color: var(--ink-soft);
-  font-size: 0.78rem;
-}
-
-.hero-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.hero-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 12px;
-  border: 2px solid rgba(69, 42, 22, 0.28);
-  background: rgba(255, 251, 240, 0.84);
-}
-
-.hero-row.active {
-  border-color: var(--leaf-dark);
-  background: #f3fce7;
-}
-
-.hero-row.harvested {
-  background: #f5e2dd;
-  border-style: dashed;
-  opacity: 0.78;
-}
-
-.hero-row.clickable {
-  cursor: pointer;
-}
-
-.hero-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  border: 2px solid var(--paper-edge);
-  box-shadow: 0 0 0 1.6px var(--ink), 0 2px 5px rgba(42, 20, 6, 0.20);
-  background:
-    linear-gradient(180deg, rgba(255, 253, 247, 0.90) 0%, rgba(246, 236, 216, 0.92) 100%),
-    var(--tex-paper) center / 220px 220px repeat;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.coop-tag {
-  font-size: 0.66rem;
-  font-weight: 800;
-  padding: 1px 6px;
-  border-radius: 6px;
-  border: 1.4px solid var(--ink);
-  background: #fde8b2;
-  color: #6b3c0b;
-  cursor: pointer;
-}
-
-.hero-avatar img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  filter: drop-shadow(0 2px 2px rgba(42, 20, 6, 0.25));
-}
-
-.hero-meta {
-  flex: 1;
-  min-width: 0;
-}
-
-.hero-name-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.tier-tag {
-  font-size: 0.66rem;
-  text-transform: uppercase;
-  font-weight: 800;
-  padding: 1px 6px;
-  border-radius: 6px;
-  border: 1.5px solid var(--ink);
-  background: #f2e5c9;
-}
-
-.tier-tag.ripe { background: #d8f3c6; }
-.tier-tag.heirloom { background: #fde078; }
-
-.bag-tag {
-  font-size: 0.72rem;
-  font-weight: 800;
-  color: #9e271b;
-}
-
-.bench-tag {
-  margin-left: auto;
-  font-size: 0.7rem;
-  font-weight: 800;
-  color: var(--ink-soft);
-}
-
-.hp-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.hp-track {
-  width: 74px;
-  height: 8px;
-  background: #dfd0b4;
-  border: 1.5px solid var(--ink);
-  border-radius: 999px;
-  overflow: hidden;
-}
-
-.hp-fill {
-  height: 100%;
-  background: #5cb848;
-}
-
-.graft-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.graft-chip {
-  font-size: 0.72rem;
-  padding: 2px 7px;
-  border-radius: 6px;
-  background: #fff6dc;
-  border: 1.4px solid var(--ink);
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.inventory-panel {
-  padding: 12px 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.tap-detail {
-  background: #fff4c8;
-  border: 2px solid var(--ink);
-  border-radius: 10px;
-  padding: 8px 10px;
+.stop-copy {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  cursor: pointer;
+  min-width: 0;
 }
 
-.tap-detail small {
-  font-size: 0.76rem;
-  color: var(--ink-soft);
-}
-
-.inv-block h4 {
-  font-size: 0.88rem;
-  margin-bottom: 5px;
-}
-
-.tap-hint {
-  font-weight: 600;
-  color: var(--ink-soft);
-  font-size: 0.74rem;
-}
-
-.empty-note {
-  font-size: 0.78rem;
-  color: var(--ink-soft);
-}
-
-.pill-wrap {
+.stop-title-row {
   display: flex;
+  align-items: center;
+  gap: 7px;
   flex-wrap: wrap;
-  gap: 6px;
 }
 
-.pill-btn {
-  cursor: pointer;
+.stop-title-row strong {
+  font-size: 0.96rem;
   color: var(--ink);
 }
 
-.paper-pill.zero {
-  opacity: 0.45;
+.stop-copy small {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  line-height: 1.25;
 }
 
-.mobile-bottom-nav {
-  display: none;
-  padding: 6px;
-  gap: 8px;
+.stop-type-pill {
+  font-size: 0.68rem;
+  font-weight: 900;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1.5px solid var(--ink);
+  background: #ffe2cc;
+  color: #6b240c;
+  white-space: nowrap;
+}
+
+.stop-type-pill.sky {
+  background: #d4f1ff;
+  color: #0e4f6e;
+}
+
+.stop-type-pill.gold {
+  background: #fff0b3;
+  color: #6e4500;
+}
+
+.stop-type-pill.green {
+  background: #dcf5d2;
+  color: #215e16;
+}
+
+.stop-type-pill.plum {
+  background: #f0dcff;
+  color: #541c78;
+}
+
+.stop-type-pill.elite,
+.stop-type-pill.boss {
+  background: #ffd4d8;
+  color: #7c1420;
+}
+
+.stop-go-btn {
+  padding: 10px 18px;
+  font-size: 0.94rem;
+  font-weight: 900;
   flex-shrink: 0;
 }
 
-.nav-tab {
-  flex: 1;
-  min-height: 44px;
+.stop-state {
+  font-size: 0.76rem;
+  font-weight: 800;
+  flex-shrink: 0;
 }
 
-@media (max-width: 860px) {
-  .map-layout {
-    grid-template-columns: 1fr;
-    overflow: hidden;
-  }
-
-  .hide-mobile {
-    display: none !important;
-  }
-
-  .mobile-bottom-nav {
-    display: flex;
-  }
-
-  .route-board {
-    padding: 18px 14px 16px;
-  }
-
-
-
-
-  .season-title h2 {
-    font-size: 0.96rem;
-  }
-
-  .map-topbar {
-    padding: 7px 10px;
-    gap: 6px;
-  }
-
-  .brand-left {
-    gap: 5px;
-    min-width: 0;
-  }
-
-  .brand-right {
-    gap: 5px;
-    flex-shrink: 0;
-    flex-wrap: nowrap;
-  }
-
-  .sidebar {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .squad-panel {
-    flex: 0 0 auto;
-  }
-
-  .node-sprite {
-    height: 34px;
-    width: 34px;
-  }
-
-  .floor-row {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-
-  .floor-lanes {
-    gap: 8px;
-  }
-
-  .trail-graph {
-    gap: 16px;
-  }
+.stop-state.done {
+  background: #daf5cf;
+  color: #215e16;
 }
 
+@media (max-width: 820px) {
+  .act-copy small {
+    display: none;
+  }
+
+  .ow-bottom-dock {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 7px;
+  }
+
+  .ow-squad-dock {
+    justify-content: space-between;
+  }
+
+  .ow-stop-card {
+    width: 100%;
+  }
+}
 </style>

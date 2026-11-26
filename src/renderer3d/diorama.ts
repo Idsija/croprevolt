@@ -24,6 +24,8 @@ export interface AnimatedDioramaPart {
   update: (time: number, dt: number) => void;
 }
 
+export const ELEVATION_STEP_3D = 0.52;
+
 const TERRAIN_Y_OFFSET: Record<TerrainType, number> = {
   grass: 0,
   soil: -0.016,
@@ -32,10 +34,18 @@ const TERRAIN_Y_OFFSET: Record<TerrainType, number> = {
   barn_floor: 0.016,
   gate: 0.022,
   sunbeam: 0.01,
+  water: -0.105,
+  bridge: 0.055,
+  lava: -0.095,
+  ramp: 0.22,
 };
 
 export function getTerrainSurfaceY(terrain: TerrainType): number {
   return TERRAIN_Y_OFFSET[terrain] ?? 0;
+}
+
+export function getTileSurfaceY(tile: { terrain: TerrainType; elevation?: number }): number {
+  return (tile.elevation ?? 0) * ELEVATION_STEP_3D + getTerrainSurfaceY(tile.terrain);
 }
 
 function addInkEdges(mesh: THREE.Mesh, color = 0x452a16, opacity = 0.65, thresholdAngle = 22): THREE.LineSegments {
@@ -83,7 +93,7 @@ export class PaperDioramaWorld {
   }
 
   private buildDeskSurface(): void {
-    const deskGeo = new THREE.PlaneGeometry(72, 72);
+    const deskGeo = new THREE.PlaneGeometry(84, 84);
     deskGeo.rotateX(-Math.PI / 2);
     const deskMat = new THREE.MeshStandardMaterial({
       map: this.textures.woodDeskMap,
@@ -92,7 +102,7 @@ export class PaperDioramaWorld {
       metalness: 0.04,
     });
     const desk = new THREE.Mesh(deskGeo, deskMat);
-    desk.position.y = -0.68;
+    desk.position.y = -0.78;
     desk.receiveShadow = true;
     desk.name = 'wood_desk';
     this.root.add(desk);
@@ -101,7 +111,7 @@ export class PaperDioramaWorld {
   public syncBattle(battle: BattleState): void {
     const theme: BoardTheme = battle.theme ?? 'spring';
     const terrainSig = battle.tiles
-      .map((row) => row.map((t) => t.terrain[0]).join(''))
+      .map((row) => row.map((t) => `${t.terrain[0]}${t.elevation ?? 0}`).join(''))
       .join('/');
     const sig = `${battle.mapId}|${theme}|${battle.width}x${battle.height}|${terrainSig}`;
 
@@ -121,10 +131,10 @@ export class PaperDioramaWorld {
 
     const boardW = battle.width * TILE_SIZE_3D;
     const boardH = battle.height * TILE_SIZE_3D;
-    const pad = 0.62;
+    const pad = 0.66;
     const slabH = 0.62;
 
-    // 1. Thick Corrugated Cardboard Diorama Slab
+    // 1. Thick Corrugated Cardboard Diorama Slab (sits cleanly beneath deepest water/lava channels!)
     const sideCorrMat = new THREE.MeshStandardMaterial({
       map: this.textures.corrugatedMap,
       bumpMap: this.textures.corrugatedBump,
@@ -154,13 +164,13 @@ export class PaperDioramaWorld {
       sideCorrMat,
       sideCorrMat,
     ]);
-    slab.position.set(0, -slabH / 2 - 0.08, 0);
+    slab.position.set(0, -slabH / 2 - 0.16, 0);
     slab.castShadow = true;
     slab.receiveShadow = true;
     addInkEdges(slab, 0x452a16, 0.55);
     this.boardGroup.add(slab);
 
-    // Cream cardstock border lip framing the playable grid cleanly (sits beneath deepest recessed mud tile!)
+    // Cream cardstock border lip framing the playable grid cleanly beneath recessed water/lava
     const lipGeo = new THREE.BoxGeometry(boardW + 0.18, 0.04, boardH + 0.18);
     const lipMat = new THREE.MeshStandardMaterial({
       color: '#efe2c2',
@@ -169,22 +179,57 @@ export class PaperDioramaWorld {
       bumpScale: 0.01,
     });
     const lip = new THREE.Mesh(lipGeo, lipMat);
-    lip.position.set(0, -0.082, 0);
+    lip.position.set(0, -0.155, 0);
     lip.receiveShadow = true;
     addInkEdges(lip, 0x5c391e, 0.45);
     this.boardGroup.add(lip);
 
-    // 2. Individual 3D Terrain Tiles with Tactile Relief
-    const tileGeo = new THREE.BoxGeometry(TILE_SIZE_3D - 0.025, 0.09, TILE_SIZE_3D - 0.025);
+    // 2. Individual 3D Terrain Tiles with Full Multi-Elevation Terraces, Ramps, Water, Bridges & Lava!
+    const tileFootprint = TILE_SIZE_3D - 0.022;
+    const baseTileH = 0.14;
     const sideTileMat = new THREE.MeshStandardMaterial({
       color: '#8f6237',
       roughness: 0.92,
     });
+    const cliffSideMat = new THREE.MeshStandardMaterial({
+      map: this.textures.cliffSideMap,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.025,
+      roughness: 0.9,
+    });
+
+    const waterSurfaces: Array<{ mesh: THREE.Mesh; baseY: number; phase: number }> = [];
+    const lavaMats: Array<{ mat: THREE.MeshStandardMaterial; phase: number }> = [];
 
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
         const tile = battle.tiles[y][x];
+        const elev = tile.elevation ?? 0;
         const checker = (x + y) % 2 === 0;
+        const wp = gridToWorld3D(x, y, battle.width, battle.height, 0);
+        const surfaceY = getTileSurfaceY(tile);
+
+        if (tile.terrain === 'ramp') {
+          this.buildRampTile(battle, x, y, elev, wp, checker, theme, cliffSideMat);
+          continue;
+        }
+
+        if (tile.terrain === 'water') {
+          this.buildWaterTile(x, y, elev, wp, surfaceY, checker, theme, waterSurfaces);
+          continue;
+        }
+
+        if (tile.terrain === 'lava') {
+          this.buildLavaTile(x, y, elev, wp, surfaceY, checker, theme, lavaMats);
+          continue;
+        }
+
+        if (tile.terrain === 'bridge') {
+          this.buildBridgeTile(battle, x, y, elev, wp, surfaceY, checker, theme, waterSurfaces, lavaMats);
+          continue;
+        }
+
+        // Standard or Elevated Terraced Block (grass, soil, mud, compost, barn_floor, gate, sunbeam)
         const tex = this.textures.getTerrainTexture(theme, tile.terrain, checker);
         const topMat = new THREE.MeshStandardMaterial({
           map: tex,
@@ -194,24 +239,30 @@ export class PaperDioramaWorld {
           bumpScale: tile.terrain === 'mud' ? 0.005 : 0.018,
         });
 
-        const mesh = new THREE.Mesh(tileGeo.clone(), [
-          sideTileMat,
-          sideTileMat,
+        const bottomY = -0.14;
+        const boxH = Math.max(baseTileH, surfaceY - bottomY);
+        const geo = new THREE.BoxGeometry(tileFootprint, boxH, tileFootprint);
+        const wallMat = elev > 0 ? cliffSideMat : sideTileMat;
+
+        const mesh = new THREE.Mesh(geo, [
+          wallMat,
+          wallMat,
           topMat,
           sideTileMat,
-          sideTileMat,
-          sideTileMat,
+          wallMat,
+          wallMat,
         ]);
-        const wp = gridToWorld3D(x, y, battle.width, battle.height, 0);
-        const surfaceY = getTerrainSurfaceY(tile.terrain);
-        mesh.position.set(wp.x, surfaceY - 0.045, wp.z);
+        mesh.position.set(wp.x, surfaceY - boxH / 2, wp.z);
         mesh.receiveShadow = true;
-        mesh.castShadow = false;
+        mesh.castShadow = elev > 0;
         mesh.userData.gridPos = { x, y };
+        if (elev > 0) {
+          addInkEdges(mesh, 0x3e220f, 0.52);
+        }
         this.boardGroup.add(mesh);
         this.tilePickMeshes.push(mesh);
 
-        // Decorative micro 3D paper tufts on empty grass/compost tiles
+        // Decorative micro 3D paper tufts on empty grass/compost/sunbeam tiles
         if (tile.terrain === 'compost') {
           this.addCompostSprout(wp.x, surfaceY, wp.z, x * 7 + y * 13);
         } else if (tile.terrain === 'sunbeam') {
@@ -222,6 +273,19 @@ export class PaperDioramaWorld {
       }
     }
 
+    if (waterSurfaces.length > 0 || lavaMats.length > 0) {
+      this.animatedParts.push({
+        update: (time) => {
+          for (const w of waterSurfaces) {
+            w.mesh.position.y = w.baseY + Math.sin(time * 2.4 + w.phase) * 0.014;
+          }
+          for (const l of lavaMats) {
+            l.mat.emissiveIntensity = 0.72 + Math.sin(time * 3.1 + l.phase) * 0.28;
+          }
+        },
+      });
+    }
+
     // 3. Garden Gate Archway for Reach-Gate Maps
     if (battle.gateTiles.length > 0) {
       this.buildGateArchway(battle);
@@ -230,6 +294,301 @@ export class PaperDioramaWorld {
     // 4. Multi-Plane Paper Mario Diorama Scenery (Fences, Layered Hills, Trees, Barn/Greenhouse, Clouds!)
     this.buildPerimeterFences(boardW, boardH, theme);
     this.buildStageBackdrop(boardW, boardH, theme);
+  }
+
+  private buildRampTile(
+    battle: BattleState,
+    x: number,
+    y: number,
+    elev: number,
+    wp: { x: number; y: number; z: number },
+    checker: boolean,
+    theme: BoardTheme,
+    cliffSideMat: THREE.MeshStandardMaterial
+  ): void {
+    const s = TILE_SIZE_3D - 0.022;
+    const lowY = elev * ELEVATION_STEP_3D;
+    const rise = ELEVATION_STEP_3D;
+    const baseBottom = -0.14;
+
+    // Determine which cardinal direction climbs uphill (+1 elevation neighbor)
+    const dirs = [
+      { dx: 0, dy: -1, rotY: 0 }, // Climbs North (-Z)
+      { dx: 1, dy: 0, rotY: -Math.PI / 2 }, // Climbs East (+X)
+      { dx: 0, dy: 1, rotY: Math.PI }, // Climbs South (+Z)
+      { dx: -1, dy: 0, rotY: Math.PI / 2 }, // Climbs West (-X)
+    ];
+    let rotY = 0;
+    for (const d of dirs) {
+      const nx = x + d.dx;
+      const ny = y + d.dy;
+      if (nx >= 0 && ny >= 0 && nx < battle.width && ny < battle.height) {
+        if ((battle.tiles[ny][nx].elevation ?? 0) > elev) {
+          rotY = d.rotY;
+          break;
+        }
+      }
+    }
+
+    const rampGroup = new THREE.Group();
+    rampGroup.position.set(wp.x, 0, wp.z);
+    rampGroup.rotation.y = rotY;
+
+    // Solid base pedestal beneath ramp (from -0.14 up to lowY)
+    const baseH = Math.max(0.12, lowY - baseBottom);
+    const baseMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(s, baseH, s),
+      cliffSideMat
+    );
+    baseMesh.position.y = lowY - baseH / 2;
+    baseMesh.receiveShadow = true;
+    baseMesh.castShadow = true;
+    baseMesh.userData.gridPos = { x, y };
+    rampGroup.add(baseMesh);
+
+    // 3D Extruded Sloped Wedge (low at +Z, high at -Z in local space!)
+    const shape = new THREE.Shape();
+    shape.moveTo(-s / 2, 0);
+    shape.lineTo(s / 2, 0);
+    shape.lineTo(s / 2, rise);
+    shape.closePath();
+
+    const wedgeGeo = new THREE.ExtrudeGeometry(shape, { depth: s, bevelEnabled: false });
+    // Center along X (extrude axis) and map shape's +X (high end) to local -Z (North)
+    wedgeGeo.translate(0, 0, -s / 2);
+    wedgeGeo.rotateY(Math.PI / 2);
+
+    const wedgeMesh = new THREE.Mesh(wedgeGeo, cliffSideMat);
+    wedgeMesh.position.y = lowY;
+    wedgeMesh.castShadow = true;
+    wedgeMesh.receiveShadow = true;
+    wedgeMesh.userData.gridPos = { x, y };
+    addInkEdges(wedgeMesh, 0x3e220f, 0.55);
+    rampGroup.add(wedgeMesh);
+
+    // Sloped timber tread top plate textured with upward-chevron ramp planks!
+    const slopeLen = Math.hypot(s, rise);
+    const slopeAngle = Math.atan2(rise, s);
+    const topGeo = new THREE.PlaneGeometry(s * 0.96, slopeLen);
+    topGeo.rotateX(-Math.PI / 2 + slopeAngle);
+    const rampTex = this.textures.getTerrainTexture(theme, 'ramp', checker);
+    const topMat = new THREE.MeshStandardMaterial({
+      map: rampTex,
+      roughness: 0.85,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.018,
+    });
+    const slopePlate = new THREE.Mesh(topGeo, topMat);
+    slopePlate.position.set(0, lowY + rise * 0.5 + 0.01, 0);
+    slopePlate.receiveShadow = true;
+    slopePlate.userData.gridPos = { x, y };
+    rampGroup.add(slopePlate);
+
+    this.boardGroup.add(rampGroup);
+    this.tilePickMeshes.push(wedgeMesh, slopePlate);
+  }
+
+  private buildWaterTile(
+    x: number,
+    y: number,
+    elev: number,
+    wp: { x: number; y: number; z: number },
+    surfaceY: number,
+    checker: boolean,
+    theme: BoardTheme,
+    waterSurfaces: Array<{ mesh: THREE.Mesh; baseY: number; phase: number }>
+  ): void {
+    const s = TILE_SIZE_3D - 0.015;
+    // Deep recessed aqua riverbed
+    const bedMat = new THREE.MeshStandardMaterial({
+      color: '#195c78',
+      roughness: 0.9,
+    });
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(s, 0.06, s), bedMat);
+    bed.position.set(wp.x, surfaceY - 0.05, wp.z);
+    bed.receiveShadow = true;
+    bed.userData.gridPos = { x, y };
+    this.boardGroup.add(bed);
+    this.tilePickMeshes.push(bed);
+
+    // Shimmering animated Paper Mario water sheet
+    const waterTex = this.textures.getTerrainTexture(theme, 'water', checker);
+    const waterMat = new THREE.MeshStandardMaterial({
+      map: waterTex,
+      roughness: 0.16,
+      metalness: 0.14,
+      transparent: true,
+      opacity: 0.88,
+    });
+    const surfGeo = new THREE.PlaneGeometry(s, s);
+    surfGeo.rotateX(-Math.PI / 2);
+    const surf = new THREE.Mesh(surfGeo, waterMat);
+    surf.position.set(wp.x, surfaceY + 0.01, wp.z);
+    surf.receiveShadow = true;
+    surf.userData.gridPos = { x, y };
+    this.boardGroup.add(surf);
+    waterSurfaces.push({ mesh: surf, baseY: surfaceY + 0.01, phase: x * 0.8 + y * 1.1 });
+
+    // Cute floating paper lily pad on select water tiles!
+    if ((x * 5 + y * 11) % 3 === 0 && elev === 0) {
+      const pad = new THREE.Group();
+      const padMat = new THREE.MeshStandardMaterial({ color: '#58a842', roughness: 0.8 });
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.025, 10, 1, false, 0.35, Math.PI * 1.85), padMat);
+      pad.add(disc);
+      if ((x + y) % 2 === 0) {
+        const flower = new THREE.Mesh(
+          new THREE.ConeGeometry(0.08, 0.09, 6),
+          new THREE.MeshStandardMaterial({ color: '#ffb3c6', roughness: 0.7 })
+        );
+        flower.position.set(0.03, 0.05, 0);
+        flower.rotation.x = Math.PI;
+        pad.add(flower);
+      }
+      pad.position.set(wp.x + ((x % 2) * 0.2 - 0.1), surfaceY + 0.025, wp.z + ((y % 2) * 0.18 - 0.09));
+      pad.rotation.y = (x + y) * 1.1;
+      this.sceneryGroup.add(pad);
+    }
+  }
+
+  private buildLavaTile(
+    x: number,
+    y: number,
+    _elev: number,
+    wp: { x: number; y: number; z: number },
+    surfaceY: number,
+    checker: boolean,
+    theme: BoardTheme,
+    lavaMats: Array<{ mat: THREE.MeshStandardMaterial; phase: number }>
+  ): void {
+    const s = TILE_SIZE_3D - 0.015;
+    const lavaTex = this.textures.getTerrainTexture(theme, 'lava', checker);
+    const lavaMat = new THREE.MeshStandardMaterial({
+      map: lavaTex,
+      emissive: new THREE.Color('#ff4a08'),
+      emissiveIntensity: 0.85,
+      roughness: 0.42,
+    });
+    const block = new THREE.Mesh(new THREE.BoxGeometry(s, 0.08, s), lavaMat);
+    block.position.set(wp.x, surfaceY - 0.04, wp.z);
+    block.userData.gridPos = { x, y };
+    this.boardGroup.add(block);
+    this.tilePickMeshes.push(block);
+    lavaMats.push({ mat: lavaMat, phase: x * 1.3 + y * 0.9 });
+
+    // Glowing floating lava ember motes!
+    const emberGroup = new THREE.Group();
+    emberGroup.position.set(wp.x, surfaceY + 0.08, wp.z);
+    const emberGeo = new THREE.OctahedronGeometry(0.045, 0);
+    const emberMat = new THREE.MeshBasicMaterial({ color: '#ffdf6b' });
+    const motes: Array<{ mesh: THREE.Mesh; phase: number; ox: number; oz: number }> = [];
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.Mesh(emberGeo, emberMat);
+      emberGroup.add(m);
+      motes.push({
+        mesh: m,
+        phase: i * 2.1 + x * 0.7 + y,
+        ox: (i - 1) * 0.24,
+        oz: ((i % 2) - 0.5) * 0.28,
+      });
+    }
+    this.sceneryGroup.add(emberGroup);
+    this.animatedParts.push({
+      update: (time) => {
+        for (const e of motes) {
+          const cyc = (time * 0.7 + e.phase) % 1.4;
+          e.mesh.position.set(
+            e.ox + Math.sin(time * 2.5 + e.phase) * 0.09,
+            cyc * 0.65,
+            e.oz + Math.cos(time * 2.2 + e.phase) * 0.09
+          );
+          e.mesh.scale.setScalar(Math.max(0.1, 1 - cyc / 1.4));
+        }
+      },
+    });
+  }
+
+  private buildBridgeTile(
+    battle: BattleState,
+    x: number,
+    y: number,
+    elev: number,
+    wp: { x: number; y: number; z: number },
+    surfaceY: number,
+    checker: boolean,
+    theme: BoardTheme,
+    waterSurfaces: Array<{ mesh: THREE.Mesh; baseY: number; phase: number }>,
+    lavaMats: Array<{ mat: THREE.MeshStandardMaterial; phase: number }>
+  ): void {
+    // 1. Check adjacent tiles so we place matching water OR lava underneath AND orient handrails properly!
+    const leftT = x > 0 ? battle.tiles[y][x - 1].terrain : null;
+    const rightT = x + 1 < battle.width ? battle.tiles[y][x + 1].terrain : null;
+    const upT = y > 0 ? battle.tiles[y - 1][x].terrain : null;
+    const downT = y + 1 < battle.height ? battle.tiles[y + 1][x].terrain : null;
+
+    const overLava = leftT === 'lava' || rightT === 'lava' || upT === 'lava' || downT === 'lava';
+    const riverRunsHoriz =
+      leftT === 'water' || rightT === 'water' || leftT === 'lava' || rightT === 'lava';
+
+    // Liquid basin directly beneath the suspended wooden bridge!
+    const liquidY = elev * ELEVATION_STEP_3D + (overLava ? -0.095 : -0.105);
+    if (overLava) {
+      this.buildLavaTile(x, y, elev, wp, liquidY, checker, theme, lavaMats);
+    } else {
+      this.buildWaterTile(x, y, elev, wp, liquidY, checker, theme, waterSurfaces);
+    }
+
+    // 2. Suspended 3D Wooden Plank Deck + Corner Railings!
+    const bridgeGroup = new THREE.Group();
+    bridgeGroup.position.set(wp.x, surfaceY, wp.z);
+    if (!riverRunsHoriz) {
+      bridgeGroup.rotation.y = Math.PI / 2;
+    }
+
+    const deckW = TILE_SIZE_3D - 0.02;
+    const deckH = 0.09;
+    const bridgeTex = this.textures.getTerrainTexture(theme, 'bridge', checker);
+    const deckTopMat = new THREE.MeshStandardMaterial({
+      map: bridgeTex,
+      roughness: 0.84,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.02,
+    });
+    const beamMat = new THREE.MeshStandardMaterial({
+      color: overLava ? '#5c4b42' : '#7b4922',
+      roughness: 0.88,
+    });
+
+    const deck = new THREE.Mesh(
+      new THREE.BoxGeometry(deckW * 0.94, deckH, deckW),
+      [beamMat, beamMat, deckTopMat, beamMat, beamMat, beamMat]
+    );
+    deck.position.y = -deckH / 2;
+    deck.castShadow = true;
+    deck.receiveShadow = true;
+    deck.userData.gridPos = { x, y };
+    addInkEdges(deck, 0x3a2010, 0.62);
+    bridgeGroup.add(deck);
+
+    // Side handrail posts + top rail bars along X = ±deckW*0.44 (never blocking N/S crossing!)
+    const postGeo = new THREE.BoxGeometry(0.075, 0.34, 0.075);
+    const railGeo = new THREE.BoxGeometry(0.055, 0.055, deckW);
+    for (const side of [-1, 1]) {
+      const rx = side * (deckW * 0.44);
+      for (const pz of [-deckW * 0.38, deckW * 0.38]) {
+        const post = new THREE.Mesh(postGeo, beamMat);
+        post.position.set(rx, 0.14, pz);
+        post.castShadow = true;
+        addInkEdges(post, 0x3a2010, 0.5);
+        bridgeGroup.add(post);
+      }
+      const topRail = new THREE.Mesh(railGeo, beamMat);
+      topRail.position.set(rx, 0.27, 0);
+      topRail.castShadow = true;
+      bridgeGroup.add(topRail);
+    }
+
+    this.boardGroup.add(bridgeGroup);
+    this.tilePickMeshes.push(deck);
   }
 
   private addCompostSprout(x: number, y: number, z: number, seed: number): void {
@@ -719,7 +1078,7 @@ export class PaperDioramaWorld {
           this.removeCoverVisual(key);
         }
 
-        const wp = gridToWorld3D(x, y, battle.width, battle.height, getTerrainSurfaceY(tile.terrain));
+        const wp = gridToWorld3D(x, y, battle.width, battle.height, getTileSurfaceY(tile));
         const visual = this.createCoverProp({ x, y }, tile.cover, wp);
         this.coverMap.set(key, visual);
         this.coverGroup.add(visual.group);

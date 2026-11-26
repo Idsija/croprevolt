@@ -12,6 +12,7 @@ import {
   executeDash,
   executeItem,
   executeMove,
+  executeOverwatch,
   executeTeamJump,
   getAbilityTargetTiles,
   getItemTargetTiles,
@@ -45,10 +46,12 @@ import {
   purchaseMetaUnlock,
   saveRun,
   toggleHeroActiveSquad,
+  unlockHeroPerk,
 } from '../engine/run';
 import type {
   BattleEvent,
   BattleState,
+  BattleUnit,
   GridPos,
   MetaProgress,
   RunState,
@@ -499,10 +502,63 @@ export function inspectEnemyUnit(enemyId: string | null): void {
   }
 }
 
+export function getAttackTargetsForSelected(): BattleUnit[] {
+  const b = gameStore.battle;
+  if (!b || !gameStore.selectedUnitId) return [];
+  const u = getUnitById(b, gameStore.selectedUnitId);
+  if (!u || !u.alive || u.actions.hasAttacked) return [];
+  const targets = b.units.filter((other) => {
+    if (!other.alive || other.team === u.team) return false;
+    return forecastAttack(b, u, other.pos).canAttack;
+  });
+  targets.sort((a, bUnit) => {
+    const fa = forecastAttack(b, u, a.pos);
+    const fb = forecastAttack(b, u, bUnit.pos);
+    if (fa.isLethal !== fb.isLethal) return fa.isLethal ? -1 : 1;
+    if (fa.hitChance !== fb.hitChance) return fb.hitChance - fa.hitChance;
+    return fb.finalDamage - fa.finalDamage;
+  });
+  return targets;
+}
+
+export function cycleAimTarget(delta: 1 | -1): void {
+  const targets = getAttackTargetsForSelected();
+  if (targets.length === 0) return;
+  sfx.click();
+  const curPos = gameStore.previewTile;
+  const curIdx = curPos ? targets.findIndex((t) => samePos(t.pos, curPos)) : -1;
+  const nextIdx =
+    curIdx < 0
+      ? 0
+      : (curIdx + delta + targets.length) % targets.length;
+  gameStore.mode = 'attack';
+  gameStore.previewTile = { ...targets[nextIdx].pos };
+  gameStore.inspectedEnemyId = null;
+}
+
+export function triggerOverwatch(): boolean {
+  const b = gameStore.battle;
+  if (!b || b.status !== 'ongoing' || b.phase !== 'player' || gameStore.enemyTurnRunning) return false;
+  if (!gameStore.selectedUnitId) return false;
+  const selected = getUnitById(b, gameStore.selectedUnitId);
+  if (!selected || !selected.alive || selected.actions.hasAttacked) return false;
+
+  clearAutoEndTimer();
+  const ok = executeOverwatch(b, selected.id);
+  if (ok) {
+    sfx.rescue();
+    lastUndoUnitId = selected.id;
+    flushBattleEvents();
+    autoAdvanceAfterAction(selected.id, selected.pos);
+  }
+  return ok;
+}
+
 /**
  * Explicitly switches interaction mode.
  * IMPORTANT: Never auto-fires self/AoE skills on mode switch!
  * Instead, entering 'ability' mode previews the skill area/info and lets the player confirm or cancel.
+ * Entering 'attack' mode automatically locks Aim Cam onto the highest-value target in range!
  */
 export function setInteractionMode(mode: InteractionMode, itemId?: string): void {
   if (gameStore.enemyTurnRunning) return;
@@ -516,6 +572,14 @@ export function setInteractionMode(mode: InteractionMode, itemId?: string): void
   gameStore.selectedItemId = mode === 'item' ? (itemId ?? null) : null;
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
+
+  // Mario + Rabbids Aim Cam: entering Weapon mode auto-locks onto best valid enemy target!
+  if (mode === 'attack' && gameStore.battle && gameStore.selectedUnitId) {
+    const targets = getAttackTargetsForSelected();
+    if (targets.length > 0) {
+      gameStore.previewTile = { ...targets[0].pos };
+    }
+  }
 
   // For self / aura skills, pre-focus the caster tile so the player immediately sees the
   // exact aura radius + skill description + explicit [Cast] confirmation button!
@@ -1074,6 +1138,16 @@ export function toggleSquadMember(heroUid: string): boolean {
   const ok = toggleHeroActiveSquad(gameStore.run, heroUid);
   if (ok) {
     sfx.click();
+    saveRun(gameStore.run);
+  }
+  return ok;
+}
+
+export function unlockPerk(heroUid: string, perkId: string): boolean {
+  if (!gameStore.run) return false;
+  const ok = unlockHeroPerk(gameStore.run, heroUid, perkId);
+  if (ok) {
+    sfx.rescue();
     saveRun(gameStore.run);
   }
   return ok;

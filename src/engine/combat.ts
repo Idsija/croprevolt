@@ -4,6 +4,7 @@ import {
   getMatchup,
   getMatchupMultiplier,
   hasGraft,
+  hasPerk,
   hasRelic,
   hasStatus,
 } from './hooks';
@@ -20,13 +21,15 @@ export function computePushDirection(from: GridPos, to: GridPos): GridPos {
 }
 
 /**
- * Predicts exact hit chance (100 / 50 / 0), cover protection, triangle multiplier, knockback, and damage.
+ * Predicts exact hit chance (100 / 50 / 0), cover protection, high-ground elevation bonus,
+ * triangle multiplier, knockback hazards (bump / water / lava / cliff drop), and damage.
  * Shared identically by the Hover Forecast UI and the Battle Executor!
  */
 export function forecastAttack(
   state: BattleState,
   attacker: BattleUnit,
-  targetPos: GridPos
+  targetPos: GridPos,
+  ignoreHasAttacked = false
 ): CombatForecast {
   const dist = manhattan(attacker.pos, targetPos);
   const w = attacker.weapon;
@@ -48,7 +51,7 @@ export function forecastAttack(
     reason,
   });
 
-  if (attacker.actions.hasAttacked) {
+  if (attacker.actions.hasAttacked && !ignoreHasAttacked) {
     return invalid('Already attacked this turn');
   }
   if (dist < w.minRange || dist > w.maxRange) {
@@ -65,7 +68,8 @@ export function forecastAttack(
   }
 
   // Raw base attack including temporary bonuses (Bouncy Mulch, Cluck Norris jump, Spicy Pep, Sunbeam tile!)
-  const sunbeamBonus = tileAt(state, attacker.pos)?.terrain === 'sunbeam' ? 2 : 0;
+  const attackerTile = tileAt(state, attacker.pos);
+  const sunbeamBonus = attackerTile?.terrain === 'sunbeam' ? 2 : 0;
   const boostBonus = (hasStatus(attacker, 'boosted') ? 2 : 0) + attacker.tempAttackBonus + sunbeamBonus;
   const rawBase = w.damage + boostBonus;
   const effCoverDmg = getEffectiveCoverDamage(attacker) + boostBonus;
@@ -91,7 +95,13 @@ export function forecastAttack(
   const matchup = getMatchup(attacker.family, defender.family);
   const mult = getMatchupMultiplier(matchup, attacker.team, state.relicIds);
 
-  // Discrete Mario + Rabbids cover resolution (including Living Wool Sheep half cover!)
+  // Elevation Advantage (Mario + Rabbids High Ground!)
+  const attackerElev = attackerTile?.elevation ?? 0;
+  const defenderElev = targetTile?.elevation ?? 0;
+  const elevationDiff = attackerElev - defenderElev;
+  const highGroundBonus = elevationDiff > 0 ? 2 : 0;
+
+  // Discrete Mario + Rabbids cover resolution (including Living Wool Sheep half cover + High Ground override!)
   let coverEval = evaluateCover(state, attacker.pos, defender.pos, defender.team);
   let hitChance = 100;
 
@@ -103,11 +113,18 @@ export function forecastAttack(
     if (coverEval.level === 'full') {
       hitChance = 0;
     } else {
-      // Melee smashes through half cover
       hitChance = 100;
     }
   } else {
-    // Direct / Pierce shots
+    // High Ground shoots right over Half Cover!
+    if (elevationDiff > 0 && coverEval.level === 'half') {
+      coverEval = { level: 'none' };
+    }
+    // Shooting steeply uphill (+2 levels) grants defender ledge half-cover if exposed
+    if (elevationDiff <= -2 && coverEval.level === 'none') {
+      coverEval = { level: 'half' };
+    }
+
     if (coverEval.level === 'full') {
       hitChance = 0;
     } else if (coverEval.level === 'half') {
@@ -117,8 +134,10 @@ export function forecastAttack(
     }
   }
 
-  // Final damage calculation
-  let dmg = Math.round(rawBase * mult);
+  // Final damage calculation (+ High Ground + Flank Breaker Critical!)
+  const isCriticalFlank = hitChance >= 100 && hasPerk(attacker, 'cover_buster');
+  let dmg = Math.round((rawBase + highGroundBonus) * mult);
+  if (isCriticalFlank) dmg += 2;
   if (hasStatus(defender, 'acid')) dmg += 2;
   if (hasStatus(defender, 'shield')) dmg -= 2;
   dmg = Math.max(1, dmg);
@@ -127,13 +146,32 @@ export function forecastAttack(
     w.appliesStatus?.kind ??
     (hitChance === 100 && hasGraft(attacker, 'spicy_shot') ? 'burn' : undefined);
 
+  const effectiveKnockback = (w.knockback ?? 0) + (hasPerk(attacker, 'cover_buster') ? 1 : 0);
   let knockbackDir: GridPos | undefined;
   let knockbackWillBump = false;
-  if (w.knockback && w.knockback > 0 && hitChance > 0) {
+  let knockbackHazard: CombatForecast['knockbackHazard'];
+  let extraHazardDmg = 0;
+
+  if (effectiveKnockback > 0 && hitChance > 0) {
     knockbackDir = computePushDirection(attacker.pos, defender.pos);
     const dest = { x: defender.pos.x + knockbackDir.x, y: defender.pos.y + knockbackDir.y };
-    knockbackWillBump =
-      !inBounds(state, dest) || Boolean(tileAt(state, dest)?.cover) || Boolean(unitAt(state, dest));
+    const destTile = tileAt(state, dest);
+    if (!inBounds(state, dest) || Boolean(destTile?.cover) || Boolean(unitAt(state, dest))) {
+      knockbackWillBump = true;
+      knockbackHazard = 'bump';
+      extraHazardDmg = 2;
+    } else if (destTile?.terrain === 'lava') {
+      knockbackWillBump = true;
+      knockbackHazard = 'lava';
+      extraHazardDmg = 4;
+    } else if (destTile?.terrain === 'water') {
+      knockbackWillBump = true;
+      knockbackHazard = 'water';
+      extraHazardDmg = 3;
+    } else if (destTile && (destTile.elevation ?? 0) < defenderElev) {
+      knockbackHazard = 'drop';
+      extraHazardDmg = 2;
+    }
   }
 
   return {
@@ -147,9 +185,13 @@ export function forecastAttack(
     baseDamage: rawBase,
     finalDamage: hitChance === 0 ? 0 : dmg,
     coverDamage: effCoverDmg,
-    isLethal: hitChance > 0 && dmg + (knockbackWillBump ? 2 : 0) >= defender.hp,
+    isLethal: hitChance > 0 && dmg + extraHazardDmg >= defender.hp,
     knockbackDir,
     knockbackWillBump,
+    knockbackHazard,
+    elevationDiff,
+    highGroundBonus,
+    isCriticalFlank,
     appliesStatus,
     canAttack: hitChance > 0,
     reason: hitChance === 0 ? 'Blocked by Full Cover! Flank, lob, or smash cover.' : undefined,

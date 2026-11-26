@@ -2295,6 +2295,18 @@ export class PaperCraftRenderer {
     } else if (tile.terrain === 'sunbeam') {
       fill = checker ? '#f7dc6f' : '#f2cf57';
       topEdgeCol = '#c4961a';
+    } else if (tile.terrain === 'water') {
+      fill = checker ? '#2d95bd' : '#2587ad';
+      topEdgeCol = '#195f7c';
+    } else if (tile.terrain === 'bridge') {
+      fill = checker ? '#c68a4d' : '#b87d43';
+      topEdgeCol = '#75441c';
+    } else if (tile.terrain === 'lava') {
+      fill = checker ? '#df4b18' : '#c93a10';
+      topEdgeCol = '#7c1a08';
+    } else if (tile.terrain === 'ramp') {
+      fill = checker ? '#cb9b5c' : '#be8d4f';
+      topEdgeCol = '#7d5224';
     }
 
     const d = m.boardDepth;

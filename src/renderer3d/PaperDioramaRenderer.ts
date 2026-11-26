@@ -28,7 +28,7 @@ import type {
 import { roundRect } from '../renderer/particles';
 import { sfx } from '../renderer/sfx';
 import { TacticalCameraController } from './cameraController';
-import { getTerrainSurfaceY, PaperDioramaWorld } from './diorama';
+import { getTileSurfaceY, PaperDioramaWorld } from './diorama';
 import { TacticalOverlaySystem3D } from './tacticalOverlays';
 import {
   CraftTextureLibrary,
@@ -137,6 +137,7 @@ const STATUS_BADGE_STYLE: Record<string, { label: string; bg: string; fg: string
   feared: { label: '!', bg: '#8a46b0', fg: '#faf0ff' },
   shield: { label: 'S', bg: '#3282c8', fg: '#ebf6ff' },
   boosted: { label: '+', bg: '#e39a1c', fg: '#331d00' },
+  overwatch: { label: 'W', bg: '#f2b824', fg: '#3b2100' },
 };
 
 export class PaperDioramaRenderer implements BattleRendererHandle {
@@ -254,8 +255,8 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 2;
-    sun.shadow.camera.far = 42;
-    const d = 12;
+    sun.shadow.camera.far = 52;
+    const d = 16;
     sun.shadow.camera.left = -d;
     sun.shadow.camera.right = d;
     sun.shadow.camera.top = d;
@@ -519,7 +520,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       pos.y,
       battle.width,
       battle.height,
-      (t ? getTerrainSurfaceY(t.terrain) : 0) + yLift
+      (t ? getTileSurfaceY(t) : 0) + yLift
     );
     return new THREE.Vector3(wp.x, wp.y, wp.z);
   }
@@ -815,6 +816,78 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
             '#ffdfd9',
             1.16
           );
+          break;
+        }
+
+        case 'overwatch_shot': {
+          const pFrom = this.worldPointForTile(b, ev.from, 0.72);
+          const pTo = this.worldPointForTile(b, ev.to, 0.56);
+          this.spawnProjectile3D(pFrom, pTo, 'direct', ev.attackerKind);
+          const te = this.unitMap.get(ev.targetId);
+          if (te) {
+            te.hitFlash = 1;
+            te.squash = 1;
+          }
+          this.cameraCtrl.triggerShake(0.24, 0.18);
+          this.focusOnGrid(ev.to);
+          this.spawnBurst(pTo, ['#ffe052', '#ffae2b', '#fff9d6'], 20, 'confetti');
+          this.spawnPopup(
+            pTo.clone().add(new THREE.Vector3(0, 1.05, 0)),
+            `HERO SIGHT! -${ev.damage}`,
+            '#5c3200',
+            '#ffe880',
+            1.18
+          );
+          sfx.shoot();
+          sfx.hit(true);
+          break;
+        }
+
+        case 'stomp': {
+          const p = this.worldPointForTile(b, ev.pos, 0.35);
+          this.cameraCtrl.triggerShake(0.26, 0.2);
+          this.spawnBurst(p, ['#ffd54f', '#ff8524', '#fbf3df'], 22, 'confetti');
+          if (ev.hitIds.length > 0) {
+            for (const hid of ev.hitIds) {
+              const he = this.unitMap.get(hid);
+              if (he) {
+                he.hitFlash = 1;
+                he.squash = 1;
+              }
+            }
+            this.spawnPopup(
+              p.clone().add(new THREE.Vector3(0, 1.25, 0)),
+              `JUMP STOMP! -${ev.damage}`,
+              '#7a2800',
+              '#ffe49e',
+              1.18
+            );
+            sfx.hit(true);
+          }
+          break;
+        }
+
+        case 'terrain_hazard': {
+          const p = this.worldPointForTile(b, ev.pos, 0.45);
+          const te = this.unitMap.get(ev.unitId);
+          if (te) {
+            te.hitFlash = 1;
+            te.squash = 1;
+          }
+          this.cameraCtrl.triggerShake(0.28, 0.22);
+          if (ev.kind === 'lava') {
+            this.spawnBurst(p, ['#ff521b', '#ffd54f', '#2b130c'], 26, 'confetti');
+            this.spawnPopup(p.clone().add(new THREE.Vector3(0, 1.1, 0)), `LAVA! -${ev.damage}`, '#7a0d00', '#ffd099', 1.22);
+            sfx.hit(true);
+          } else if (ev.kind === 'water') {
+            this.spawnBurst(p, ['#33b8e8', '#a8ebff', '#ffffff'], 26, 'droplet');
+            this.spawnPopup(p.clone().add(new THREE.Vector3(0, 1.1, 0)), `SPLASH! -${ev.damage}`, '#0d4a6b', '#d9f6ff', 1.18);
+            sfx.dash();
+          } else {
+            this.spawnBurst(p, ['#d4a46a', '#8c5a2b', '#fbf3df'], 16, 'plank');
+            this.spawnPopup(p.clone().add(new THREE.Vector3(0, 1.1, 0)), `CLIFF DROP! -${ev.damage}`, '#6b2c0c', '#ffe2bd', 1.14);
+            sfx.coverBreak();
+          }
           break;
         }
 
@@ -1290,11 +1363,17 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       entry.rig.frontMat.color.set(tintHex);
       entry.rig.backMat.color.set(isDone ? '#b5a892' : '#fffaf0');
 
-      // Pedestal glowing ring state
+      // Pedestal glowing ring state (Selected / Dash target / Inspected / Hero Sight Overwatch!)
+      const isOverwatching = u.statuses.some((s) => s.kind === 'overwatch');
       if (isSelected) {
         entry.rig.ringMat.color.set('#ffe052');
         entry.rig.ringMat.opacity = 0.78 + Math.sin(this.elapsedTotal * 6) * 0.16;
         const rs = 1 + Math.sin(this.elapsedTotal * 5) * 0.05;
+        entry.rig.ringMesh.scale.set(rs, rs, 1);
+      } else if (isOverwatching) {
+        entry.rig.ringMat.color.set('#ffb824');
+        entry.rig.ringMat.opacity = 0.72 + Math.sin(this.elapsedTotal * 7.5) * 0.22;
+        const rs = 1.06 + Math.sin(this.elapsedTotal * 6) * 0.08;
         entry.rig.ringMesh.scale.set(rs, rs, 1);
       } else if (isDashTarget) {
         entry.rig.ringMat.color.set('#ff7b24');

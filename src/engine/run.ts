@@ -3,11 +3,14 @@ import { ALL_ITEM_IDS, ITEM_REGISTRY } from '../data/items';
 import { PRODUCE_BLUEPRINTS, RECRUITABLE_BLUEPRINT_IDS, STARTER_BLUEPRINT_IDS } from '../data/produce';
 import { MAP_TEMPLATES } from '../data/maps';
 import { ALL_RELIC_IDS } from '../data/relics';
+import { canUnlockPerk, getXpToNextLevel, MAX_HERO_LEVEL, SKILL_PERKS } from '../data/skills';
 import { ACTS, actIndexForSeason, actRng, generateActNodes, randomSeed } from './mapgen';
 import type {
   BattleState,
+  HeroLevelUpSummary,
   MarketOffer,
   MetaProgress,
+  NodeType,
   PromotionTier,
   RewardBundle,
   RosterHero,
@@ -146,6 +149,10 @@ export function createHeroFromBlueprint(blueprintId: string, bonusMaxHp = 0): Ro
     weapon: { ...bp.weapon, appliesStatus: bp.weapon.appliesStatus ? { ...bp.weapon.appliesStatus } : undefined },
     ability: { ...bp.ability, appliesStatus: bp.ability.appliesStatus ? { ...bp.ability.appliesStatus } : undefined },
     graftIds: [],
+    level: 1,
+    xp: 0,
+    skillPoints: 1,
+    perkIds: [],
     tier: 'seedling',
     harvested: false,
     color: bp.color,
@@ -231,6 +238,14 @@ export function migrateSavedRun(run: RunState): RunState {
   }
   if (typeof run.seed !== 'number') {
     run.seed = randomSeed();
+  }
+  if (Array.isArray(run.roster)) {
+    for (const hero of run.roster) {
+      if (typeof hero.level !== 'number') hero.level = 1;
+      if (typeof hero.xp !== 'number') hero.xp = 0;
+      if (typeof hero.skillPoints !== 'number') hero.skillPoints = 1;
+      if (!Array.isArray(hero.perkIds)) hero.perkIds = [];
+    }
   }
   return run;
 }
@@ -423,6 +438,64 @@ export function buyMarketOffer(run: RunState, offerId: string, targetHeroUid?: s
   return true;
 }
 
+export function awardBattleXpAndLevels(
+  run: RunState,
+  battle: BattleState,
+  nodeType: NodeType = 'skirmish'
+): { xpEarned: number; levelUps: HeroLevelUpSummary[] } {
+  const defeated = battle.units.filter((u) => u.team === 'enemy' && !u.alive).length;
+  const baseXp =
+    nodeType === 'boss' ? 95 : nodeType === 'elite' ? 70 : nodeType === 'barn_rescue' ? 55 : 48;
+  const xpEarned = baseXp + defeated * 8;
+  const activeSet = new Set(run.activeSquadUids);
+  const levelUps: HeroLevelUpSummary[] = [];
+
+  for (const hero of run.roster) {
+    if (hero.harvested) continue;
+    const gain = activeSet.has(hero.uid) ? xpEarned : Math.round(xpEarned * 0.65);
+    const oldLevel = hero.level;
+    let bonusHp = 0;
+    let bonusAttack = 0;
+    let spGained = 0;
+
+    if (hero.level < MAX_HERO_LEVEL) {
+      hero.xp += gain;
+      while (hero.level < MAX_HERO_LEVEL && hero.xp >= getXpToNextLevel(hero.level)) {
+        hero.xp -= getXpToNextLevel(hero.level);
+        hero.level += 1;
+        hero.skillPoints += 1;
+        spGained += 1;
+        hero.maxHp += 2;
+        hero.hp = Math.min(hero.maxHp, hero.hp + 2);
+        bonusHp += 2;
+        if (hero.level === 3 || hero.level === 5) {
+          hero.weapon = { ...hero.weapon, damage: hero.weapon.damage + 1 };
+          bonusAttack += 1;
+        }
+      }
+      if (hero.level >= MAX_HERO_LEVEL) {
+        hero.xp = 0;
+      }
+    }
+
+    if (hero.level > oldLevel) {
+      levelUps.push({
+        heroUid: hero.uid,
+        heroName: hero.name,
+        blueprintId: hero.blueprintId,
+        species: hero.species,
+        oldLevel,
+        newLevel: hero.level,
+        skillPointsGained: spGained,
+        bonusHp,
+        bonusAttack,
+      });
+    }
+  }
+
+  return { xpEarned, levelUps };
+}
+
 export function applyBattleOutcomeToRun(
   run: RunState,
   battle: BattleState,
@@ -511,9 +584,14 @@ export function applyBattleOutcomeToRun(
     }
   }
 
+  // Award XP & Level-Ups to the squad!
+  const { xpEarned, levelUps } = awardBattleXpAndLevels(run, battle, node?.type ?? 'skirmish');
+
   if (node?.type === 'boss' && !isFinalAct(run)) {
     // Act cleared: bank the boss reward, then continue on the next act's map.
     const reward = generateRewardForNode(run, node);
+    reward.xpEarned = xpEarned;
+    reward.levelUps = levelUps;
     run.seeds += reward.seedsEarned;
     if (reward.itemGrant) {
       run.items[reward.itemGrant.itemId] =
@@ -538,6 +616,8 @@ export function applyBattleOutcomeToRun(
 
   if (node) {
     const reward = generateRewardForNode(run, node);
+    reward.xpEarned = xpEarned;
+    reward.levelUps = levelUps;
     run.seeds += reward.seedsEarned;
     if (reward.itemGrant) {
       run.items[reward.itemGrant.itemId] =
@@ -634,6 +714,32 @@ export function toggleHeroActiveSquad(run: RunState, heroUid: string): boolean {
   }
   if (run.activeSquadUids.length >= 4) return false;
   run.activeSquadUids.push(heroUid);
+  return true;
+}
+
+export function unlockHeroPerk(run: RunState, heroUid: string, perkId: string): boolean {
+  const hero = run.roster.find((h) => h.uid === heroUid && !h.harvested);
+  const perk = SKILL_PERKS[perkId];
+  if (!hero || !perk) return false;
+  if (!canUnlockPerk(hero.perkIds, hero.skillPoints, perkId)) return false;
+
+  hero.skillPoints -= perk.cost;
+  hero.perkIds.push(perkId);
+
+  if (perkId === 'swift_roots') {
+    hero.moveRange += 1;
+    hero.jumpRange += 1;
+  } else if (perkId === 'eagle_eye') {
+    hero.weapon = {
+      ...hero.weapon,
+      maxRange: hero.weapon.maxRange + 1,
+      damage: hero.weapon.damage + 1,
+    };
+  } else if (perkId === 'hardy_husk') {
+    hero.maxHp += 4;
+    hero.hp = Math.min(hero.maxHp, hero.hp + 4);
+  }
+
   return true;
 }
 

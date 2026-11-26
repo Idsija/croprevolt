@@ -59,6 +59,22 @@ export function getTerrainMoveCost(terrain: TerrainType): number {
   return terrain === 'mud' ? 2 : 1;
 }
 
+export function isHazardLiquid(terrain: TerrainType): boolean {
+  return terrain === 'water' || terrain === 'lava';
+}
+
+export function canStepElevation(fromTile: Tile, toTile: Tile): boolean {
+  return Math.abs((fromTile.elevation ?? 0) - (toTile.elevation ?? 0)) <= 1;
+}
+
+export function getStepMoveCost(fromTile: Tile, toTile: Tile, ignoresMud = false): number {
+  const base = ignoresMud ? 1 : getTerrainMoveCost(toTile.terrain);
+  const climbing = (toTile.elevation ?? 0) > (fromTile.elevation ?? 0);
+  const onRamp = fromTile.terrain === 'ramp' || toTile.terrain === 'ramp';
+  // Ramps make climbing smooth (cost 1); scrambling up a sheer +1 terrace costs +1 Move!
+  return base + (climbing && !onRamp ? 1 : 0);
+}
+
 export function createCover(
   kind: Exclude<CoverKind, 'none'>,
   captiveUnitId?: string,
@@ -98,7 +114,7 @@ export function isTileWalkable(
   asDestination = true
 ): boolean {
   const tile = tileAt(state, pos);
-  if (!tile || tile.cover) return false;
+  if (!tile || tile.cover || isHazardLiquid(tile.terrain)) return false;
   const occupant = unitAt(state, pos);
   if (!occupant) return true;
   if (asDestination) return false;

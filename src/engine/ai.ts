@@ -1,6 +1,6 @@
 import { executeAbility, executeAttack, executeDash, executeMove } from './battle';
 import { forecastAttack } from './combat';
-import { chebyshev, evaluateCover, manhattan, samePos } from './grid';
+import { chebyshev, evaluateCover, getNeighbors, isHazardLiquid, manhattan, samePos, tileAt } from './grid';
 import { computeDashOptions, computeMovableTiles } from './pathfinding';
 import type { BattleState, BattleUnit, GridPos } from './types';
 
@@ -28,6 +28,9 @@ function evaluateBestAttackFromPos(
     if (fc.isLethal) score += 35;
     if (fc.matchup === 'advantage') score += 12;
     if (fc.hitChance === 100) score += 10;
+    if (fc.highGroundBonus) score += 8;
+    if (fc.knockbackHazard === 'lava') score += 16;
+    else if (fc.knockbackHazard === 'water') score += 10;
 
     if (!best || score > best.score) {
       best = { targetPos: player.pos, score };
@@ -62,7 +65,18 @@ function evaluateTileCoverScore(state: BattleState, pos: GridPos): number {
     if (cov.level === 'full') score += 9;
     else if (cov.level === 'half') score += 5;
   }
-  return Math.min(18, score);
+  const tile = tileAt(state, pos);
+  if (tile) {
+    // Farmers love claiming high ground terraces!
+    score += tile.elevation * 4.5;
+    // Slight caution near lava/water edges to avoid easy knockback dunks
+    const adjHazard = getNeighbors(state, pos).some((n) => {
+      const nt = tileAt(state, n);
+      return Boolean(nt && isHazardLiquid(nt.terrain));
+    });
+    if (adjHazard) score -= 2.5;
+  }
+  return Math.min(24, score);
 }
 
 /**
@@ -88,7 +102,7 @@ export function runEnemyUnitTurn(
     if (dashes.length > 0) {
       dashes.sort((a, b) => b.damage - a.damage);
       executeDash(state, enemy.id, dashes[0].enemyId);
-      if (state.status !== 'ongoing') return true;
+      if (state.status !== 'ongoing' || !enemy.alive) return true;
     }
   }
 
@@ -130,7 +144,7 @@ export function runEnemyUnitTurn(
 
   if (!samePos(bestPos, enemy.pos)) {
     executeMove(state, enemy.id, bestPos);
-    if (state.status !== 'ongoing') return true;
+    if (state.status !== 'ongoing' || !enemy.alive) return true;
   }
 
   // 3. Boss Signature Ability (Captain Scarecrow's Harvest Hex!)

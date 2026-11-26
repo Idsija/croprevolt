@@ -15,6 +15,7 @@ import {
   purchaseMarketOffer,
 } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
+import HeroBuildModal from './HeroBuildModal.vue';
 
 const run = computed(() => gameStore.run!);
 const reward = computed(() => run.value.pendingReward!);
@@ -22,6 +23,13 @@ const selectedGraftId = ref<string | null>(null);
 const selectedMarketGraftOfferId = ref<string | null>(null);
 const targetHeroBoxRef = ref<HTMLElement | null>(null);
 const confirmSkipUnclaimed = ref(false);
+const showBuildModal = ref(false);
+const buildFocusHeroUid = ref<string | null>(null);
+
+function openLevelUpBuilds(uid?: string): void {
+  buildFocusHeroUid.value = uid ?? reward.value.levelUps?.[0]?.heroUid ?? null;
+  showBuildModal.value = true;
+}
 
 const activeMarketGraftOffer = computed(() =>
   reward.value.marketOffers?.find(
@@ -107,12 +115,15 @@ function nextTierLabel(graftCount: number): string {
                 ? "Farmer's Compost Market"
                 : run.status === 'vault'
                   ? 'Seed Vault & Compost Market'
-                  : 'Harvest Spoils & Grafting'
+                  : 'Harvest Spoils & Level-Ups'
             }}
           </h2>
           <div class="spoils-strip">
             <span class="paper-pill seed-pill">
               <CraftIcon name="seed" :size="14" /> {{ run.seeds }} Run Seeds (+{{ reward.seedsEarned }})
+            </span>
+            <span v-if="reward.xpEarned" class="paper-pill xp-pill">
+              ★ +{{ reward.xpEarned }} XP
             </span>
             <span v-if="reward.itemGrant" class="paper-pill">
               {{ ITEM_REGISTRY[reward.itemGrant.itemId]?.icon }}
@@ -127,6 +138,38 @@ function nextTierLabel(graftCount: number): string {
 
       <!-- Scrollable Seed Packet Body -->
       <div class="reward-body scroll-soft">
+        <!-- 0. Hero Level-Up Celebration Banner! -->
+        <section v-if="reward.levelUps && reward.levelUps.length > 0" class="reward-sec levelup-sec">
+          <div class="lu-head-row">
+            <h3>🎉 Squad Level Up!</h3>
+            <button class="paper-btn gold mini-sp-btn" @click="openLevelUpBuilds()">
+              ★ Spend Skill Points →
+            </button>
+          </div>
+          <div class="lu-grid">
+            <button
+              v-for="lu in reward.levelUps"
+              :key="lu.heroUid"
+              class="lu-card"
+              @click="openLevelUpBuilds(lu.heroUid)"
+            >
+              <img
+                class="lu-spr"
+                :src="`/sprites/${lu.species ?? PRODUCE_BLUEPRINTS[lu.blueprintId]?.species ?? 'potato'}.png`"
+                :alt="lu.heroName"
+              />
+              <div class="lu-copy">
+                <strong>{{ lu.heroName }}</strong>
+                <span class="lu-badge">Lv.{{ lu.oldLevel }} → Lv.{{ lu.newLevel }}</span>
+                <small>
+                  +{{ lu.bonusHp }} Max HP
+                  <template v-if="lu.bonusAttack > 0"> · +{{ lu.bonusAttack }} ATK</template>
+                  · +{{ lu.skillPointsGained }} SP
+                </small>
+              </div>
+            </button>
+          </div>
+        </section>
         <!-- 1. Recruit a Produce or Barnyard Ally -->
         <section v-if="reward.recruitChoices.length > 0 && !reward.claimedRecruit" class="reward-sec">
           <h3>Recruit a Produce or Barnyard Hero</h3>
@@ -333,6 +376,12 @@ function nextTierLabel(graftCount: number): string {
         </button>
       </footer>
     </div>
+
+    <HeroBuildModal
+      v-if="showBuildModal"
+      :initial-hero-uid="buildFocusHeroUid"
+      @close="showBuildModal = false"
+    />
   </div>
 </template>
 
@@ -572,5 +621,87 @@ function nextTierLabel(graftCount: number): string {
   .reward-body { padding: 12px 14px; }
   .reward-foot { padding: 10px 14px 12px; }
   .choice-grid { grid-template-columns: 1fr; }
+}
+
+.xp-pill {
+  background: #d8f1ff;
+  color: #104e75;
+  font-weight: 800;
+}
+
+.levelup-sec {
+  background: linear-gradient(135deg, #fff6cf 0%, #ffe699 100%);
+  border: 2px solid var(--ink);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.lu-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.lu-head-row h3 {
+  margin: 0;
+  color: #542d00;
+}
+
+.mini-sp-btn {
+  padding: 6px 11px;
+  font-size: 0.78rem;
+}
+
+.lu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+  gap: 8px;
+}
+
+.lu-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fffdf5;
+  border: 2px solid var(--ink);
+  border-radius: 11px;
+  padding: 6px 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lu-card:hover {
+  transform: translateY(-1px);
+  background: #fff4d4;
+}
+
+.lu-spr {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.lu-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lu-copy strong {
+  font-size: 0.84rem;
+  color: var(--ink);
+}
+
+.lu-badge {
+  font-size: 0.72rem;
+  font-weight: 900;
+  color: #9e4b00;
+}
+
+.lu-copy small {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
 }
 </style>
