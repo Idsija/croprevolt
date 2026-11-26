@@ -581,6 +581,8 @@ export interface RunState {
   perks?: RunPerks;
   /** UTC date (YYYY-MM-DD) of the daily run this is. */
   dailyKey?: string;
+  /** Achievements this run earned when it ended, for the summary screen. */
+  earnedAchievementIds?: string[];
   /** Which attempt at that day's run this is on this device; only attempt 1 is scored. */
   dailyAttempt?: number;
   /** Battle turns spent across all won and lost battles; feeds the score's speed bonus. */

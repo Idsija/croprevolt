@@ -9,6 +9,7 @@ import {
   toRow,
 } from '../engine/onlineScores';
 import { activeStreak, dailyShareText, isPracticeRun, loadDailyState } from '../engine/daily';
+import { ACHIEVEMENTS } from '../engine/history';
 import { computeRunScore, loadScores, rankOf, scoreEntryForRun } from '../engine/score';
 import { gameStore, playAgain, returnToTitle } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
@@ -22,6 +23,9 @@ const rank = computed(() => rankOf(loadScores(), scoreEntryForRun(run.value)));
 const fmt = (n: number) => n.toLocaleString('en-US');
 
 /** Upload to the shared board when one is configured; unsent scores stay queued for later. */
+const earnedAchievements = computed(() =>
+  ACHIEVEMENTS.filter((a) => run.value.earnedAchievementIds?.includes(a.id))
+);
 const isPractice = computed(() => isPracticeRun(run.value));
 /** Day streak including this run (the run was recorded when it ended). */
 const streak = isDaily.value ? activeStreak(loadDailyState().streak, run.value.dailyKey ?? '') : 0;
@@ -119,6 +123,12 @@ onMounted(async () => {
           </div>
         </dl>
       </div>
+
+      <ul v-if="earnedAchievements.length > 0" class="earned-list" aria-label="Achievements earned">
+        <li v-for="a in earnedAchievements" :key="a.id" class="paper-pill earned-pill">
+          {{ a.icon }} <strong>{{ a.name }}</strong> · +{{ a.seeds }} seeds
+        </li>
+      </ul>
 
       <div class="final-squad">
         <h3>Final Produce Roster</h3>
@@ -291,6 +301,20 @@ onMounted(async () => {
 .share-btn {
   min-height: 42px;
   padding-inline: 18px;
+}
+
+.earned-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.earned-pill {
+  background: #fde89b;
 }
 
 .upload-note {

@@ -11,7 +11,8 @@ import {
   STARTER_UNLOCKED_WEAPONS,
 } from '../data/weapons';
 import { battleRng, getHeatSeedMultiplier, heatRunRules, MAX_HARVEST_HEAT } from './difficulty';
-import { recordDailyFinish } from './daily';
+import { loadDailyState, recordDailyFinish } from './daily';
+import { recordRunHistory } from './history';
 import { dailyKeyFor, dailySeedFor, recordRunScore } from './score';
 import {
   ACTS,
@@ -812,6 +813,15 @@ export function awardBattleXpAndLevels(
   return { xpEarned, levelUps };
 }
 
+/** A run just ended: put it on the boards, the streak, the history, and pay out achievements. */
+function finishRunRecords(run: RunState, meta: MetaProgress): void {
+  recordRunScore(run);
+  recordDailyFinish(run);
+  const earned = recordRunHistory(run, loadDailyState().streak.best);
+  run.earnedAchievementIds = earned.map((a) => a.id);
+  meta.heirloomSeeds += earned.reduce((sum, a) => sum + a.seeds, 0);
+}
+
 export function applyBattleOutcomeToRun(
   run: RunState,
   battle: BattleState,
@@ -882,10 +892,9 @@ export function applyBattleOutcomeToRun(
     const consolationSeeds = Math.round(Math.max(10, run.seeds + defeatedEnemies * 2) * heatMult);
     meta.heirloomSeeds += consolationSeeds;
     meta.runsPlayed += 1;
+    finishRunRecords(run, meta);
     saveMetaProgress(meta);
     clearSavedRun();
-    recordRunScore(run);
-    recordDailyFinish(run);
     return;
   }
 
@@ -934,10 +943,9 @@ export function applyBattleOutcomeToRun(
     meta.runsWon += 1;
     const nextHeat = Math.min(MAX_HARVEST_HEAT, (run.harvestHeat ?? 0) + 1);
     meta.maxHeatUnlocked = Math.max(meta.maxHeatUnlocked ?? 1, nextHeat);
+    finishRunRecords(run, meta);
     saveMetaProgress(meta);
     clearSavedRun();
-    recordRunScore(run);
-    recordDailyFinish(run);
     return;
   }
 
