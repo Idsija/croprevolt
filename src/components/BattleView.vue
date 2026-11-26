@@ -40,6 +40,7 @@ import {
   confirmPrepPhase,
   cycleAimTarget,
   deselectAll,
+  dismissFarmerRecap,
   endPlayerTurn,
   executePreviewOption,
   finalizeBattleAndProceed,
@@ -585,8 +586,18 @@ const heroDoneMap = computed(() => {
   return map;
 });
 
+/** Heroes that have not attacked, cast a skill or gone on Watch this turn. Leftover steps do not count. */
 const readyHeroesCount = computed(
-  () => playerUnits.value.filter((u) => u.alive && !heroDoneMap.value[u.id]).length
+  () =>
+    playerUnits.value.filter(
+      (u) =>
+        u.alive &&
+        !u.isEscortCart &&
+        !heroDoneMap.value[u.id] &&
+        !u.actions.hasAttacked &&
+        !u.actions.hasUsedSkill &&
+        !u.statuses.some((st) => st.kind === 'overwatch')
+    ).length
 );
 
 const totalItemsLeft = computed(() =>
@@ -712,6 +723,13 @@ watch(
   () => clearEndConfirm()
 );
 
+watch(
+  () => [gameStore.mode, gameStore.selectedItemId],
+  () => {
+    if (gameStore.mode !== 'move') dismissFarmerRecap();
+  }
+);
+
 /** What to tap while a skill or item is armed, in words that match what is glowing. */
 const skillTargetPrompt = computed(() => {
   const u = selectedUnit.value;
@@ -725,7 +743,7 @@ const skillTargetPrompt = computed(() => {
     if (u.ability.targetType === 'ally') return `${verb} a glowing ally`;
     return `${verb} a glowing purple tile`;
   }
-  return `${verb} a glowing green tile`;
+  return `${verb} a glowing white tile`;
 });
 
 // Notes and hints are short-lived: they close on their own and never sit over the board.
@@ -761,7 +779,7 @@ const objectiveLine = computed(() => {
     return `🛒 Seed Cart ${escortCart.value.hp}/${escortCart.value.maxHp} HP · ${foes} foes`;
   }
   if (b.objective === 'rout') return `🏃 Rout · bonk ${routLeft.value} more · ${foes} foes`;
-  return `${b.objectiveLabel} · ${foes} foes left`;
+  return `${b.objectiveLabel} · ${foes} ${foes === 1 ? 'foe' : 'foes'} left`;
 });
 
 /** Squad Bonds for the heroes on the board: live while deploying, fixed once Turn 1 starts. */
@@ -1325,7 +1343,7 @@ onBeforeUnmount(() => {
           :class="{ over: !battle.prepPhase && battle.turn > battle.parTurns }"
           :title="`Win within ${battle.parTurns} turns for a Great Harvest, with no hero bagged for a Perfect Harvest`"
         >
-          ⏱ Goal: {{ battle.parTurns }} turns
+          ⏱ <span class="desktop-only">Goal: </span>{{ battle.parTurns }} turns
         </span>
         <button
           v-if="!battle.prepPhase && activeSquadBonds.length > 0"
@@ -1483,7 +1501,8 @@ onBeforeUnmount(() => {
         battle.status === 'ongoing' &&
         gameStore.mode === 'move' &&
         !gameStore.previewTile &&
-        !inspectedEnemy
+        !inspectedEnemy &&
+        !gameStore.farmerRecap
       "
       class="coach-note paper-card pinned-card"
     >
@@ -1501,6 +1520,25 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+
+    <!-- What the Farmer Turn just did, in one place. Closes on a tap or when the player starts aiming. -->
+    <transition name="hint-pop">
+      <button
+        v-if="gameStore.farmerRecap && battle.phase === 'player' && battle.status === 'ongoing' && !isCombatPreview"
+        class="farmer-recap"
+        @click="dismissFarmerRecap()"
+      >
+        <strong>Farmer Turn</strong>
+        <span v-if="gameStore.farmerRecap.lines.length === 0">No hero was hurt.</span>
+        <span v-for="line in gameStore.farmerRecap.lines" :key="line.name" :class="{ ko: line.ko }">
+          {{ line.ko ? '✖' : '♥' }} {{ line.name }} {{ line.text }}
+        </span>
+        <span v-if="gameStore.farmerRecap.arrivals > 0" class="arrive">
+          ＋ {{ gameStore.farmerRecap.arrivals }} new {{ gameStore.farmerRecap.arrivals === 1 ? 'farmer' : 'farmers' }} arrived
+        </span>
+        <small>{{ gameStore.isTouchMode ? 'Tap' : 'Click' }} to close</small>
+      </button>
+    </transition>
 
     <!-- Why a tap did nothing -->
     <transition name="hint-pop">
@@ -1746,7 +1784,7 @@ onBeforeUnmount(() => {
           <div class="auto-copy">
             <CraftIcon name="end_turn" :size="15" />
             <span>
-              End the turn? {{ readyHeroesCount }} hero{{ readyHeroesCount === 1 ? '' : 'es' }} can still act.
+              End the turn? {{ readyHeroesCount }} hero{{ readyHeroesCount === 1 ? ' has' : 'es have' }} not attacked yet.
             </span>
           </div>
           <div class="auto-btns">
@@ -2395,7 +2433,7 @@ onBeforeUnmount(() => {
                       {{ endConfirmPending ? 'End?' : readyHeroesCount === 0 ? 'End!' : 'End' }}
                     </span>
                     <small v-if="readyHeroesCount > 0 && !endConfirmPending" class="act-sub desktop-only">
-                      {{ readyHeroesCount }} left
+                      {{ readyHeroesCount }} to go
                     </small>
                   </div>
                 </button>
@@ -2436,7 +2474,7 @@ onBeforeUnmount(() => {
           </span>
           <span class="paper-pill">
             Turns: {{ victoryGrade ? victoryGrade.turns : battle.turn
-            }}<template v-if="battle.parTurns"> / goal {{ battle.parTurns }}</template>
+            }}<template v-if="battle.parTurns && battle.status === 'victory'"> / goal {{ battle.parTurns }}</template>
           </span>
           <span class="paper-pill">
             Survivors: {{ battle.units.filter((u) => u.team === 'player' && u.alive && !u.isEscortCart).length }}
@@ -4547,6 +4585,11 @@ onBeforeUnmount(() => {
     opacity: 0.8;
   }
 }
+@media (max-width: 767px) {
+  .hurry-hint {
+    bottom: calc(252px + var(--safe-bottom, 0px));
+  }
+}
 .cam-mode-pill.bonds {
   background: #fff3c4;
   color: #42240d;
@@ -4777,11 +4820,8 @@ onBeforeUnmount(() => {
   }
   .coach-copy small {
     font-size: 0.66rem;
-    line-height: 1.2;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    line-height: 1.25;
+    white-space: normal;
   }
 }
 
@@ -4811,6 +4851,46 @@ onBeforeUnmount(() => {
   text-align: center;
   box-shadow: 0 3px 0 rgba(60, 40, 20, 0.35);
   pointer-events: none;
+}
+.farmer-recap {
+  position: fixed;
+  left: 50%;
+  top: calc(118px + var(--safe-top, 0px));
+  transform: translateX(-50%);
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 8px 14px;
+  border-radius: 14px;
+  border: 2px solid var(--ink);
+  background: #fff6d8;
+  color: var(--ink);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-align: left;
+  box-shadow: 0 3px 0 rgba(60, 40, 20, 0.35);
+  cursor: pointer;
+}
+.farmer-recap strong {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8f1d10;
+}
+.farmer-recap .ko {
+  color: #8f1d10;
+}
+.farmer-recap .arrive {
+  color: #6b4700;
+}
+.farmer-recap small {
+  font-size: 0.66rem;
+  font-weight: 500;
+  opacity: 0.7;
 }
 .hint-pop-enter-active,
 .hint-pop-leave-active {

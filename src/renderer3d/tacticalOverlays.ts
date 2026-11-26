@@ -403,9 +403,9 @@ export class TacticalOverlaySystem3D {
           b,
           { x, y },
           0xe64536,
-          isTarget ? 0.3 : 0.1,
-          isTarget ? 0xff968a : 0xd65447,
-          isTarget ? 0.82 : 0.28,
+          isTarget ? 0.5 : 0.24,
+          isTarget ? 0xffffff : 0xff6a5c,
+          isTarget ? 1 : 0.8,
           0.026
         );
       }
@@ -444,9 +444,9 @@ export class TacticalOverlaySystem3D {
         this.addTilePlate(
           b,
           { x, y },
-          0x2fd04a,
-          isFocused ? 0.62 : 0.4,
-          0xd6ffd9,
+          0xfff7d6,
+          isFocused ? 0.7 : 0.48,
+          0xffffff,
           isFocused ? 1 : 0.9,
           0.028
         );

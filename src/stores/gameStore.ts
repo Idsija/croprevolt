@@ -164,6 +164,8 @@ export interface GameStoreState {
   enemyHurry: boolean;
   /** Short message for a tap that could not do anything ("Out of range"); id changes per message. */
   boardHint: { text: string; id: number } | null;
+  /** What the last Farmer Turn did to each hero, shown as a short recap when the player's turn starts. */
+  farmerRecap: { turn: number; lines: { name: string; text: string; ko: boolean }[]; arrivals: number } | null;
   enemySpeedFast: boolean;
   muted: boolean;
   musicMuted: boolean;
@@ -189,7 +191,7 @@ export const gameStore = reactive<GameStoreState>({
   selectedItemId: null,
   hoveredTile: null,
   previewTile: null,
-  isTouchMode: false,
+  isTouchMode: typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches),
   rendererKind: loadInitialRendererKind(),
   viewMode: loadInitialViewMode(),
   autoEndTurnEnabled: loadAutoEndPref(),
@@ -198,6 +200,7 @@ export const gameStore = reactive<GameStoreState>({
   enemyTurnProgress: null,
   enemyHurry: false,
   boardHint: null,
+  farmerRecap: null,
   enemySpeedFast: loadEnemySpeedFast(),
   muted: sfx.isMuted(),
   musicMuted: music.isMuted(),
@@ -810,7 +813,12 @@ export function setInteractionMode(mode: InteractionMode, itemId?: string): void
     if (targets.length > 0) {
       gameStore.previewTile = { ...targets[0].pos };
     } else {
-      showBoardHint('No farmer in range. Red tiles show your reach: move closer first.');
+      const sel = getUnitById(gameStore.battle, gameStore.selectedUnitId);
+      showBoardHint(
+        sel?.actions.hasMoved
+          ? 'No farmer in range from here. Undo the move, or use Watch to guard instead.'
+          : 'No farmer in range. Red tiles show your reach: move closer first.'
+      );
     }
   }
 
@@ -1182,7 +1190,9 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
   }
 
   // 3. A friendly hero IS selected — check actionable options on this tile
-  const opts = getActionOptionsForTile(pos);
+  let opts = getActionOptionsForTile(pos);
+  // While aiming the weapon, a click on a farmer only ever means "shoot": never a surprise Dash.
+  if (gameStore.mode === 'attack') opts = opts.filter((o) => o.kind === 'attack');
 
   // 3A. Clicking an enemy unit
   if (clickedUnit && clickedUnit.team === 'enemy') {
@@ -1339,6 +1349,11 @@ export async function endPlayerTurn(): Promise<void> {
   lastUndoUnitId = null;
   sfx.click();
   gameStore.enemyTurnRunning = true;
+  gameStore.farmerRecap = null;
+  const recapBefore = b.units
+    .filter((u) => u.team === 'player' && u.alive)
+    .map((u) => ({ id: u.id, name: u.name, hp: u.hp }));
+  const recapEnemyIds = new Set(b.units.filter((u) => u.team === 'enemy').map((u) => u.id));
   gameStore.hoveredTile = null;
   gameStore.previewTile = null;
   gameStore.previewOverwatch = false;
@@ -1397,7 +1412,7 @@ export async function endPlayerTurn(): Promise<void> {
 
       if (moveEvents.length > 0) {
         dispatchBattleEvents(moveEvents);
-        await enemyPhaseSleep(combatEvents.length > 0 ? 340 : 520);
+        await enemyPhaseSleep(combatEvents.length > 0 ? 440 : 520);
         if (session !== battleSessionId || !gameStore.battle) {
           gameStore.enemyTurnRunning = false;
           gameStore.enemyTurnProgress = null;
@@ -1407,7 +1422,8 @@ export async function endPlayerTurn(): Promise<void> {
       }
       if (combatEvents.length > 0) {
         dispatchBattleEvents(combatEvents);
-        await enemyPhaseSleep(560);
+        // Long enough for one farmer's popups to clear before the next farmer acts.
+        await enemyPhaseSleep(980);
       }
     }
   }
@@ -1428,11 +1444,29 @@ export async function endPlayerTurn(): Promise<void> {
     gameStore.selectedUnitId = firstAlive?.id ?? null;
     gameStore.mode = 'move';
     if (firstAlive) requestCameraFocus(firstAlive.pos);
+
+    const now = gameStore.battle;
+    const lines = recapBefore
+      .map((before) => {
+        const u = now.units.find((x) => x.id === before.id);
+        const hp = u && u.alive ? u.hp : 0;
+        const lost = before.hp - hp;
+        if (!u || !u.alive) return { name: before.name, text: `lost ${before.hp} HP and was bagged`, ko: true };
+        if (lost > 0) return { name: before.name, text: `lost ${lost} HP, ${hp} left`, ko: false };
+        return null;
+      })
+      .filter((l): l is { name: string; text: string; ko: boolean } => l !== null);
+    const arrivals = now.units.filter((u) => u.team === 'enemy' && u.alive && !recapEnemyIds.has(u.id)).length;
+    gameStore.farmerRecap = { turn: now.turn, lines, arrivals };
   }
 
   gameStore.enemyTurnRunning = false;
   gameStore.enemyTurnProgress = null;
   gameStore.enemyHurry = false;
+}
+
+export function dismissFarmerRecap(): void {
+  gameStore.farmerRecap = null;
 }
 
 export function finalizeBattleAndProceed(): void {
