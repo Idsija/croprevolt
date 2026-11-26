@@ -165,6 +165,7 @@ export class PaperCraftRenderer {
   private woodDeskImg: HTMLImageElement | null = null;
   private wcBoardPattern: CanvasPattern | null = null;
   private paperPattern: CanvasPattern | null = null;
+  private dangerHatchPattern: CanvasPattern | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -186,6 +187,7 @@ export class PaperCraftRenderer {
 
     preloadPaperCraftSprites();
     this.buildPaperGrainPattern();
+    this.buildDangerHatchPattern();
     this.preloadWatercolorUiTextures();
 
     this.handlePointerDown = this.handlePointerDown.bind(this);
@@ -195,6 +197,7 @@ export class PaperCraftRenderer {
     this.handlePointerLeave = this.handlePointerLeave.bind(this);
     this.handleWheel = this.handleWheel.bind(this);
     this.handleWindowBlur = this.handleWindowBlur.bind(this);
+    this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
     this.loop = this.loop.bind(this);
 
     canvas.addEventListener('pointerdown', this.handlePointerDown);
@@ -204,6 +207,7 @@ export class PaperCraftRenderer {
     canvas.addEventListener('pointerleave', this.handlePointerLeave);
     canvas.addEventListener('wheel', this.handleWheel, { passive: false });
     window.addEventListener('blur', this.handleWindowBlur);
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(canvas);
@@ -223,6 +227,42 @@ export class PaperCraftRenderer {
     this.canvas.removeEventListener('pointerleave', this.handlePointerLeave);
     this.canvas.removeEventListener('wheel', this.handleWheel);
     window.removeEventListener('blur', this.handleWindowBlur);
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+  }
+
+  public cancelActiveAnims(): void {
+    this.unitAnims.clear();
+    this.projectiles = [];
+  }
+
+  private handleVisibilityChange(): void {
+    if (typeof document !== 'undefined' && document.hidden) {
+      this.handleWindowBlur();
+    }
+  }
+
+  private buildDangerHatchPattern(): void {
+    const c = document.createElement('canvas');
+    c.width = 16;
+    c.height = 16;
+    const g = c.getContext('2d')!;
+    g.strokeStyle = 'rgba(182, 26, 20, 0.52)';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(-4, 16);
+    g.lineTo(16, -4);
+    g.moveTo(4, 20);
+    g.lineTo(20, 4);
+    g.stroke();
+    g.strokeStyle = 'rgba(255, 248, 232, 0.34)';
+    g.lineWidth = 1.2;
+    g.beginPath();
+    g.moveTo(-2, 16);
+    g.lineTo(16, -2);
+    g.moveTo(6, 20);
+    g.lineTo(20, 6);
+    g.stroke();
+    this.dangerHatchPattern = this.ctx.createPattern(c, 'repeat');
   }
 
   private handleWindowBlur(): void {
@@ -600,6 +640,13 @@ export class PaperCraftRenderer {
       this.didPinch = false;
       this.lastPinchDist = 0;
       this.lastPinchMid = null;
+    } else if (this.activePointers.size === 1) {
+      const remaining = Array.from(this.activePointers.values())[0];
+      this.downPoint = { x: remaining.x, y: remaining.y };
+      this.didPinch = false;
+      this.isDragging = false;
+      this.lastPinchDist = 0;
+      this.lastPinchMid = null;
     }
   }
 
@@ -714,18 +761,32 @@ export class PaperCraftRenderer {
               'rect'
             );
             const label = strong
-              ? `STRONG! -${ev.damage}`
+              ? `▲ STRONG! -${ev.damage}`
               : ev.matchup === 'disadvantage'
-                ? `WEAK -${ev.damage}`
+                ? `▼ WEAK -${ev.damage}`
                 : `-${ev.damage}`;
             this.particles.spawnPopup(
               pt.x,
               pt.y - 56 * m.scale,
               label,
-              strong ? '#8a1c0b' : '#452a16',
+              strong ? '#8a1c0b' : '#4a2c17',
               strong ? '#ffe082' : '#fbf3df',
               strong ? 1.15 : 1
             );
+            if (ev.status) {
+              const statusLabels: Record<string, { text: string; fg: string; bg: string }> = {
+                burn: { text: 'BURN!', fg: '#9c2c0e', bg: '#ffe0b2' },
+                rooted: { text: 'ROOTED!', fg: '#1b5e20', bg: '#dcf5cc' },
+                acid: { text: 'ACID +2!', fg: '#5a5000', bg: '#f4f7b2' },
+                feared: { text: 'FEARED!', fg: '#5e1d7a', bg: '#f0d9ff' },
+                shield: { text: 'SHIELD!', fg: '#124a78', bg: '#d4ecff' },
+                boosted: { text: 'BOOST!', fg: '#7a4a00', bg: '#fff0b3' },
+              };
+              const stInfo = statusLabels[ev.status];
+              if (stInfo) {
+                this.particles.spawnPopup(pt.x, pt.y - 80 * m.scale, stInfo.text, stInfo.fg, stInfo.bg, 0.92);
+              }
+            }
             sfx.hit(strong);
           }
           break;
@@ -743,14 +804,23 @@ export class PaperCraftRenderer {
             15,
             'circle'
           );
+          const detail = isHeal
+            ? `${name} +${ev.heal} HP`
+            : ev.damage
+              ? `${name} -${ev.damage}`
+              : `${name}!`;
           this.particles.spawnPopup(
             pt.x,
             pt.y - 58 * m.scale,
-            isHeal ? `+${ev.heal} HP` : `${name}!`,
+            detail,
             isHeal ? '#1b5e20' : '#4a148c',
             isHeal ? '#dff7df' : '#f3e5f5',
             1.05
           );
+          if (ev.status) {
+            const stTag = ev.status.toUpperCase() + '!';
+            this.particles.spawnPopup(pt.x, pt.y - 82 * m.scale, stTag, '#4a2c17', '#fff4cc', 0.9);
+          }
           if (isHeal) sfx.heal();
           else sfx.hit(false);
           break;
@@ -785,7 +855,22 @@ export class PaperCraftRenderer {
         case 'status_tick': {
           const pt = gridToScreen(ev.pos.x, ev.pos.y, m);
           this.hitFlashes.set(ev.unitId, 0.8);
-          this.particles.spawnPopup(pt.x, pt.y - 48 * m.scale, `-${ev.damage}`, '#b71c1c', '#ffd7cc');
+          const tickPrefix =
+            ev.status === 'burn'
+              ? 'BURN'
+              : ev.status === 'rooted'
+                ? 'THORNS'
+                : ev.status === 'acid'
+                  ? 'PIERCE'
+                  : 'SPLASH';
+          this.particles.spawnBurst(pt.x, pt.y - 22 * m.scale, ['#ff7043', '#ffd54f', '#fbf3df'], 8, 'rect');
+          this.particles.spawnPopup(
+            pt.x,
+            pt.y - 48 * m.scale,
+            `${tickPrefix} -${ev.damage}`,
+            '#9c1c12',
+            '#ffe2d6'
+          );
           break;
         }
 
@@ -1059,40 +1144,45 @@ export class PaperCraftRenderer {
     this.drawBoardCardstockRim(ctx, battle.width, battle.height, m);
 
     // 5. Clean Unified Tactical Range Areas (subtle washes + crisp outer contours — ZERO messy internal lines!)
-    // 5A. Enemy Threat Zone (when inspecting an enemy)
+    // 5A. Enemy Threat Zone (high-contrast diagonal warning hatch + cream-backed dashed rim for colorblind clarity!)
     if (enemyThreat) {
       this.drawUnifiedZone(ctx, enemyThreat.attackKeys, battle, m, {
-        fill: 'rgba(216, 48, 40, 0.17)',
-        outerBackingColor: 'rgba(255, 244, 238, 0.55)',
-        borderColor: 'rgba(196, 36, 28, 0.82)',
-        borderWidth: 2.3 * m.scale,
+        fill: 'rgba(196, 36, 30, 0.16)',
+        pattern: this.dangerHatchPattern,
+        patternAlpha: 0.48,
+        outerBackingColor: 'rgba(255, 248, 232, 0.78)',
+        borderColor: 'rgba(176, 26, 20, 0.94)',
+        borderWidth: 2.5 * m.scale,
         dash: [7 * m.scale, 4 * m.scale],
       });
       if (enemyThreat.moveKeys.size > 0) {
         this.drawUnifiedZone(ctx, enemyThreat.moveKeys, battle, m, {
           fill: 'rgba(244, 158, 42, 0.16)',
-          borderColor: 'rgba(226, 130, 22, 0.65)',
-          borderWidth: 1.7 * m.scale,
+          outerBackingColor: 'rgba(255, 248, 224, 0.55)',
+          borderColor: 'rgba(196, 102, 14, 0.82)',
+          borderWidth: 1.8 * m.scale,
         });
       }
     }
 
-    // 5B. Subtle Red Attack Area (unified translucent red wash + single clean outer perimeter!)
+    // 5B. Crisp Attack Area (unified wash + cream-backed crimson perimeter so it stays legible over grass!)
     if (weaponRangeKeys.size > 0 && !inspectedEnemy) {
       const explicitAim = mode === 'attack';
       this.drawUnifiedZone(ctx, weaponRangeKeys, battle, m, {
         fill: explicitAim
-          ? 'rgba(220, 58, 46, 0.19)'
+          ? 'rgba(206, 44, 36, 0.22)'
           : isProjectingFromMove
-            ? 'rgba(224, 72, 54, 0.14)'
-            : 'rgba(218, 58, 46, 0.10)',
-        outerBackingColor: explicitAim ? 'rgba(255, 245, 238, 0.45)' : undefined,
+            ? 'rgba(208, 54, 42, 0.16)'
+            : 'rgba(204, 48, 38, 0.12)',
+        outerBackingColor: explicitAim
+          ? 'rgba(255, 248, 232, 0.82)'
+          : 'rgba(255, 248, 232, 0.58)',
         borderColor: explicitAim
-          ? 'rgba(208, 46, 36, 0.82)'
+          ? 'rgba(184, 30, 22, 0.94)'
           : isProjectingFromMove
-            ? 'rgba(214, 64, 48, 0.62)'
-            : 'rgba(206, 54, 44, 0.46)',
-        borderWidth: (explicitAim ? 2.4 : 1.7) * m.scale,
+            ? 'rgba(192, 42, 32, 0.82)'
+            : 'rgba(186, 40, 30, 0.68)',
+        borderWidth: (explicitAim ? 2.6 : 2.0) * m.scale,
       });
     }
 
@@ -1106,7 +1196,7 @@ export class PaperCraftRenderer {
       });
     }
 
-    // 5D. Ally Team-Jump Area (clean warm honey-gold wash + outer perimeter)
+    // 5D. Ally Team-Jump Area (clean warm honey-gold wash + dashed perimeter)
     if (jumpKeys.size > 0) {
       this.drawUnifiedZone(ctx, jumpKeys, battle, m, {
         fill: 'rgba(246, 204, 68, 0.34)',
@@ -1117,26 +1207,28 @@ export class PaperCraftRenderer {
       });
     }
 
-    // 5E. Ability Area (plum reach / self-aura area)
+    // 5E. Ability Area (plum reach / self-aura with dotted perimeter so it stays distinct from Move!)
     if (abilityZoneKeys.size > 0) {
       const isSelfAura =
         selectedUnit?.ability?.targetType === 'self' ||
         selectedUnit?.ability?.targetType === 'aoe_self';
       this.drawUnifiedZone(ctx, abilityZoneKeys, battle, m, {
-        fill: isSelfAura ? 'rgba(154, 92, 218, 0.25)' : 'rgba(154, 92, 218, 0.14)',
-        outerBackingColor: 'rgba(252, 244, 255, 0.5)',
-        borderColor: 'rgba(136, 66, 202, 0.84)',
-        borderWidth: 2.3 * m.scale,
+        fill: isSelfAura ? 'rgba(148, 78, 214, 0.28)' : 'rgba(148, 78, 214, 0.17)',
+        outerBackingColor: 'rgba(252, 244, 255, 0.78)',
+        borderColor: 'rgba(114, 46, 178, 0.94)',
+        borderWidth: 2.5 * m.scale,
+        dash: [2.8 * m.scale, 4.5 * m.scale],
       });
     }
 
-    // 5F. Item Area (clean leaf-green wash + outer perimeter)
+    // 5F. Item Area (high-contrast cream-teal wash + dash-dot perimeter so it pops cleanly over green grass!)
     if (itemKeySet.size > 0) {
       this.drawUnifiedZone(ctx, itemKeySet, battle, m, {
-        fill: 'rgba(92, 194, 114, 0.24)',
-        outerBackingColor: 'rgba(240, 255, 242, 0.5)',
-        borderColor: 'rgba(54, 148, 72, 0.82)',
-        borderWidth: 2.2 * m.scale,
+        fill: 'rgba(34, 178, 168, 0.28)',
+        outerBackingColor: 'rgba(245, 255, 252, 0.82)',
+        borderColor: 'rgba(18, 118, 114, 0.94)',
+        borderWidth: 2.5 * m.scale,
+        dash: [8 * m.scale, 4 * m.scale, 2 * m.scale, 4 * m.scale],
       });
     }
 
@@ -1389,16 +1481,20 @@ export class PaperCraftRenderer {
           }
 
           const tPt = gridToScreen(focusTile.x, focusTile.y, m);
+          const matchGlyph =
+            fc.matchup === 'advantage' ? ' ▲' : fc.matchup === 'disadvantage' ? ' ▼' : '';
           const pillText =
             dashOpt && fc.canAttack
-              ? `DASH -${dashOpt.damage} | ${fc.hitChance}% (-${fc.finalDamage})`
+              ? `DASH -${dashOpt.damage} | ${fc.hitChance}%${matchGlyph} (-${fc.finalDamage})`
               : !fc.canAttack
                 ? dashOpt
                   ? `DASH -${dashOpt.damage} | BLOCKED`
                   : '0% BLOCKED'
                 : fc.targetUnitId
-                  ? `${fc.hitChance}% · -${fc.finalDamage} HP`
-                  : `SMASH -${fc.coverDamage}`;
+                  ? `${fc.hitChance}%${matchGlyph} · -${fc.finalDamage} HP`
+                  : tileAt(battle, focusTile)?.cover
+                    ? `SMASH -${fc.coverDamage}`
+                    : `SPLASH -${fc.finalDamage}`;
           this.drawFloatingHintPill(
             ctx,
             tPt.x,
@@ -1479,6 +1575,8 @@ export class PaperCraftRenderer {
     m: IsoMetrics,
     opts: {
       fill: string;
+      pattern?: CanvasPattern | null;
+      patternAlpha?: number;
       borderColor?: string;
       borderWidth?: number;
       outerBackingColor?: string;
@@ -1511,6 +1609,14 @@ export class PaperCraftRenderer {
     }
     ctx.fillStyle = opts.fill;
     ctx.fill();
+
+    if (opts.pattern) {
+      ctx.save();
+      ctx.globalAlpha = opts.patternAlpha ?? 0.45;
+      ctx.fillStyle = opts.pattern;
+      ctx.fill();
+      ctx.restore();
+    }
 
     // Pass 2: Outer perimeter edges ONLY
     if (opts.borderColor) {
@@ -2028,7 +2134,7 @@ export class PaperCraftRenderer {
     const tw = Math.min(w - 34, Math.max(compact ? 195 : 240, ctx.measureText(banner.text).width + 40));
     const th = compact ? 36 : 44;
     const x = w / 2 - tw / 2;
-    const y = compact ? 62 : 72;
+    const y = compact ? 54 : 68;
 
     // Soft tabletop drop shadow
     ctx.fillStyle = 'rgba(42, 20, 6, 0.28)';

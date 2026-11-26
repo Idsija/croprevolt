@@ -9,6 +9,7 @@ import {
   handleOffBoardTap,
   selectBattleUnit,
   setInteractionMode,
+  triggerUndoMove,
 } from '../../stores/gameStore';
 import { runEnemyUnitTurn } from '../ai';
 import {
@@ -16,6 +17,7 @@ import {
   executeAbility,
   executeAttack,
   executeDash,
+  executeItem,
   executeMove,
   executeTeamJump,
   startPhase,
@@ -30,7 +32,7 @@ import {
   unitHasMeaningfulAction,
 } from '../combat';
 import { createCover, evaluateCover, posKey, tileAt } from '../grid';
-import { getMatchup, getMatchupMultiplier } from '../hooks';
+import { applyStatusToUnit, getEffectiveMoveRange, getMatchup, getMatchupMultiplier } from '../hooks';
 import { computeDashOptions, computeTeamJumpOptions } from '../pathfinding';
 import {
   applyBattleOutcomeToRun,
@@ -38,6 +40,7 @@ import {
   claimRecruitReward,
   createNewRun,
   defaultMetaProgress,
+  MAX_GRAFTS_PER_HERO,
 } from '../run';
 
 describe('Crop Revolt! Tactical Engine', () => {
@@ -417,5 +420,116 @@ describe('Crop Revolt! Tactical Engine', () => {
     expect(gameStore.mode).toBe('move');
 
     deselectAll();
+  });
+
+  it('keeps 1-turn Rooted/Feared active through the target turn and prevents Barn Rescue victory bypass', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const battle = createBattleFromMap('barn_raid', run.roster.slice(0, 4), [], run.items, {
+      blueprintId: 'rooster',
+    });
+
+    const pea = battle.units.find((u) => u.visualKind === 'pea')!;
+    const enemy = battle.units.find((u) => u.team === 'enemy')!;
+    pea.pos = { x: 2, y: 5 };
+    enemy.pos = { x: 2, y: 3 };
+
+    // 1. 1-turn Rooted applied on Player Turn stays active throughout Enemy Turn, then expires!
+    expect(executeAbility(battle, pea.id, enemy.pos)).toBe(true);
+    expect(enemy.statuses.some((s) => s.kind === 'rooted' && s.turns === 1)).toBe(true);
+    startPhase(battle, 'enemy');
+    expect(getEffectiveMoveRange(enemy)).toBe(0);
+    // Apply 1-turn Feared to player on Enemy Turn -> stays active on Player Turn 2!
+    applyStatusToUnit(pea, 'feared', 1);
+    startPhase(battle, 'player');
+    expect(enemy.statuses.some((s) => s.kind === 'rooted')).toBe(false);
+    expect(getEffectiveMoveRange(pea)).toBe(Math.max(1, pea.moveRange - 2));
+
+    // 2. Killing all enemies on barn_raid MUST NOT trigger victory while the Burlap Cage still stands!
+    for (const e of battle.units) {
+      if (e.team === 'enemy') {
+        e.hp = 0;
+        e.alive = false;
+      }
+    }
+    const lemon = battle.units.find((u) => u.visualKind === 'lemon')!;
+    lemon.pos = { x: 3, y: 3 };
+    tileAt(battle, { x: 3, y: 1 })!.cover!.hp = 2;
+    // Move Lemon on open barn floor: status MUST stay ongoing while the Burlap Cage still stands!
+    expect(executeMove(battle, lemon.id, { x: 3, y: 2 })).toBe(true);
+    expect(battle.status).toBe('ongoing');
+    // unitHasMeaningfulAction still sees the objective cage in range (Citrus Mortar minRange=2 from (3,3) or via moving back)
+    lemon.pos = { x: 3, y: 3 };
+    lemon.actions.hasMoved = true;
+    lemon.actions.hasUsedSkill = true;
+    expect(unitHasMeaningfulAction(battle, lemon)).toBe(true);
+
+    // 3. Smashing the cage frees Cluck Norris WITH his Barnyard Co-op traits preserved and wins!
+    expect(executeAttack(battle, lemon.id, { x: 3, y: 1 }, () => 0)).toBe(true);
+    const freedRooster = battle.units.find((u) => u.visualKind === 'rooster');
+    expect(freedRooster).toBeDefined();
+    expect(freedRooster!.isAnimal).toBe(true);
+    expect(freedRooster!.launchpadCoop).toBe(true);
+    expect(battle.status).toBe('victory');
+  });
+
+  it('caps Grafts at 2, validates ability/item targets before spending, prefers Dash on touch move double-tap, and restores Undo focus', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const hero = run.roster[0];
+    expect(applyGraftToHero(run, hero.uid, 'spring_sprout')).toBe(true);
+    expect(applyGraftToHero(run, hero.uid, 'spicy_shot')).toBe(true);
+    expect(hero.graftIds.length).toBe(MAX_GRAFTS_PER_HERO);
+    expect(applyGraftToHero(run, hero.uid, 'pumpkin_rind')).toBe(false);
+
+    const battle = createBattleFromMap('vegetable_patch', run.roster.slice(0, 2), [], run.items);
+    for (let y = 0; y < battle.height; y++) {
+      for (let x = 0; x < battle.width; x++) {
+        battle.tiles[y][x].cover = null;
+      }
+    }
+    const spud = battle.units.find((u) => u.visualKind === 'potato')!;
+    const pea = battle.units.find((u) => u.visualKind === 'pea')!;
+    const enemy = battle.units.find((u) => u.team === 'enemy')!;
+    spud.pos = { x: 3, y: 6 };
+    pea.pos = { x: 5, y: 7 };
+    enemy.pos = { x: 3, y: 4 };
+
+    // Invalid enemy/ally targets must NOT consume Skill slot or Bag items!
+    expect(executeAbility(battle, pea.id, { x: 0, y: 0 })).toBe(false);
+    expect(pea.actions.hasUsedSkill).toBe(false);
+    const cansBefore = battle.items.watering_can;
+    expect(executeItem(battle, pea.id, 'watering_can', { x: 5, y: 5 })).toBe(false);
+    expect(battle.items.watering_can).toBe(cansBefore);
+    expect(pea.actions.hasUsedSkill).toBe(false);
+
+    // unitHasMeaningfulAction still sees usable Bag items when skill is on cooldown!
+    spud.actions.hasMoved = true;
+    spud.actions.hasAttacked = true;
+    spud.actions.hasUsedSkill = false;
+    spud.abilityCooldown = 2;
+    expect(unitHasMeaningfulAction(battle, spud)).toBe(true);
+
+    // Touch double-tap on enemy in 'move' mode when BOTH Dash & Attack are available executes Dash!
+    spud.actions.hasMoved = false;
+    spud.actions.hasAttacked = false;
+    spud.actions.hasDashed = false;
+    gameStore.run = run;
+    gameStore.battle = battle;
+    gameStore.enemyTurnRunning = false;
+    gameStore.selectedUnitId = spud.id;
+    gameStore.mode = 'move';
+    gameStore.previewTile = null;
+    handleBattleTileTap(enemy.pos, 'touch'); // Tap 1 previews
+    expect(gameStore.previewTile).toEqual(enemy.pos);
+    handleBattleTileTap(enemy.pos, 'touch'); // Tap 2 prefers Dash in 'move' mode!
+    expect(spud.actions.hasDashed).toBe(true);
+    expect(spud.actions.hasAttacked).toBe(false);
+
+    // Undo restores focus back to the undone hero even after auto-advance!
+    spud.actions.hasAttacked = true;
+    spud.actions.hasUsedSkill = true;
+    handleBattleTileTap({ x: 3, y: 6 }, 'mouse'); // Move Spudnik (auto-advances to Pea)
+    expect(gameStore.selectedUnitId).toBe(pea.id);
+    triggerUndoMove();
+    expect(gameStore.selectedUnitId).toBe(spud.id);
   });
 });

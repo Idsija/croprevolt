@@ -373,7 +373,7 @@ export function drawUnitStandee(
   roundRect(ctx, -barW / 2, barY, barW, barH, 2.5 * s);
   ctx.fill();
 
-  ctx.fillStyle = unit.team === 'player' ? '#5cb848' : unit.isBoss ? '#de6e24' : '#d9483b';
+  ctx.fillStyle = unit.team === 'player' ? '#35a3d8' : unit.isBoss ? '#d96c1e' : '#c63228';
   if (hpRatio > 0) {
     roundRect(ctx, -barW / 2, barY, Math.max(3 * s, barW * hpRatio), barH, 2.5 * s);
     ctx.fill();
@@ -431,30 +431,40 @@ export function drawUnitStandee(
   }
 
   if (unit.statuses.length > 0) {
-    const statusMap: Record<string, { icon: string; bg: string }> = {
-      burn: { icon: '🔥', bg: '#ff7043' },
-      rooted: { icon: '🌿', bg: '#558b2f' },
-      acid: { icon: '🧪', bg: '#cddc39' },
-      shield: { icon: '🛡️', bg: '#42a5f5' },
-      boosted: { icon: '⚡', bg: '#ffca28' },
-      feared: { icon: '😱', bg: '#ab47bc' },
+    const statusMap: Record<string, { bg: string; glyph: string; fg: string }> = {
+      burn: { bg: '#e85d2a', glyph: 'B', fg: '#fff9e8' },
+      rooted: { bg: '#3e7a28', glyph: 'R', fg: '#fff9e8' },
+      acid: { bg: '#d4be24', glyph: 'A', fg: '#3b240e' },
+      shield: { bg: '#2f86c4', glyph: 'S', fg: '#fff9e8' },
+      boosted: { bg: '#f0b828', glyph: '+', fg: '#3b240e' },
+      feared: { bg: '#8a3fa8', glyph: '!', fg: '#fff9e8' },
     };
+    const badgeR = Math.max(7.2, 6.8 * s);
     unit.statuses.slice(0, 2).forEach((st, idx) => {
       const info = statusMap[st.kind];
       if (!info) return;
-      const sx = -barW / 2 - 11 * s - idx * 14 * s;
+      const sx = -barW / 2 - (badgeR + 5 * s) - idx * (badgeR * 2.15);
       const sy = barY + 3 * s;
+
+      // Matte cream die-cut outer sticker rim + painted hand-inked status pill
+      ctx.fillStyle = PAPER_RIM;
+      ctx.beginPath();
+      ctx.arc(sx, sy, badgeR + 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.fillStyle = info.bg;
       ctx.strokeStyle = INK;
-      ctx.lineWidth = 1.2 * s;
+      ctx.lineWidth = Math.max(1.3, 1.35 * s);
       ctx.beginPath();
-      ctx.arc(sx, sy, 6.2 * s, 0, Math.PI * 2);
+      ctx.arc(sx, sy, badgeR, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      ctx.font = `${Math.round(9 * s)}px sans-serif`;
+
+      ctx.fillStyle = info.fg;
+      ctx.font = `700 ${Math.max(8, Math.round(badgeR * 1.15))}px "Fredoka", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(info.icon, sx, sy + 0.5 * s);
+      ctx.fillText(info.glyph, sx, sy + 0.5);
     });
   }
 

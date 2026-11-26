@@ -65,7 +65,7 @@ export const ENEMY_BLUEPRINTS: Record<string, EnemyBlueprint> = {
       damage: 3,
       coverDamage: 2,
       aoeRadius: 1,
-      appliesStatus: { kind: 'acid', turns: 1 },
+      appliesStatus: { kind: 'acid', turns: 2 },
       description: 'Lobbed mist that arcs over cover. Strong vs. Fruits!',
     },
     color: '#7c9c43',
@@ -80,7 +80,7 @@ export const ENEMY_BLUEPRINTS: Record<string, EnemyBlueprint> = {
     family: 'blade',
     maxHp: 13,
     moveRange: 5,
-    dashDamage: 4,
+    dashDamage: 3,
     weapon: {
       id: 'blade_chug',
       name: 'Rotary Ram',
@@ -102,7 +102,7 @@ export const ENEMY_BLUEPRINTS: Record<string, EnemyBlueprint> = {
     title: 'Season Boss',
     family: 'digger',
     isBoss: true,
-    maxHp: 28,
+    maxHp: 40,
     moveRange: 3,
     dashDamage: 3,
     weapon: {

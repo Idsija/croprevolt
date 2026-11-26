@@ -92,6 +92,10 @@ export function applyStatusToUnit(unit: BattleUnit, kind: StatusKind, turns: num
   if (hasGraft(unit, 'root_anchor') && (kind === 'rooted' || kind === 'feared')) {
     return false;
   }
+  // Season Bosses cannot be permanently locked in place by Rooted
+  if (unit.isBoss && kind === 'rooted') {
+    return false;
+  }
   const existing = unit.statuses.find((s) => s.kind === kind);
   if (existing) {
     existing.turns = Math.max(existing.turns, turns);

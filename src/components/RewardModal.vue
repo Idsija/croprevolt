@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
 import { PRODUCE_BLUEPRINTS } from '../data/produce';
 import { RELIC_REGISTRY } from '../data/relics';
+import { getFamilyLabel } from '../engine/hooks';
+import { MAX_GRAFTS_PER_HERO } from '../engine/run';
 import {
   closeRewardsToMap,
   gameStore,
@@ -16,8 +18,30 @@ import CraftIcon from './CraftIcon.vue';
 const run = computed(() => gameStore.run!);
 const reward = computed(() => run.value.pendingReward!);
 const selectedGraftId = ref<string | null>(null);
+const targetHeroBoxRef = ref<HTMLElement | null>(null);
+const confirmSkipUnclaimed = ref(false);
 
 const healthyRoster = computed(() => run.value.roster.filter((h) => !h.harvested));
+
+const unclaimedCount = computed(() => {
+  let left = 0;
+  if (reward.value.recruitChoices.length > 0 && !reward.value.claimedRecruit) left += 1;
+  if (reward.value.graftChoices.length > 0 && !reward.value.claimedGraft) left += 1;
+  if (reward.value.relicChoices.length > 0 && !reward.value.claimedRelic) left += 1;
+  return left;
+});
+
+watch(selectedGraftId, async (val) => {
+  confirmSkipUnclaimed.value = false;
+  if (val) {
+    await nextTick();
+    targetHeroBoxRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+});
+
+watch(unclaimedCount, () => {
+  confirmSkipUnclaimed.value = false;
+});
 
 function chooseGraftTarget(heroUid: string): void {
   if (!selectedGraftId.value) return;
@@ -27,10 +51,18 @@ function chooseGraftTarget(heroUid: string): void {
   }
 }
 
+function handleContinue(): void {
+  if (unclaimedCount.value > 0 && !confirmSkipUnclaimed.value) {
+    confirmSkipUnclaimed.value = true;
+    return;
+  }
+  closeRewardsToMap();
+}
+
 function nextTierLabel(graftCount: number): string {
   if (graftCount === 0) return 'Promotes → RIPE (+2 HP, +1 ATK)';
   if (graftCount === 1) return 'Promotes → HEIRLOOM (+3 HP, +1 ATK, +1 Move)';
-  return 'Heirloom Tier';
+  return `Max ${MAX_GRAFTS_PER_HERO}/${MAX_GRAFTS_PER_HERO} Grafts (Heirloom)`;
 }
 </script>
 
@@ -82,7 +114,9 @@ function nextTierLabel(graftCount: number): string {
                   />
                   <div>
                     <strong>{{ PRODUCE_BLUEPRINTS[bpId].name }}</strong>
-                    <small class="sub-role">{{ PRODUCE_BLUEPRINTS[bpId].title }}</small>
+                    <small class="sub-role">
+                      {{ PRODUCE_BLUEPRINTS[bpId].title }} · {{ getFamilyLabel(PRODUCE_BLUEPRINTS[bpId].family) }}
+                    </small>
                   </div>
                 </div>
                 <span v-if="PRODUCE_BLUEPRINTS[bpId].isAnimal" class="paper-pill animal-pill">Barnyard</span>
@@ -92,7 +126,10 @@ function nextTierLabel(graftCount: number): string {
                 ★ {{ PRODUCE_BLUEPRINTS[bpId].coopPassive }}
               </small>
               <small class="stat-line">
-                HP {{ PRODUCE_BLUEPRINTS[bpId].maxHp }} · {{ PRODUCE_BLUEPRINTS[bpId].weapon.name }} ({{ PRODUCE_BLUEPRINTS[bpId].weapon.damage }}) · {{ PRODUCE_BLUEPRINTS[bpId].ability.name }}
+                HP {{ PRODUCE_BLUEPRINTS[bpId].maxHp }} · Mv {{ PRODUCE_BLUEPRINTS[bpId].moveRange }} · Dash {{ PRODUCE_BLUEPRINTS[bpId].dashDamage }} · {{ PRODUCE_BLUEPRINTS[bpId].weapon.name }} ({{ PRODUCE_BLUEPRINTS[bpId].weapon.damage }} dmg, R{{ PRODUCE_BLUEPRINTS[bpId].weapon.minRange }}-{{ PRODUCE_BLUEPRINTS[bpId].weapon.maxRange }})
+              </small>
+              <small class="stat-line">
+                <strong>{{ PRODUCE_BLUEPRINTS[bpId].ability.name }}:</strong> {{ PRODUCE_BLUEPRINTS[bpId].ability.description }}
               </small>
               <button class="paper-btn primary" @click="pickRecruit(bpId)">
                 Recruit {{ PRODUCE_BLUEPRINTS[bpId].name }}
@@ -105,7 +142,7 @@ function nextTierLabel(graftCount: number): string {
         </div>
 
         <!-- 2. Graft Sticker Draft -->
-        <section v-if="!reward.claimedGraft" class="reward-sec">
+        <section v-if="reward.graftChoices.length > 0 && !reward.claimedGraft" class="reward-sec">
           <h3>
             {{ selectedGraftId ? 'Step 2: Tap a Hero to Attach Graft!' : 'Pick a Graft Mutation Sticker' }}
           </h3>
@@ -125,26 +162,39 @@ function nextTierLabel(graftCount: number): string {
             </button>
           </div>
 
-          <div v-if="selectedGraftId" class="target-hero-box">
+          <div v-if="selectedGraftId" ref="targetHeroBoxRef" class="target-hero-box">
             <strong>Attach {{ GRAFT_REGISTRY[selectedGraftId].badgeIcon }} {{ GRAFT_REGISTRY[selectedGraftId].name }} to:</strong>
             <div class="hero-targets">
               <button
                 v-for="h in healthyRoster"
                 :key="h.uid"
                 class="paper-btn gold hero-graft-btn"
-                :disabled="h.graftIds.includes(selectedGraftId)"
+                :disabled="h.graftIds.includes(selectedGraftId) || h.graftIds.length >= MAX_GRAFTS_PER_HERO"
                 @click="chooseGraftTarget(h.uid)"
               >
                 <img class="mini-spr" :src="`/sprites/${h.species}.png`" :alt="h.name" />
                 <div class="hg-copy">
-                  <span>{{ h.name }} ({{ h.tier }})</span>
-                  <small>{{ h.graftIds.includes(selectedGraftId) ? 'Already attached' : nextTierLabel(h.graftIds.length) }}</small>
+                  <span>
+                    {{ h.name }}
+                    <em class="squad-tag">{{ run.activeSquadUids.includes(h.uid) ? 'Active' : 'Bench' }}</em>
+                  </span>
+                  <small>
+                    HP {{ h.hp }}/{{ h.maxHp }} · {{ h.weapon.damage }} ATK · {{ h.graftIds.length }}/{{ MAX_GRAFTS_PER_HERO }} Grafts
+                    {{ h.graftIds.map((g) => GRAFT_REGISTRY[g]?.badgeIcon).join('') }}
+                  </small>
+                  <small>
+                    {{
+                      h.graftIds.includes(selectedGraftId)
+                        ? 'Already attached'
+                        : nextTierLabel(h.graftIds.length)
+                    }}
+                  </small>
                 </div>
               </button>
             </div>
           </div>
         </section>
-        <div v-else class="claimed-banner">
+        <div v-else-if="reward.graftChoices.length > 0" class="claimed-banner">
           <CraftIcon name="check" :size="16" /> Graft sticker attached &amp; hero promoted!
         </div>
 
@@ -174,9 +224,19 @@ function nextTierLabel(graftCount: number): string {
 
       <!-- Sticky Thumb-Friendly Footer CTA -->
       <footer class="reward-foot">
-        <button class="paper-btn primary diecut done-btn" @click="closeRewardsToMap">
+        <button
+          class="paper-btn diecut done-btn"
+          :class="confirmSkipUnclaimed ? 'danger' : unclaimedCount > 0 ? 'gold' : 'primary'"
+          @click="handleContinue"
+        >
           <CraftIcon name="map" :size="18" />
-          <span>Continue to Garden Trail →</span>
+          <span v-if="confirmSkipUnclaimed">
+            Leave {{ unclaimedCount }} unclaimed reward{{ unclaimedCount > 1 ? 's' : '' }}? Tap again →
+          </span>
+          <span v-else-if="unclaimedCount > 0">
+            Continue ({{ unclaimedCount }} reward{{ unclaimedCount > 1 ? 's' : '' }} left) →
+          </span>
+          <span v-else>Continue to Garden Trail →</span>
         </button>
       </footer>
     </div>
@@ -362,6 +422,16 @@ function nextTierLabel(graftCount: number): string {
   font-family: 'Nunito', sans-serif;
   font-size: 0.72rem;
   font-weight: 700;
+}
+
+.squad-tag {
+  font-style: normal;
+  font-size: 0.66rem;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 252, 240, 0.78);
+  border: 1px solid rgba(74, 44, 23, 0.35);
 }
 
 .claimed-banner {

@@ -138,9 +138,16 @@ export const gameStore = reactive<GameStoreState>({
   eventQueueVersion: 0,
 });
 
+export const AUTO_END_GRACE_MS = 2400;
+
 const eventListeners = new Set<(events: BattleEvent[]) => void>();
 const focusListeners = new Set<(pos: GridPos) => void>();
+const undoResetListeners = new Set<() => void>();
 let autoEndTimer: ReturnType<typeof setTimeout> | null = null;
+let battleSessionId = 0;
+let lastUndoUnitId: string | null = null;
+let lastAutoAdvanceAt = 0;
+let lastAutoAdvancePos: GridPos | null = null;
 
 export function subscribeBattleEvents(fn: (events: BattleEvent[]) => void): () => void {
   eventListeners.add(fn);
@@ -152,17 +159,31 @@ export function subscribeCameraFocus(fn: (pos: GridPos) => void): () => void {
   return () => focusListeners.delete(fn);
 }
 
+export function subscribeUndoReset(fn: () => void): () => void {
+  undoResetListeners.add(fn);
+  return () => undoResetListeners.delete(fn);
+}
+
+function emitUndoReset(): void {
+  for (const fn of undoResetListeners) fn();
+}
+
 function requestCameraFocus(pos: GridPos): void {
   for (const fn of focusListeners) fn(pos);
+}
+
+function dispatchBattleEvents(events: BattleEvent[]): void {
+  if (events.length === 0) return;
+  gameStore.eventQueueVersion += 1;
+  for (const fn of eventListeners) {
+    fn(events);
+  }
 }
 
 function flushBattleEvents(): void {
   if (!gameStore.battle || gameStore.battle.pendingEvents.length === 0) return;
   const events = gameStore.battle.pendingEvents.splice(0);
-  gameStore.eventQueueVersion += 1;
-  for (const fn of eventListeners) {
-    fn(events);
-  }
+  dispatchBattleEvents(events);
 }
 
 export function clearAutoEndTimer(): void {
@@ -198,7 +219,7 @@ function scheduleAutoEndCheck(): void {
       ) {
         void endPlayerTurn();
       }
-    }, 950);
+    }, AUTO_END_GRACE_MS);
   }
 }
 
@@ -252,11 +273,14 @@ export function buyMetaUnlock(key: keyof MetaProgress['unlocks']): boolean {
 
 export function startNewSeasonRun(): void {
   sfx.click();
+  battleSessionId += 1;
+  lastUndoUnitId = null;
   clearAutoEndTimer();
   clearSavedRun();
   const run = createNewRun(gameStore.meta);
   gameStore.run = run;
   gameStore.battle = null;
+  gameStore.enemyTurnRunning = false;
   gameStore.selectedUnitId = null;
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
@@ -272,12 +296,15 @@ export function continueSavedRun(): void {
     return;
   }
   sfx.click();
+  battleSessionId += 1;
+  lastUndoUnitId = null;
   clearAutoEndTimer();
   if (saved.status === 'battle') {
     saved.status = 'map';
   }
   gameStore.run = saved;
   gameStore.battle = null;
+  gameStore.enemyTurnRunning = false;
   gameStore.selectedUnitId = null;
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
@@ -286,7 +313,10 @@ export function continueSavedRun(): void {
 
 export function returnToTitle(): void {
   sfx.click();
+  battleSessionId += 1;
+  lastUndoUnitId = null;
   clearAutoEndTimer();
+  gameStore.enemyTurnRunning = false;
   if (gameStore.run && gameStore.run.status !== 'victory' && gameStore.run.status !== 'defeat') {
     saveRun(gameStore.run);
     gameStore.savedRunAvailable = true;
@@ -306,6 +336,8 @@ export function enterSeasonNode(nodeId: string): void {
   const node = run.nodes.find((n) => n.id === nodeId);
   if (!node) return;
   sfx.click();
+  battleSessionId += 1;
+  lastUndoUnitId = null;
   clearAutoEndTimer();
 
   if (node.type === 'vault') {
@@ -428,6 +460,10 @@ export function inspectEnemyUnit(enemyId: string | null): void {
  */
 export function setInteractionMode(mode: InteractionMode, itemId?: string): void {
   if (gameStore.enemyTurnRunning) return;
+  if (mode === 'item' && gameStore.battle && gameStore.selectedUnitId) {
+    const selected = getUnitById(gameStore.battle, gameStore.selectedUnitId);
+    if (!selected || selected.actions.hasUsedSkill) return;
+  }
   sfx.click();
   clearAutoEndTimer();
   gameStore.mode = mode;
@@ -564,7 +600,7 @@ export function getPreviewActionOptions(): PreviewActionOption[] {
  * - Always returns to default unified 'move' mode so skills are ONLY used intentionally.
  * - Auto-advances to the next ready hero only when the current hero has NO remaining actions.
  */
-function autoAdvanceAfterAction(unitId: string): void {
+function autoAdvanceAfterAction(unitId: string, actionPos?: GridPos): void {
   const b = gameStore.battle;
   if (!b || b.status !== 'ongoing') {
     clearAutoEndTimer();
@@ -580,6 +616,8 @@ function autoAdvanceAfterAction(unitId: string): void {
     const nextReady = b.units.find(
       (other) => other.id !== unitId && unitHasMeaningfulAction(b, other)
     );
+    lastAutoAdvanceAt = Date.now();
+    lastAutoAdvancePos = actionPos ? { ...actionPos } : null;
     if (nextReady) {
       gameStore.selectedUnitId = nextReady.id;
       gameStore.mode = 'move';
@@ -608,13 +646,16 @@ export function executePreviewOption(kind: PreviewActionOption['kind'], explicit
 
   if (kind === 'move') {
     ok = executeMove(b, selected.id, pos);
+    if (ok) lastUndoUnitId = selected.id;
   } else if (kind === 'jump') {
     ok = executeTeamJump(b, selected.id, pos);
+    if (ok) lastUndoUnitId = selected.id;
   } else if (kind === 'dash') {
     const enemy = unitAt(b, pos);
     if (enemy && enemy.team === 'enemy') {
       ok = executeDash(b, selected.id, enemy.id);
       if (ok) {
+        lastUndoUnitId = selected.id;
         gameStore.previewTile = null;
         gameStore.inspectedEnemyId = null;
         gameStore.mode = 'move';
@@ -625,15 +666,18 @@ export function executePreviewOption(kind: PreviewActionOption['kind'], explicit
     }
   } else if (kind === 'attack') {
     ok = executeAttack(b, selected.id, pos, Math.random, run.roster);
+    if (ok) lastUndoUnitId = null;
   } else if (kind === 'ability') {
     ok = executeAbility(b, selected.id, pos);
+    if (ok) lastUndoUnitId = null;
   } else if (kind === 'item' && gameStore.selectedItemId) {
     ok = executeItem(b, selected.id, gameStore.selectedItemId, pos, run.roster);
+    if (ok) lastUndoUnitId = null;
   }
 
   if (ok) {
     flushBattleEvents();
-    autoAdvanceAfterAction(selected.id);
+    autoAdvanceAfterAction(selected.id, pos);
   }
   return ok;
 }
@@ -668,6 +712,16 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
   clearAutoEndTimer();
   const isTouch = pointerType !== 'mouse';
   if (isTouch) gameStore.isTouchMode = true;
+
+  // Guard against desktop double-click spillover onto the newly auto-advanced hero
+  if (
+    !isTouch &&
+    lastAutoAdvancePos &&
+    samePos(lastAutoAdvancePos, pos) &&
+    Date.now() - lastAutoAdvanceAt < 220
+  ) {
+    return;
+  }
 
   const clickedUnit = unitAt(b, pos);
   const selected = gameStore.selectedUnitId ? getUnitById(b, gameStore.selectedUnitId) : undefined;
@@ -746,7 +800,7 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
         const preferred =
           gameStore.mode === 'attack'
             ? opts.find((o) => o.kind === 'attack') ?? opts[0]
-            : opts.find((o) => o.kind === 'attack') ?? opts[0];
+            : opts.find((o) => o.kind === 'dash') ?? opts.find((o) => o.kind === 'attack') ?? opts[0];
         executePreviewOption(preferred.kind, pos);
         return;
       }
@@ -795,8 +849,14 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
     return;
   }
 
-  // 3C. Clicked empty non-actionable tile -> cleanly deselect / cancel mode so zero focus remains!
-  if (gameStore.mode === 'ability' || gameStore.mode === 'item') {
+  // 3C. Clicked empty non-actionable tile -> clear preview/targeting mode first, or deselect cleanly!
+  if (isTouch && gameStore.previewTile) {
+    sfx.click();
+    gameStore.previewTile = null;
+    gameStore.inspectedEnemyId = null;
+    return;
+  }
+  if (gameStore.mode === 'attack' || gameStore.mode === 'ability' || gameStore.mode === 'item') {
     sfx.click();
     gameStore.mode = 'move';
     gameStore.selectedItemId = null;
@@ -815,9 +875,18 @@ export function triggerUndoMove(): void {
   if (!restored) return;
   sfx.click();
   gameStore.battle = restored;
+  if (lastUndoUnitId) {
+    const undoneHero = getUnitById(restored, lastUndoUnitId);
+    if (undoneHero && undoneHero.alive && undoneHero.team === 'player') {
+      gameStore.selectedUnitId = undoneHero.id;
+      requestCameraFocus(undoneHero.pos);
+    }
+    lastUndoUnitId = null;
+  }
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
   gameStore.mode = 'move';
+  emitUndoReset();
 }
 
 function sleep(ms: number): Promise<void> {
@@ -828,7 +897,9 @@ export async function endPlayerTurn(): Promise<void> {
   const b = gameStore.battle;
   if (!b || b.status !== 'ongoing' || b.phase !== 'player' || gameStore.enemyTurnRunning) return;
 
+  const session = battleSessionId;
   clearAutoEndTimer();
+  lastUndoUnitId = null;
   sfx.click();
   gameStore.enemyTurnRunning = true;
   gameStore.hoveredTile = null;
@@ -844,16 +915,49 @@ export async function endPlayerTurn(): Promise<void> {
     return;
   }
 
-  await sleep(650);
+  await sleep(850);
+  if (session !== battleSessionId || !gameStore.battle) {
+    gameStore.enemyTurnRunning = false;
+    return;
+  }
 
-  const enemyIds = b.units.filter((u) => u.team === 'enemy' && u.alive).map((u) => u.id);
+  const enemyIds = gameStore.battle.units
+    .filter((u) => u.team === 'enemy' && u.alive)
+    .map((u) => u.id);
+
   for (const eid of enemyIds) {
-    if (!gameStore.battle || gameStore.battle.status !== 'ongoing') break;
+    if (session !== battleSessionId || !gameStore.battle || gameStore.battle.status !== 'ongoing') {
+      break;
+    }
     const acted = runEnemyUnitTurn(gameStore.battle, eid);
     if (acted) {
-      flushBattleEvents();
-      await sleep(580);
+      // Split movement/dash from attacks/abilities so players can read every farmer's beat clearly!
+      const allEvents = gameStore.battle.pendingEvents.splice(0);
+      const moveEvents = allEvents.filter(
+        (ev) => ev.type === 'move' || ev.type === 'dash' || ev.type === 'jump'
+      );
+      const combatEvents = allEvents.filter(
+        (ev) => ev.type !== 'move' && ev.type !== 'dash' && ev.type !== 'jump'
+      );
+
+      if (moveEvents.length > 0) {
+        dispatchBattleEvents(moveEvents);
+        await sleep(combatEvents.length > 0 ? 340 : 520);
+        if (session !== battleSessionId || !gameStore.battle) {
+          gameStore.enemyTurnRunning = false;
+          return;
+        }
+      }
+      if (combatEvents.length > 0) {
+        dispatchBattleEvents(combatEvents);
+        await sleep(560);
+      }
     }
+  }
+
+  if (session !== battleSessionId) {
+    gameStore.enemyTurnRunning = false;
+    return;
   }
 
   if (gameStore.battle && gameStore.battle.status === 'ongoing') {
@@ -872,6 +976,8 @@ export function finalizeBattleAndProceed(): void {
   const b = gameStore.battle;
   const run = gameStore.run;
   if (!b || !run || b.status === 'ongoing') return;
+  battleSessionId += 1;
+  lastUndoUnitId = null;
   clearAutoEndTimer();
   sfx.click();
   applyBattleOutcomeToRun(run, b, gameStore.meta);

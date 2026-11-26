@@ -89,7 +89,7 @@ export function createBattleUnitFromEnemy(blueprintId: string, index: number, po
   const bp = ENEMY_BLUEPRINTS[blueprintId];
   if (!bp) throw new Error(`Unknown enemy blueprint: ${blueprintId}`);
   const isHeavyDiggerVariant = blueprintId === 'digger' && index % 2 === 1;
-  return {
+  const enemyUnit: BattleUnit = {
     id: `enemy_${blueprintId}_${index}`,
     blueprintId: bp.id,
     team: 'enemy',
@@ -119,6 +119,10 @@ export function createBattleUnitFromEnemy(blueprintId: string, index: number, po
     color: bp.color,
     accentColor: bp.accentColor,
   };
+  if (bp.isBoss) {
+    applyStatusToUnit(enemyUnit, 'shield', 1);
+  }
+  return enemyUnit;
 }
 
 export function createBattleFromMap(
@@ -273,12 +277,16 @@ function checkBattleEnd(state: BattleState): void {
     const cageStillStanding = state.tiles.some((row) =>
       row.some((t) => t.cover?.isObjectiveCage)
     );
-    if (!cageStillStanding && aliveEnemies.length === 0) {
+    if (cageStillStanding) {
+      return;
+    }
+    if (aliveEnemies.length === 0) {
       state.status = 'victory';
       state.pendingEvents.push({ type: 'banner', text: 'BARN RESCUE COMPLETE!', tone: 'victory' });
       pushLog(state, 'Barn cleared and ally freed!');
       return;
     }
+    return;
   }
 
   if (aliveEnemies.length === 0) {
@@ -372,6 +380,11 @@ function damageCoverAt(
         species: bp.species,
         title: bp.title,
         family: bp.family,
+        isAnimal: bp.isAnimal,
+        coopPassive: bp.coopPassive,
+        ignoresMud: bp.ignoresMud,
+        livingHalfCover: bp.livingHalfCover,
+        launchpadCoop: bp.launchpadCoop,
         hp: bp.maxHp,
         maxHp: bp.maxHp,
         moveRange: bp.moveRange,
@@ -501,15 +514,15 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
   unit.actions.hasMoved = true;
 
   if (hasRelic(state.relicIds, 'bouncy_mulch')) {
-    unit.tempAttackBonus += 2;
+    unit.tempAttackBonus = Math.min(3, unit.tempAttackBonus + 2);
     pushLog(state, `Bouncy Mulch energized ${unit.name} (+2 Attack this turn)!`);
   }
 
-  // Barnyard Co-op: Team-Jumping off Cluck Norris launches +2 tiles & grants +2 Attack!
+  // Barnyard Co-op: Team-Jumping off Cluck Norris launches +2 tiles & grants +2 Attack (stacked jump bonus caps at +3)!
   const springboardAlly = getUnitById(state, opt.allyId);
   if (springboardAlly?.launchpadCoop) {
-    unit.tempAttackBonus += 2;
-    pushLog(state, `CO-OP LAUNCH! ${springboardAlly.name} boosted ${unit.name} (+2 Attack this turn)!`);
+    unit.tempAttackBonus = Math.min(3, unit.tempAttackBonus + 2);
+    pushLog(state, `CO-OP LAUNCH! ${springboardAlly.name} boosted ${unit.name} (+${unit.tempAttackBonus} Attack this turn)!`);
   }
 
   state.pendingEvents.push({
@@ -608,9 +621,13 @@ export function executeAttack(
 
   // HIT!
   defender.hp -= fc.finalDamage;
-  if (fc.appliesStatus) {
-    const duration = attacker.weapon.appliesStatus?.turns ?? 2;
-    applyStatusToUnit(defender, fc.appliesStatus, duration);
+  let appliedStatusKind = fc.appliesStatus;
+  if (attacker.weapon.appliesStatus) {
+    applyStatusToUnit(defender, attacker.weapon.appliesStatus.kind, attacker.weapon.appliesStatus.turns);
+  }
+  if (fc.hitChance === 100 && hasGraft(attacker, 'spicy_shot')) {
+    applyStatusToUnit(defender, 'burn', 2);
+    if (!appliedStatusKind) appliedStatusKind = 'burn';
   }
 
   state.pendingEvents.push({
@@ -623,7 +640,7 @@ export function executeAttack(
     damage: fc.finalDamage,
     targetId: defender.id,
     matchup: fc.matchup,
-    status: fc.appliesStatus,
+    status: appliedStatusKind,
   });
 
   const matchupTag =
@@ -723,6 +740,7 @@ function applyWeaponSplash(
           status: attacker.weapon.appliesStatus?.kind ?? 'burn',
           damage: splashDmg,
         });
+        pushLog(state, `${attacker.weapon.name} splashed ${u.name} for ${splashDmg} dmg!`);
         handleUnitKO(state, u);
       }
     }
@@ -763,6 +781,15 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
   const ab = unit.ability;
   const dist = manhattan(unit.pos, targetPos);
   if (ab.targetType !== 'self' && ab.targetType !== 'aoe_self' && dist > ab.range) return false;
+
+  // Validate unit targets BEFORE consuming skill slot / cooldown / undo snapshot
+  if (ab.targetType === 'ally') {
+    const ally = unitAt(state, targetPos);
+    if (!ally || ally.team !== unit.team) return false;
+  } else if (ab.targetType === 'enemy') {
+    const enemy = unitAt(state, targetPos);
+    if (!enemy || enemy.team === unit.team) return false;
+  }
 
   state.undoSnapshot = null;
   unit.actions.hasUsedSkill = true;
@@ -876,6 +903,12 @@ export function executeItem(
   if ((state.items[itemId] ?? 0) <= 0) return false;
   if (manhattan(unit.pos, targetPos) > item.range) return false;
 
+  // Validate ally target BEFORE consuming item or skill slot
+  if (item.targetType === 'ally') {
+    const ally = unitAt(state, targetPos);
+    if (!ally || ally.team !== unit.team) return false;
+  }
+
   state.undoSnapshot = null;
   state.items[itemId] = (state.items[itemId] ?? 1) - 1;
   unit.actions.hasUsedSkill = true;
@@ -934,7 +967,28 @@ export function executeItem(
 
 export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): void {
   if (state.status !== 'ongoing') return;
+  const prevPhase = state.phase;
   state.undoSnapshot = null;
+
+  // End-of-phase duration ticks BEFORE switching phases:
+  // - Movement debuffs (rooted, feared) tick down when the affected team finishes its turn
+  //   so 1-turn Rooted/Feared always lasts through the target's full turn!
+  // - Acid ticks down when the opposing attacking team finishes its turn.
+  for (const unit of state.units) {
+    if (!unit.alive) continue;
+    if (unit.team === prevPhase) {
+      unit.statuses = unit.statuses
+        .map((s) =>
+          s.kind === 'rooted' || s.kind === 'feared' ? { ...s, turns: s.turns - 1 } : s
+        )
+        .filter((s) => s.turns > 0);
+    } else {
+      unit.statuses = unit.statuses
+        .map((s) => (s.kind === 'acid' ? { ...s, turns: s.turns - 1 } : s))
+        .filter((s) => s.turns > 0);
+    }
+  }
+
   state.phase = nextPhase;
 
   if (nextPhase === 'player') {
@@ -959,7 +1013,7 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
     unit.tempAttackBonus = 0;
     if (unit.abilityCooldown > 0) unit.abilityCooldown -= 1;
 
-    // Burn damage tick
+    // Burn damage tick (deals damage first, then ticks down)
     const burn = unit.statuses.find((s) => s.kind === 'burn' && s.turns > 0);
     if (burn) {
       unit.hp -= 2;
@@ -976,9 +1030,13 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
 
     if (!unit.alive) continue;
 
-    // Tick down status durations
+    // Start-of-phase duration ticks for Burn (post-tick) and self/ally buffs (shield, boosted)
     unit.statuses = unit.statuses
-      .map((s) => ({ ...s, turns: s.turns - 1 }))
+      .map((s) =>
+        s.kind === 'burn' || s.kind === 'shield' || s.kind === 'boosted'
+          ? { ...s, turns: s.turns - 1 }
+          : s
+      )
       .filter((s) => s.turns > 0);
 
     // Rich Compost terrain heal (+2 HP for produce!)
@@ -993,6 +1051,7 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
         amount: heal,
         source: 'Compost',
       });
+      pushLog(state, `${unit.name} healed +${heal} HP on Rich Compost!`);
     }
 
     // Sweet Nectar graft regeneration (+2 HP!)
@@ -1006,6 +1065,7 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
         amount: heal,
         source: 'Sweet Nectar',
       });
+      pushLog(state, `${unit.name} regenerated +${heal} HP from Sweet Nectar!`);
     }
   }
 

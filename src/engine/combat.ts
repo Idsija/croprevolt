@@ -60,8 +60,9 @@ export function forecastAttack(
   const rawBase = w.damage + boostBonus;
   const effCoverDmg = getEffectiveCoverDamage(attacker) + boostBonus;
 
-  // Targeting destructible cover / Barn Rescue cage directly: always 100% hit!
+  // Targeting destructible cover / Barn Rescue cage directly (or lobbing onto empty ground): always 100% hit!
   if (!isEnemyTarget) {
+    const emptyLobSplash = Math.max(1, Math.floor(w.damage / 2));
     return {
       attackerId: attacker.id,
       targetPos,
@@ -69,7 +70,7 @@ export function forecastAttack(
       coverLevel: 'none',
       matchup: 'neutral',
       baseDamage: rawBase,
-      finalDamage: isDestructibleCover ? effCoverDmg : rawBase,
+      finalDamage: isDestructibleCover ? effCoverDmg : emptyLobSplash,
       coverDamage: effCoverDmg,
       isLethal: Boolean(targetTile?.cover && effCoverDmg >= targetTile.cover.hp),
       canAttack: true,
@@ -250,10 +251,26 @@ export function unitHasMeaningfulAction(state: BattleState, unit: BattleUnit): b
       (e) => e.alive && e.team === 'enemy' && forecastAttack(state, unit, e.pos).canAttack
     );
     if (hasShootableEnemy) return true;
+
+    // Objective Barn Rescue Cage within weapon reach counts as a meaningful attack target!
+    for (let y = 0; y < state.height; y++) {
+      for (let x = 0; x < state.width; x++) {
+        if (state.tiles[y][x].cover?.isObjectiveCage && forecastAttack(state, unit, { x, y }).canAttack) {
+          return true;
+        }
+      }
+    }
   }
 
-  if (!unit.actions.hasUsedSkill && unit.ability && unit.abilityCooldown === 0) {
-    return true;
+  if (!unit.actions.hasUsedSkill) {
+    if (unit.ability && unit.abilityCooldown === 0) {
+      return true;
+    }
+    // Check if the player has usable Garden Satchel items remaining for this hero's utility slot
+    const hasAnyItem = Object.values(state.items).some((count) => count > 0);
+    if (hasAnyItem) {
+      return true;
+    }
   }
 
   return false;

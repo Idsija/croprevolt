@@ -10,10 +10,12 @@ import {
   unitHasMeaningfulAction,
 } from '../engine/combat';
 import { getAdjacentCoverBadges, posKey, tileAt, unitAt } from '../engine/grid';
-import { getFamilyLabel, getMatchup } from '../engine/hooks';
+import { getFamilyLabel, getMatchup, hasRelic } from '../engine/hooks';
 import { computeDashOptions, computeTeamJumpOptions } from '../engine/pathfinding';
+import type { StatusKind } from '../engine/types';
 import { type InteractionMode, PaperCraftRenderer } from '../renderer/canvas';
 import {
+  AUTO_END_GRACE_MS,
   cancelPreviewAction,
   clearAutoEndTimer,
   clearFocusOnTabAway,
@@ -32,6 +34,7 @@ import {
   setInteractionMode,
   subscribeBattleEvents,
   subscribeCameraFocus,
+  subscribeUndoReset,
   toggleAllDangerZone,
   toggleAudioMute,
   toggleAutoEndTurn,
@@ -46,10 +49,13 @@ const showItemsMenu = ref(false);
 const showUtilityMenu = ref(false);
 const inspectedNote = ref<{ title: string; desc: string } | null>(null);
 const zoomPercent = ref(100);
+const endConfirmPending = ref(false);
+let endConfirmTimer: ReturnType<typeof setTimeout> | null = null;
 
 let renderer: PaperCraftRenderer | null = null;
 let unsubscribeEvents: (() => void) | null = null;
 let unsubscribeFocus: (() => void) | null = null;
+let unsubscribeUndoReset: (() => void) | null = null;
 
 const battle = computed(() => gameStore.battle!);
 const playerUnits = computed(() => battle.value.units.filter((u) => u.team === 'player'));
@@ -199,6 +205,61 @@ const inspectedEnemyMatchup = computed(() => {
   return getMatchup(selectedUnit.value.family, inspectedEnemy.value.family);
 });
 
+const advantagePctLabel = computed(() =>
+  hasRelic(battle.value.relicIds, 'sharp_trowel') ? '+50%' : '+30%'
+);
+
+const latestLogLine = computed(() =>
+  battle.value.combatLog.length > 0 ? battle.value.combatLog[battle.value.combatLog.length - 1] : ''
+);
+
+const STATUS_META: Record<StatusKind, { short: string; title: string; desc: string }> = {
+  burn: { short: 'Burn', title: 'Burn', desc: 'Takes 2 fire damage at the start of its turn.' },
+  rooted: { short: 'Root', title: 'Rooted', desc: 'Tangled in vines — cannot Move, Dash, or Team-Jump.' },
+  acid: { short: 'Acid', title: 'Acid', desc: 'Corroded — takes +2 bonus damage from every attack.' },
+  feared: { short: 'Fear', title: 'Feared', desc: 'Rattled by crows — Move range reduced by 2 tiles.' },
+  shield: { short: 'Shld', title: 'Shield', desc: 'Braced — takes 2 less damage from incoming attacks.' },
+  boosted: { short: 'Bst', title: 'Boosted', desc: 'Fired up — deals +2 Attack and +2 Dash damage.' },
+};
+
+function inspectStatus(kind: StatusKind, turns: number): void {
+  const info = STATUS_META[kind];
+  if (!info) return;
+  inspectedNote.value = { title: `${info.title} (${turns}t)`, desc: info.desc };
+}
+
+function clearEndConfirm(): void {
+  endConfirmPending.value = false;
+  if (endConfirmTimer !== null) {
+    clearTimeout(endConfirmTimer);
+    endConfirmTimer = null;
+  }
+}
+
+function requestEndTurn(): void {
+  if (battle.value.phase !== 'player' || gameStore.enemyTurnRunning || battle.value.status !== 'ongoing') {
+    return;
+  }
+  showItemsMenu.value = false;
+  if (readyHeroesCount.value > 0 && !endConfirmPending.value) {
+    endConfirmPending.value = true;
+    if (endConfirmTimer !== null) clearTimeout(endConfirmTimer);
+    endConfirmTimer = setTimeout(() => {
+      endConfirmPending.value = false;
+      endConfirmTimer = null;
+    }, 2800);
+    return;
+  }
+  clearEndConfirm();
+  void endPlayerTurn();
+}
+
+function selectMedallion(unitId: string): void {
+  showItemsMenu.value = false;
+  clearEndConfirm();
+  selectBattleUnit(unitId);
+}
+
 const enemiesInAttackRange = computed(() => {
   if (!selectedUnit.value || battle.value.phase !== 'player' || selectedUnit.value.actions.hasAttacked) {
     return 0;
@@ -272,6 +333,7 @@ function optionIcon(kind: PreviewActionOption['kind']): CraftIconName {
 
 function toggleMode(targetMode: InteractionMode): void {
   showItemsMenu.value = false;
+  clearEndConfirm();
   if (gameStore.mode === targetMode) {
     setInteractionMode('move');
   } else {
@@ -281,6 +343,7 @@ function toggleMode(targetMode: InteractionMode): void {
 
 function pickItem(itemId: string): void {
   showItemsMenu.value = false;
+  clearEndConfirm();
   setInteractionMode('item', itemId);
 }
 
@@ -327,6 +390,7 @@ function handleTabAwayFocusClear(): void {
   showItemsMenu.value = false;
   showUtilityMenu.value = false;
   inspectedNote.value = null;
+  clearEndConfirm();
   clearFocusOnTabAway();
   if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
     document.activeElement.blur();
@@ -341,9 +405,11 @@ function onVisibilityChange(): void {
 
 function onKeyDown(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
+    if (gameStore.enemyTurnRunning) return;
     showItemsMenu.value = false;
     showUtilityMenu.value = false;
     inspectedNote.value = null;
+    clearEndConfirm();
     deselectAll(true);
   }
 }
@@ -371,12 +437,14 @@ onMounted(() => {
       showItemsMenu.value = false;
       showUtilityMenu.value = false;
       inspectedNote.value = null;
+      clearEndConfirm();
       handleBattleTileTap(pos, pointerType);
     },
     () => {
       showItemsMenu.value = false;
       showUtilityMenu.value = false;
       inspectedNote.value = null;
+      clearEndConfirm();
       handleOffBoardTap();
     },
     (pct) => {
@@ -389,6 +457,11 @@ onMounted(() => {
   unsubscribeFocus = subscribeCameraFocus((pos) => {
     renderer?.focusOnGrid(pos);
   });
+  unsubscribeUndoReset = subscribeUndoReset(() => {
+    showItemsMenu.value = false;
+    clearEndConfirm();
+    renderer?.cancelActiveAnims();
+  });
 
   window.addEventListener('blur', handleTabAwayFocusClear);
   document.addEventListener('visibilitychange', onVisibilityChange);
@@ -398,6 +471,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   unsubscribeEvents?.();
   unsubscribeFocus?.();
+  unsubscribeUndoReset?.();
+  clearEndConfirm();
   clearAutoEndTimer();
   renderer?.destroy();
   window.removeEventListener('blur', handleTabAwayFocusClear);
@@ -582,13 +657,28 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="menu-section">
+          <h4>Status Effects</h4>
+          <ul class="mini-rules">
+            <li><strong>Burn (B):</strong> -2 HP at start of turn · <strong>Acid (A):</strong> +2 damage taken.</li>
+            <li><strong>Rooted (R):</strong> Cannot move · <strong>Feared (!):</strong> -2 Move range.</li>
+            <li><strong>Shield (S):</strong> -2 damage taken · <strong>Boosted (+):</strong> +2 Attack &amp; Dash.</li>
+          </ul>
+        </div>
+
+        <div class="menu-section">
           <h4>Recent Battle Log</h4>
           <div class="menu-log">
-            <div v-for="(line, i) in battle.combatLog.slice(-5)" :key="i">• {{ line }}</div>
+            <div v-for="(line, i) in battle.combatLog.slice(-6)" :key="i">• {{ line }}</div>
           </div>
         </div>
 
-        <button class="paper-btn" @click="returnToTitle">← Save &amp; Return to Title</button>
+        <button
+          class="paper-btn"
+          :disabled="gameStore.enemyTurnRunning"
+          @click="returnToTitle"
+        >
+          ← Save &amp; Return to Title
+        </button>
       </section>
     </div>
 
@@ -642,7 +732,7 @@ onBeforeUnmount(() => {
             class="match-stamp"
             :class="activeForecast.matchup"
           >
-            {{ activeForecast.matchup === 'advantage' ? '+30%' : '-20%' }}
+            {{ activeForecast.matchup === 'advantage' ? `▲ ${advantagePctLabel}` : '▼ -20%' }}
           </span>
         </div>
 
@@ -680,24 +770,72 @@ onBeforeUnmount(() => {
     <!-- Single-Focus Morphing Mobile-First Paper-Craft Bottom Dock -->
     <footer v-if="battle.status === 'ongoing'" class="bottom-console-wrap">
       <div class="bottom-console">
-        <!-- Auto-End Turn Grace Strip -->
-        <div v-if="gameStore.autoEndPending" class="paper-card auto-end-banner">
-          <div class="auto-copy">
-            <CraftIcon name="auto_end" :size="15" />
-            <span>All heroes acted — Farmer Phase...</span>
-          </div>
-          <div class="auto-btns">
+        <!-- Bag Satchel Popover (Anchored directly to .bottom-console above medallions so it is NEVER occluded!) -->
+        <div
+          v-if="showItemsMenu && selectedUnit && !selectedUnit.actions.hasUsedSkill"
+          class="corrugated-slab bag-popover scroll-soft"
+        >
+          <div class="bag-head-row">
+            <span class="bag-note">Garden Satchel · uses Skill slot</span>
             <button
-              v-if="battle.undoSnapshot"
-              class="paper-btn gold mini-act"
-              @click="triggerUndoMove"
+              class="bag-close-btn"
+              aria-label="Close satchel"
+              @click="showItemsMenu = false"
             >
-              <CraftIcon name="undo" :size="13" />
-              <span>Undo</span>
+              <CraftIcon name="close" :size="13" />
             </button>
-            <button class="paper-btn mini-act" @click="clearAutoEndTimer">Stay</button>
+          </div>
+          <button
+            v-for="(count, iid) in battle.items"
+            :key="iid"
+            class="seed-packet bag-opt"
+            :disabled="count <= 0"
+            @click="pickItem(iid)"
+          >
+            <div class="bag-opt-head">
+              <strong>{{ ITEM_REGISTRY[iid]?.icon }} {{ ITEM_REGISTRY[iid]?.name }}</strong>
+              <span class="paper-pill">×{{ count }}</span>
+            </div>
+            <small>{{ ITEM_REGISTRY[iid]?.description }}</small>
+          </button>
+        </div>
+
+        <!-- Auto-End Turn Grace Strip with Live Countdown Bar -->
+        <div v-if="gameStore.autoEndPending" class="paper-card auto-end-banner">
+          <div class="auto-top-row">
+            <div class="auto-copy">
+              <CraftIcon name="auto_end" :size="15" />
+              <span>All heroes acted — Farmer Phase...</span>
+            </div>
+            <div class="auto-btns">
+              <button
+                v-if="battle.undoSnapshot"
+                class="paper-btn gold mini-act"
+                @click="triggerUndoMove"
+              >
+                <CraftIcon name="undo" :size="14" />
+                <span>Undo</span>
+              </button>
+              <button class="paper-btn mini-act" @click="clearAutoEndTimer">Stay</button>
+            </div>
+          </div>
+          <div class="auto-bar-track">
+            <div
+              class="auto-bar-fill"
+              :style="{ animationDuration: `${AUTO_END_GRACE_MS}ms` }"
+            ></div>
           </div>
         </div>
+
+        <!-- Compact 1-line Mobile Last-Action Ticker so phone/iPad players can follow enemy turns -->
+        <button
+          v-else-if="latestLogLine && !showItemsMenu && !isCombatPreview && !isMovePreview && !isSkillOrItemMode && !inspectedEnemy"
+          class="mobile-log-ticker mobile-only"
+          title="Tap to open full Battle Log"
+          @click="showUtilityMenu = true"
+        >
+          {{ latestLogLine }}
+        </button>
 
         <!-- Circular Die-Cut Paper Hero Medallions -->
         <div class="medallion-dock" :class="{ standalone: !showBottomConsoleDeck }">
@@ -712,7 +850,7 @@ onBeforeUnmount(() => {
             }"
             :disabled="!u.alive"
             :aria-label="u.id === gameStore.selectedUnitId ? `Deselect ${u.name}` : `Select ${u.name}`"
-            @click="selectBattleUnit(u.id)"
+            @click="selectMedallion(u.id)"
           >
             <div class="medallion-disc">
               <svg class="hp-ring" viewBox="0 0 48 48" aria-hidden="true">
@@ -746,12 +884,12 @@ onBeforeUnmount(() => {
           <button
             v-if="!showBottomConsoleDeck"
             class="paper-btn end-float-btn"
-            :class="{ primary: readyHeroesCount === 0 }"
+            :class="{ primary: readyHeroesCount === 0, danger: endConfirmPending }"
             :disabled="battle.phase !== 'player' || gameStore.enemyTurnRunning"
-            @click="endPlayerTurn"
+            @click="requestEndTurn"
           >
             <CraftIcon name="end_turn" :size="15" />
-            <span>{{ readyHeroesCount === 0 ? 'End!' : 'End Turn' }}</span>
+            <span>{{ endConfirmPending ? 'End?' : readyHeroesCount === 0 ? 'End!' : 'End Turn' }}</span>
           </button>
         </div>
 
@@ -813,13 +951,23 @@ onBeforeUnmount(() => {
                     class="match-stamp"
                     :class="activeForecast.matchup"
                   >
-                    {{ activeForecast.matchup === 'advantage' ? '+30%' : '-20%' }}
+                    {{ activeForecast.matchup === 'advantage' ? `▲ ${advantagePctLabel}` : '▼ -20%' }}
                   </span>
                   <span v-if="activeForecast.isLethal" class="ko-tag">KO!</span>
                 </template>
                 <span v-else-if="previewDashDamage !== null" class="hit-stamp half">
                   Dash -{{ previewDashDamage }}
                 </span>
+
+                <button
+                  v-for="st in focusedUnit?.statuses ?? []"
+                  :key="st.kind"
+                  class="status-chip"
+                  :class="st.kind"
+                  @click.stop="inspectStatus(st.kind, st.turns)"
+                >
+                  {{ STATUS_META[st.kind]?.short }} {{ st.turns }}t
+                </button>
 
                 <button
                   v-if="focusedUnit && focusedUnit.team === 'enemy'"
@@ -982,9 +1130,18 @@ onBeforeUnmount(() => {
                       class="match-stamp"
                       :class="inspectedEnemyMatchup"
                     >
-                      {{ inspectedEnemyMatchup === 'advantage' ? 'You +30%' : 'You -20%' }}
+                      {{ inspectedEnemyMatchup === 'advantage' ? `▲ You ${advantagePctLabel}` : '▼ You -20%' }}
                     </span>
                     <span v-else class="paper-pill mini-fam">{{ getFamilyLabel(inspectedEnemy.family) }}</span>
+                    <button
+                      v-for="st in inspectedEnemy.statuses"
+                      :key="st.kind"
+                      class="status-chip"
+                      :class="st.kind"
+                      @click.stop="inspectStatus(st.kind, st.turns)"
+                    >
+                      {{ STATUS_META[st.kind]?.short }} {{ st.turns }}t
+                    </button>
                   </div>
                   <small>
                     HP {{ inspectedEnemy.hp }}/{{ inspectedEnemy.maxHp }} · Mv {{ inspectedEnemy.moveRange }} ·
@@ -1018,6 +1175,25 @@ onBeforeUnmount(() => {
               </button>
 
               <div class="slot-pills">
+                <!-- Thumb-reachable mid-turn Undo chip whenever available! -->
+                <button
+                  v-if="battle.undoSnapshot && battle.phase === 'player' && !gameStore.enemyTurnRunning"
+                  class="undo-thumb-chip"
+                  title="Undo last move"
+                  @click="triggerUndoMove"
+                >
+                  <CraftIcon name="undo" :size="11" />
+                  <span>Undo</span>
+                </button>
+                <button
+                  v-for="st in selectedUnit.statuses.slice(0, 2)"
+                  :key="st.kind"
+                  class="status-chip"
+                  :class="st.kind"
+                  @click.stop="inspectStatus(st.kind, st.turns)"
+                >
+                  {{ STATUS_META[st.kind]?.short }} {{ st.turns }}t
+                </button>
                 <span
                   class="slot-pill move"
                   :class="{ spent: selectedUnit.actions.hasMoved }"
@@ -1106,53 +1282,35 @@ onBeforeUnmount(() => {
                 </span>
               </button>
 
-              <div class="bag-wrap">
-                <button
-                  class="paper-btn gold act-tab"
-                  :class="{ 'is-active': showItemsMenu }"
-                  :disabled="
-                    selectedUnit.actions.hasUsedSkill ||
-                    totalItemsLeft === 0 ||
-                    battle.phase !== 'player' ||
-                    gameStore.enemyTurnRunning
-                  "
-                  title="Garden Satchel (shares Skill slot)"
-                  @click="showItemsMenu = !showItemsMenu"
-                >
-                  <CraftIcon name="bag" :size="16" />
-                  <span class="tab-lbl">Bag</span>
-                  <span class="tab-count">{{ totalItemsLeft }}</span>
-                </button>
-
-                <div v-if="showItemsMenu" class="corrugated-slab bag-popover">
-                  <div class="bag-note">Uses this hero's Skill slot</div>
-                  <button
-                    v-for="(count, iid) in battle.items"
-                    :key="iid"
-                    class="seed-packet bag-opt"
-                    :disabled="count <= 0"
-                    @click="pickItem(iid)"
-                  >
-                    <div class="bag-opt-head">
-                      <strong>{{ ITEM_REGISTRY[iid]?.icon }} {{ ITEM_REGISTRY[iid]?.name }}</strong>
-                      <span class="paper-pill">×{{ count }}</span>
-                    </div>
-                    <small>{{ ITEM_REGISTRY[iid]?.description }}</small>
-                  </button>
-                </div>
-              </div>
+              <button
+                class="paper-btn gold act-tab"
+                :class="{ 'is-active': showItemsMenu }"
+                :disabled="
+                  selectedUnit.actions.hasUsedSkill ||
+                  totalItemsLeft === 0 ||
+                  battle.phase !== 'player' ||
+                  gameStore.enemyTurnRunning
+                "
+                title="Garden Satchel (shares Skill slot)"
+                @click="showItemsMenu = !showItemsMenu"
+              >
+                <CraftIcon name="bag" :size="16" />
+                <span class="tab-lbl">Bag</span>
+                <span class="tab-count">{{ totalItemsLeft }}</span>
+              </button>
 
               <button
                 class="paper-btn act-tab end-tab"
                 :class="{
-                  primary: readyHeroesCount === 0,
-                  'end-idle': readyHeroesCount > 0,
+                  primary: readyHeroesCount === 0 && !endConfirmPending,
+                  danger: endConfirmPending,
+                  'end-idle': readyHeroesCount > 0 && !endConfirmPending,
                 }"
                 :disabled="battle.phase !== 'player' || gameStore.enemyTurnRunning || battle.status !== 'ongoing'"
-                @click="endPlayerTurn"
+                @click="requestEndTurn"
               >
                 <CraftIcon name="end_turn" :size="16" />
-                <span class="tab-lbl">{{ readyHeroesCount === 0 ? 'End!' : 'End' }}</span>
+                <span class="tab-lbl">{{ endConfirmPending ? 'End?' : readyHeroesCount === 0 ? 'End!' : 'End' }}</span>
               </button>
             </div>
           </template>
@@ -1673,17 +1831,45 @@ onBeforeUnmount(() => {
 /* ===== Auto-End Turn Grace Banner ===== */
 .auto-end-banner {
   margin: 0 auto 6px;
-  padding: 6px 10px;
+  padding: 6px 10px 5px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  gap: 5px;
   background:
-    linear-gradient(180deg, rgba(255, 249, 224, 0.95) 0%, rgba(248, 227, 158, 0.95) 100%),
+    linear-gradient(180deg, rgba(255, 249, 224, 0.96) 0%, rgba(248, 227, 158, 0.96) 100%),
     var(--tex-paper) center / 300px 300px repeat;
   border-radius: var(--radius-tag);
   width: 100%;
   max-width: 440px;
+}
+
+.auto-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.auto-bar-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(74, 44, 23, 0.16);
+  overflow: hidden;
+}
+
+.auto-bar-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #548c32 0%, #e0ae3f 100%);
+  transform-origin: left center;
+  animation: autoShrink 2400ms linear forwards;
+}
+
+@keyframes autoShrink {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
 .auto-copy {
@@ -1697,14 +1883,32 @@ onBeforeUnmount(() => {
 
 .auto-btns {
   display: flex;
-  gap: 5px;
+  gap: 6px;
 }
 
 .mini-act {
-  min-height: 32px;
-  padding: 4px 10px;
-  font-size: 0.76rem;
-  border-radius: 8px;
+  min-height: 38px;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  border-radius: 9px;
+}
+
+.mobile-log-ticker {
+  margin: 0 auto 4px;
+  padding: 3px 10px;
+  max-width: min(360px, calc(100vw - 24px));
+  border-radius: 999px;
+  border: 1.5px solid rgba(74, 44, 23, 0.55);
+  background: rgba(252, 247, 235, 0.92);
+  color: var(--ink);
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(38, 17, 4, 0.16);
 }
 
 /* ===== Single-Focus Morphing Bottom Paper-Craft Dock ===== */
@@ -1725,6 +1929,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   pointer-events: auto;
+  position: relative;
 }
 
 .medallion-dock {
@@ -2112,12 +2317,48 @@ onBeforeUnmount(() => {
 .slot-pill.dim { opacity: 0.62; }
 
 .slot-pill.spent {
-  background: #e6dac3;
-  color: #7c6750;
-  border-color: rgba(71, 43, 22, 0.35);
+  background: #eae0cc;
+  color: #5a422b;
+  border-color: rgba(71, 43, 22, 0.42);
   text-decoration: line-through;
-  opacity: 0.72;
+  opacity: 0.85;
 }
+
+.undo-thumb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1.5px solid var(--ink);
+  background: linear-gradient(180deg, #fff5be 0%, #f1ca52 100%);
+  color: var(--ink);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1.5px 6px;
+  border-radius: 999px;
+  border: 1.4px solid var(--ink);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.66rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.status-chip.burn { background: #ffd8c2; color: #8c2308; }
+.status-chip.rooted { background: #d4f0c4; color: #1e5714; }
+.status-chip.acid { background: #f2f2a6; color: #544a00; }
+.status-chip.feared { background: #ebd4fa; color: #591c78; }
+.status-chip.shield { background: #cde8fc; color: #124873; }
+.status-chip.boosted { background: #ffebb0; color: #754700; }
 
 .graft-pin,
 .coop-pin {
@@ -2177,7 +2418,10 @@ onBeforeUnmount(() => {
 }
 
 .act-tab.is-active {
-  outline: 2.5px solid #fff7be;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 245, 0.45),
+    0 0 0 2.5px #fff5b8,
+    0 0 0 4.5px var(--ink);
   transform: translateY(-1px);
 }
 
@@ -2231,29 +2475,48 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-.bag-wrap {
-  position: relative;
-}
-
 .bag-popover {
   position: absolute;
-  bottom: calc(100% + 12px);
-  right: -36px;
-  width: min(260px, calc(100vw - 20px));
-  padding: 9px;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(300px, calc(100vw - 20px));
+  max-height: min(46dvh, 290px);
+  overflow-y: auto;
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  z-index: 30;
+  z-index: 40;
+}
+
+.bag-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1.2px dashed rgba(71, 43, 22, 0.24);
+}
+
+.bag-close-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1.5px solid var(--ink);
+  background: #fffaf0;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 .bag-note {
   font-family: 'Fredoka', sans-serif;
-  font-size: 0.7rem;
+  font-size: 0.74rem;
+  font-weight: 600;
   color: var(--ink-soft);
-  text-align: center;
-  padding-bottom: 2px;
-  border-bottom: 1.2px dashed rgba(71, 43, 22, 0.22);
 }
 
 .bag-opt {
@@ -2445,10 +2708,6 @@ onBeforeUnmount(() => {
   .tab-count {
     font-size: 0.64rem;
     padding: 0 4px;
-  }
-
-  .bag-popover {
-    right: -52px;
   }
 }
 </style>

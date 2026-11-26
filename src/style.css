@@ -292,37 +292,37 @@ h4,
 }
 
 .paper-btn:disabled {
-  opacity: 0.44;
+  opacity: 0.56;
   cursor: not-allowed;
   box-shadow: 0 1px 0 rgba(74, 44, 23, 0.35);
 }
 
-/* Clean leaf-green watercolor wash matching "CROP" in logo.png */
+/* Clean leaf-green watercolor wash matching "CROP" in logo.png (WCAG AA contrast) */
 .paper-btn.primary {
   background:
     var(--tex-tooth) center / 220px 220px repeat,
-    radial-gradient(ellipse at 22% 16%, rgba(176, 224, 128, 0.45) 0%, transparent 62%),
-    linear-gradient(178deg, #74af4a 0%, #589336 65%, #4a7e2c 100%);
+    radial-gradient(ellipse at 22% 16%, rgba(154, 208, 108, 0.34) 0%, transparent 60%),
+    linear-gradient(178deg, #548c32 0%, #3f7322 65%, #325e19 100%);
   color: #fffdf5;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 242, 0.38),
-    0 2px 0 #376220,
+    0 2px 0 #264a12,
     0 4px 8px rgba(38, 17, 4, 0.18);
-  text-shadow: 0 1px 0 rgba(42, 22, 8, 0.40);
+  text-shadow: 0 1px 0 rgba(32, 16, 4, 0.45);
 }
 
-/* Clean terracotta-red watercolor wash matching "REVOLT!" ribbon in logo.png */
+/* Clean terracotta-red watercolor wash matching "REVOLT!" ribbon in logo.png (WCAG AA contrast) */
 .paper-btn.danger {
   background:
     var(--tex-tooth) center / 220px 220px repeat,
-    radial-gradient(ellipse at 22% 16%, rgba(248, 152, 130, 0.38) 0%, transparent 62%),
-    linear-gradient(178deg, #dc654f 0%, #be4735 65%, #a13728 100%);
+    radial-gradient(ellipse at 22% 16%, rgba(242, 134, 112, 0.30) 0%, transparent 60%),
+    linear-gradient(178deg, #c64835 0%, #a83424 65%, #8c271a 100%);
   color: #fffdf5;
   box-shadow:
     inset 0 1px 0 rgba(255, 242, 235, 0.35),
-    0 2px 0 #7e2519,
+    0 2px 0 #691b11,
     0 4px 8px rgba(38, 17, 4, 0.18);
-  text-shadow: 0 1px 0 rgba(42, 22, 8, 0.40);
+  text-shadow: 0 1px 0 rgba(36, 14, 6, 0.45);
 }
 
 /* Clean sunlit honey-gold watercolor wash */
@@ -338,32 +338,32 @@ h4,
     0 4px 8px rgba(38, 17, 4, 0.15);
 }
 
-/* Clean cerulean watercolor wash */
+/* Clean cerulean watercolor wash (WCAG AA contrast) */
 .paper-btn.sky {
   background:
     var(--tex-tooth) center / 220px 220px repeat,
-    radial-gradient(ellipse at 24% 16%, rgba(180, 232, 244, 0.42) 0%, transparent 62%),
-    linear-gradient(178deg, #6fb6c8 0%, #4d94a8 65%, #3d7d90 100%);
+    radial-gradient(ellipse at 24% 16%, rgba(154, 218, 234, 0.34) 0%, transparent 60%),
+    linear-gradient(178deg, #3c8398 0%, #2b6b7f 65%, #205768 100%);
   color: #fffdf5;
   box-shadow:
     inset 0 1px 0 rgba(242, 253, 255, 0.38),
-    0 2px 0 #2b6070,
+    0 2px 0 #17414f,
     0 4px 8px rgba(38, 17, 4, 0.18);
-  text-shadow: 0 1px 0 rgba(42, 22, 8, 0.36);
+  text-shadow: 0 1px 0 rgba(24, 14, 6, 0.42);
 }
 
-/* Clean berry-plum watercolor wash */
+/* Clean berry-plum watercolor wash (WCAG AA contrast) */
 .paper-btn.plum {
   background:
     var(--tex-tooth) center / 220px 220px repeat,
-    radial-gradient(ellipse at 24% 16%, rgba(214, 180, 238, 0.38) 0%, transparent 62%),
-    linear-gradient(178deg, #a67ac5 0%, #8657a8 65%, #704391 100%);
+    radial-gradient(ellipse at 24% 16%, rgba(198, 158, 228, 0.32) 0%, transparent 60%),
+    linear-gradient(178deg, #8452a8 0%, #6b3d8f 65%, #572e78 100%);
   color: #fffdf5;
   box-shadow:
     inset 0 1px 0 rgba(250, 240, 255, 0.36),
-    0 2px 0 #4f2a6c,
+    0 2px 0 #3f1f59,
     0 4px 8px rgba(38, 17, 4, 0.18);
-  text-shadow: 0 1px 0 rgba(42, 22, 8, 0.38);
+  text-shadow: 0 1px 0 rgba(30, 12, 40, 0.44);
 }
 
 /* Clean Watercolor Paper Pill Tag */

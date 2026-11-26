@@ -103,57 +103,59 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
     </header>
 
     <div class="map-layout">
-      <!-- Illustrated Branching Parchment Garden Trail -->
-      <section class="paper-card route-board scroll-soft" :class="{ 'hide-mobile': mobileTab !== 'trail' }">
+      <!-- Illustrated Branching Parchment Garden Trail (outer shell prevents washi-tape clipping!) -->
+      <section class="paper-card route-shell" :class="{ 'hide-mobile': mobileTab !== 'trail' }">
         <div class="washi-tape"></div>
-        <div class="route-head">
-          <h3>Garden Trail Map</h3>
-          <small>Choose a glowing stop to march toward Captain Scarecrow</small>
-        </div>
+        <div class="route-board scroll-soft">
+          <div class="route-head">
+            <h3>Garden Trail Map</h3>
+            <small>Choose a glowing stop to march toward Captain Scarecrow</small>
+          </div>
 
-        <div class="stages-track">
-          <div v-for="(stageNodes, stageIdx) in stages" :key="stageIdx" class="stage-col">
-            <div class="stage-label">
-              {{ stageIdx === 3 ? 'FINAL BOSS' : `STAGE ${stageIdx + 1}` }}
-            </div>
+          <div class="stages-track">
+            <div v-for="(stageNodes, stageIdx) in stages" :key="stageIdx" class="stage-col">
+              <div class="stage-label">
+                {{ stageIdx === 3 ? 'FINAL BOSS' : `STAGE ${stageIdx + 1}` }}
+              </div>
 
-            <div class="stage-nodes" :class="{ 'branch-pair': stageNodes.length > 1 }">
-              <button
-                v-for="node in stageNodes"
-                :key="node.id"
-                class="seed-packet node-card"
-                :class="{
-                  available: availableIds.has(node.id),
-                  completed: node.completed,
-                  boss: node.type === 'boss',
-                  vault: node.type === 'vault',
-                  rescue: node.type === 'barn_rescue',
-                }"
-                :disabled="!availableIds.has(node.id)"
-                @click="enterSeasonNode(node.id)"
-              >
-                <div class="node-art-row">
-                  <img class="node-sprite" :src="nodeSprite(node.type)" :alt="node.name" />
-                  <div class="node-badges">
-                    <span class="type-tag">{{ nodeTypeTag(node.type) }}</span>
-                    <span class="state-badge">
-                      <template v-if="node.completed">
-                        <CraftIcon name="check" :size="12" /> Cleared
-                      </template>
-                      <template v-else-if="availableIds.has(node.id)">
-                        <CraftIcon name="play" :size="11" /> Play
-                      </template>
-                      <template v-else>Locked</template>
-                    </span>
+              <div class="stage-nodes" :class="{ 'branch-pair': stageNodes.length > 1 }">
+                <button
+                  v-for="node in stageNodes"
+                  :key="node.id"
+                  class="seed-packet node-card"
+                  :class="{
+                    available: availableIds.has(node.id),
+                    completed: node.completed,
+                    boss: node.type === 'boss',
+                    vault: node.type === 'vault',
+                    rescue: node.type === 'barn_rescue',
+                  }"
+                  :disabled="!availableIds.has(node.id)"
+                  @click="enterSeasonNode(node.id)"
+                >
+                  <div class="node-art-row">
+                    <img class="node-sprite" :src="nodeSprite(node.type)" :alt="node.name" />
+                    <div class="node-badges">
+                      <span class="type-tag">{{ nodeTypeTag(node.type) }}</span>
+                      <span class="state-badge">
+                        <template v-if="node.completed">
+                          <CraftIcon name="check" :size="12" /> Cleared
+                        </template>
+                        <template v-else-if="availableIds.has(node.id)">
+                          <CraftIcon name="play" :size="11" /> Play
+                        </template>
+                        <template v-else>Locked</template>
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <strong class="node-name">{{ node.name }}</strong>
-                <small class="node-sub">{{ node.subtitle }}</small>
-              </button>
-            </div>
+                  <strong class="node-name">{{ node.name }}</strong>
+                  <small class="node-sub">{{ node.subtitle }}</small>
+                </button>
+              </div>
 
-            <div v-if="stageIdx < 3" class="trail-connector">
-              <span class="conn-dots"></span>
+              <div v-if="stageIdx < 3" class="trail-connector">
+                <span class="conn-dots"></span>
+              </div>
             </div>
           </div>
         </div>
@@ -366,7 +368,17 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
   gap: 14px;
 }
 
+.route-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: visible;
+  margin-top: 6px;
+}
+
 .route-board {
+  flex: 1;
+  min-height: 0;
   padding: 20px 18px 18px;
   display: flex;
   flex-direction: column;
@@ -805,11 +817,27 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
   .brand-right {
     gap: 5px;
     flex-shrink: 0;
+    flex-wrap: nowrap;
+  }
+
+  .sidebar {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .squad-panel {
+    flex: 0 0 auto;
   }
 
   .node-sprite {
     height: 38px;
     width: 38px;
+  }
+}
+
+@media (max-width: 390px) {
+  .stage-nodes.branch-pair {
+    grid-template-columns: 1fr;
   }
 }
 </style>

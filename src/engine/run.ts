@@ -167,7 +167,7 @@ export function createMiniSeasonNodes(): SeasonNode[] {
       lane: 0,
       type: 'escape',
       name: 'Garden Gate Breakout',
-      subtitle: 'Reach the Gate — Vault past the blockade for a Graft + Relic',
+      subtitle: 'Reach the Gate — Vault past foes for a Graft, Soil Relic & 16 Seeds',
       mapId: 'patch_breakout',
       nextIds: ['n2a', 'n2b'],
       completed: false,
@@ -178,7 +178,7 @@ export function createMiniSeasonNodes(): SeasonNode[] {
       lane: 1,
       type: 'vault',
       name: 'Seed Vault & Compost',
-      subtitle: 'Safe Node — Recruit a Produce Hero, heal squad & claim a Soil Relic',
+      subtitle: 'Safe Stop — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
       nextIds: ['n2a', 'n2b'],
       completed: false,
     },
@@ -276,14 +276,14 @@ export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Mat
   if (node.type === 'vault') {
     const picks = pickRandomDistinct(recruitPool, 3, rng);
     return {
-      seedsEarned: 8,
-      graftChoices: pickRandomDistinct(ALL_GRAFT_IDS, 3, rng),
-      relicChoices: pickRandomDistinct(availableRelics, 3, rng),
+      seedsEarned: 6,
+      graftChoices: [],
+      relicChoices: [],
       recruitChoices: picks,
       freeHealAmount: 6,
       itemGrant: { itemId: 'watering_can', count: 1 },
-      claimedGraft: false,
-      claimedRelic: availableRelics.length === 0,
+      claimedGraft: true,
+      claimedRelic: true,
       claimedRecruit: picks.length === 0,
     };
   }
@@ -292,15 +292,18 @@ export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Mat
   const grantsRecruit =
     recruitPool.length > 0 && (node.type === 'skirmish' || node.type === 'barn_rescue');
   const recruitPicks = grantsRecruit ? pickRandomDistinct(recruitPool, 2, rng) : [];
-  const randomItem = ALL_ITEM_IDS[Math.floor(rng() * ALL_ITEM_IDS.length)];
+  const randomItem =
+    node.type === 'elite'
+      ? 'fertilizer_bomb'
+      : ALL_ITEM_IDS[Math.floor(rng() * ALL_ITEM_IDS.length)];
 
   return {
-    seedsEarned: node.type === 'elite' ? 20 : node.type === 'boss' ? 40 : 12,
-    graftChoices: pickRandomDistinct(ALL_GRAFT_IDS, 3, rng),
+    seedsEarned: node.type === 'elite' ? 24 : node.type === 'escape' ? 16 : node.type === 'boss' ? 40 : 12,
+    graftChoices: pickRandomDistinct(ALL_GRAFT_IDS, node.type === 'elite' ? 4 : 3, rng),
     relicChoices: grantsRelic ? pickRandomDistinct(availableRelics, 3, rng) : [],
     recruitChoices: recruitPicks,
-    itemGrant: { itemId: randomItem, count: 1 },
-    freeHealAmount: 3,
+    itemGrant: { itemId: randomItem, count: node.type === 'elite' ? 2 : 1 },
+    freeHealAmount: node.type === 'escape' ? 4 : 3,
     claimedGraft: false,
     claimedRelic: !grantsRelic || availableRelics.length === 0,
     claimedRecruit: recruitPicks.length === 0,
@@ -450,11 +453,13 @@ function getTierForGraftCount(count: number): PromotionTier {
   return 'seedling';
 }
 
+export const MAX_GRAFTS_PER_HERO = 2;
+
 export function applyGraftToHero(run: RunState, heroUid: string, graftId: string): boolean {
   const hero = run.roster.find((h) => h.uid === heroUid && !h.harvested);
   const graft = GRAFT_REGISTRY[graftId];
   if (!hero || !graft) return false;
-  if (hero.graftIds.includes(graftId)) return false;
+  if (hero.graftIds.includes(graftId) || hero.graftIds.length >= MAX_GRAFTS_PER_HERO) return false;
 
   const prevTier = hero.tier;
   hero.graftIds.push(graftId);

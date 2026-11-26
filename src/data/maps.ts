@@ -43,7 +43,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { x: 5, y: 7 },
     ],
     enemySpawns: [
-      { blueprintId: 'digger', x: 1, y: 2 },
+      { blueprintId: 'digger', x: 3, y: 4 },
       { blueprintId: 'trimmer', x: 4, y: 2 },
       { blueprintId: 'digger', x: 3, y: 1 },
     ],

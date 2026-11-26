@@ -30,11 +30,11 @@ export const ITEM_REGISTRY: Record<string, ItemDef> = {
     targetType: 'tile',
     range: 5,
     aoeRadius: 1,
-    damage: 1,
+    damage: 2,
     appliesStatus: { kind: 'rooted', turns: 1 },
     color: '#eab308',
     icon: '🍯',
-    description: 'Lob a sticky pot over cover: 1 dmg and Roots all enemies in a 3x3 area.',
+    description: 'Lob a sticky pot over cover: 2 dmg and Roots all enemies in a 3x3 area for their next turn.',
   },
 };
 

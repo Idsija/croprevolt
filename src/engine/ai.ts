@@ -81,12 +81,15 @@ export function runEnemyUnitTurn(
   const players = state.units.filter((u) => u.team === 'player' && u.alive);
   if (players.length === 0) return false;
 
-  // 1. Opportunistic Dash! (Especially aggressive for Rusty Mower & Trimmer)
-  const dashes = computeDashOptions(state, enemy);
-  if (dashes.length > 0) {
-    dashes.sort((a, b) => b.damage - a.damage);
-    executeDash(state, enemy.id, dashes[0].enemyId);
-    if (state.status !== 'ongoing') return true;
+  // 1. Opportunistic Dash! (Only for melee/frontline brawlers — never suicidal 1-dmg dashes for backline lobbers!)
+  const prefersBackline = enemy.dashDamage <= 1 || enemy.weapon.minRange >= 2;
+  if (!prefersBackline) {
+    const dashes = computeDashOptions(state, enemy);
+    if (dashes.length > 0) {
+      dashes.sort((a, b) => b.damage - a.damage);
+      executeDash(state, enemy.id, dashes[0].enemyId);
+      if (state.status !== 'ongoing') return true;
+    }
   }
 
   // 2. Pick best destination tile (staying put OR moving within moveRange)
@@ -107,10 +110,14 @@ export function runEnemyUnitTurn(
     const distPenalty = Math.abs(minDist - preferredDist) * 3.5;
 
     let totalScore = coverScore - distPenalty;
-    if (attack) totalScore += attack.score;
-
-    // Slightly favor moving closer if we can't attack yet
-    if (!attack) {
+    if (attack) {
+      totalScore += attack.score;
+      // If only a cover crate is shootable (score <= 8), still prefer advancing toward heroes rather than stalling
+      if (attack.score <= 8) {
+        totalScore -= minDist * 2;
+      }
+    } else {
+      // Slightly favor moving closer if we can't attack yet
       totalScore -= minDist * 4;
     }
 
