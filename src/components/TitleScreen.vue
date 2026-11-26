@@ -11,6 +11,7 @@ import {
   type OnlineScoreRow,
 } from '../engine/onlineScores';
 import { META_UNLOCK_COSTS } from '../engine/run';
+import { activeStreak, loadDailyState } from '../engine/daily';
 import { dailyKeyFor, loadScores, topDailyScores, topStandardScores } from '../engine/score';
 import type { MetaProgress } from '../engine/types';
 import { TitleBackdropRenderer } from '../renderer3d/TitleBackdropRenderer';
@@ -31,6 +32,7 @@ import CropRevoltLogo from './CropRevoltLogo.vue';
 const activeModal = ref<'none' | 'shed' | 'guide' | 'almanac' | 'scores'>('none');
 
 const todayKey = dailyKeyFor();
+const fmt = (n: number) => n.toLocaleString('en-US');
 const scoreTab = ref<'daily' | 'standard'>('daily');
 // Read once per visit to the title: scores only change when a run ends, which remounts this screen.
 const allScores = loadScores();
@@ -90,7 +92,15 @@ const shownBoard = computed<BoardRow[]>(() => {
 const boardLoading = computed(() => scoreScope.value === 'everyone' && onlineState.value === 'loading');
 const boardError = computed(() => scoreScope.value === 'everyone' && onlineState.value === 'error');
 const dailyBest = dailyBoard[0]?.score ?? null;
-const fmt = (n: number) => n.toLocaleString('en-US');
+const dailyState = loadDailyState();
+const dailyAttemptsToday = dailyState.attempts[todayKey] ?? 0;
+const dailyStreak = activeStreak(dailyState.streak, todayKey);
+const dailyHint =
+  dailyBest !== null
+    ? `Today's score: ${fmt(dailyBest)} · replay for practice`
+    : dailyAttemptsToday > 0
+      ? 'Scored attempt in progress or abandoned · practice only'
+      : 'One scored attempt · same garden for everyone';
 const shortDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const backdropCanvasRef = ref<HTMLCanvasElement | null>(null);
@@ -265,7 +275,10 @@ onBeforeUnmount(() => {
           <button class="paper-btn sky diecut daily-btn" @click="startDailyRun()">
             <span class="daily-copy">
               <strong>Daily Run</strong>
-              <small>{{ dailyBest !== null ? `Your best today: ${fmt(dailyBest)}` : 'Same garden for everyone today' }}</small>
+              <small>{{ dailyHint }}</small>
+            </span>
+            <span v-if="dailyStreak > 0" class="streak-chip" :title="`${dailyStreak}-day streak`">
+              {{ dailyStreak }}🔥
             </span>
           </button>
           <button class="paper-btn sec-btn scores-btn" @click="activeModal = 'scores'">
@@ -833,6 +846,13 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   line-height: 1.15;
+}
+
+.streak-chip {
+  margin-left: auto;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .daily-copy small {

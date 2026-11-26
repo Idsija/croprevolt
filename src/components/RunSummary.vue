@@ -8,6 +8,7 @@ import {
   queueScore,
   toRow,
 } from '../engine/onlineScores';
+import { activeStreak, dailyShareText, isPracticeRun, loadDailyState } from '../engine/daily';
 import { computeRunScore, loadScores, rankOf, scoreEntryForRun } from '../engine/score';
 import { gameStore, playAgain, returnToTitle } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
@@ -21,7 +22,20 @@ const rank = computed(() => rankOf(loadScores(), scoreEntryForRun(run.value)));
 const fmt = (n: number) => n.toLocaleString('en-US');
 
 /** Upload to the shared board when one is configured; unsent scores stay queued for later. */
-const online = onlineConfig();
+const isPractice = computed(() => isPracticeRun(run.value));
+/** Day streak including this run (the run was recorded when it ended). */
+const streak = isDaily.value ? activeStreak(loadDailyState().streak, run.value.dailyKey ?? '') : 0;
+const copied = ref<'idle' | 'done' | 'failed'>('idle');
+async function copyResult(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(dailyShareText(run.value, streak));
+    copied.value = 'done';
+  } catch {
+    copied.value = 'failed';
+  }
+}
+
+const online = isPractice.value ? null : onlineConfig();
 const playerName = online ? loadPlayerName() : '';
 const uploadState = ref<'sending' | 'sent' | 'queued'>('sending');
 onMounted(async () => {
@@ -78,10 +92,12 @@ onMounted(async () => {
 
       <div class="seed-packet score-card" aria-label="Run score">
         <div class="score-head">
-          <span class="score-kicker">{{ isDaily ? `Daily Run · ${run.dailyKey}` : 'Run Score' }}</span>
+          <span class="score-kicker">{{ isDaily ? `Daily Run · ${run.dailyKey}${isPractice ? ' · Practice' : ''}` : 'Run Score' }}</span>
           <strong class="score-total">{{ fmt(score.total) }}</strong>
-          <span v-if="rank === 1" class="paper-pill rank-pill best">★ New best on this device!</span>
+          <span v-if="isPractice" class="paper-pill rank-pill">Practice run, not ranked</span>
+          <span v-else-if="rank === 1" class="paper-pill rank-pill best">★ New best on this device!</span>
           <span v-else-if="rank > 0" class="paper-pill rank-pill">#{{ rank }} on this device</span>
+          <span v-if="streak > 1 && !isPractice" class="paper-pill rank-pill streak">{{ streak }}-day streak</span>
         </div>
         <small v-if="online" class="upload-note" aria-live="polite">
           {{
@@ -123,9 +139,18 @@ onMounted(async () => {
         </div>
       </div>
 
+      <div v-if="isDaily" class="share-row">
+        <button class="paper-btn sky share-btn" @click="copyResult">
+          {{ copied === 'done' ? 'Copied!' : 'Copy result to share' }}
+        </button>
+        <small v-if="copied === 'failed'" class="upload-note" role="status">
+          Couldn't copy here. Your browser blocked clipboard access.
+        </small>
+      </div>
+
       <div class="actions">
         <button class="paper-btn primary diecut act-btn" @click="playAgain()">
-          <CraftIcon name="play" :size="18" /> {{ isDaily ? 'Retry Daily Run' : 'Play Another Run' }}
+          <CraftIcon name="play" :size="18" /> {{ isDaily ? 'Practice Daily Again' : 'Play Another Run' }}
         </button>
         <button class="paper-btn gold diecut act-btn" @click="returnToTitle">
           <CraftIcon name="shed" :size="18" /> Seed Shed
@@ -249,6 +274,23 @@ onMounted(async () => {
 
 .rank-pill.best {
   background: #fde89b;
+}
+
+.rank-pill.streak {
+  background: #ffd9b0;
+}
+
+.share-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.share-btn {
+  min-height: 42px;
+  padding-inline: 18px;
 }
 
 .upload-note {

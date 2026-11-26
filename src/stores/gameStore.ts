@@ -1,3 +1,4 @@
+import { registerDailyAttempt } from '../engine/daily';
 import { reactive } from 'vue';
 import { ITEM_REGISTRY } from '../data/items';
 import { RECRUITABLE_BLUEPRINT_IDS } from '../data/produce';
@@ -399,7 +400,10 @@ export function buyMetaUnlock(key: keyof MetaProgress['unlocks']): boolean {
 }
 
 export function startDailyRun(): void {
-  beginRun(createDailyRun());
+  const run = createDailyRun();
+  // Starting uses up the day's scored attempt, so a bad start can't be rerolled.
+  run.dailyAttempt = registerDailyAttempt(run.dailyKey!);
+  beginRun(run);
 }
 
 /** Start the same kind of run again: today's daily after a daily, a standard run otherwise. */

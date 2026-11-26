@@ -572,6 +572,8 @@ export interface RunState {
   mode?: 'standard' | 'daily';
   /** UTC date (YYYY-MM-DD) of the daily run this is. */
   dailyKey?: string;
+  /** Which attempt at that day's run this is on this device; only attempt 1 is scored. */
+  dailyAttempt?: number;
   /** Battle turns spent across all won and lost battles; feeds the score's speed bonus. */
   battleTurns?: number;
   /** Unlocked alternate weapon IDs swappable anytime in the Hero Build Armory. */

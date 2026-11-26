@@ -11,6 +11,7 @@ import {
   STARTER_UNLOCKED_WEAPONS,
 } from '../data/weapons';
 import { battleRng, getHeatSeedMultiplier, MAX_HARVEST_HEAT } from './difficulty';
+import { recordDailyFinish } from './daily';
 import { dailyKeyFor, dailySeedFor, recordRunScore } from './score';
 import {
   ACTS,
@@ -810,6 +811,7 @@ export function applyBattleOutcomeToRun(
     saveMetaProgress(meta);
     clearSavedRun();
     recordRunScore(run);
+    recordDailyFinish(run);
     return;
   }
 
@@ -860,6 +862,7 @@ export function applyBattleOutcomeToRun(
     saveMetaProgress(meta);
     clearSavedRun();
     recordRunScore(run);
+    recordDailyFinish(run);
     return;
   }
 
