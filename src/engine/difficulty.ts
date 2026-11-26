@@ -100,7 +100,15 @@ export function difficultyFor(
 }
 
 /** Regular farmhands that can be rolled into any battle. */
-export const REGULAR_ENEMY_POOL = ['digger', 'trimmer', 'sprayer', 'mower'] as const;
+export const REGULAR_ENEMY_POOL = [
+  'digger',
+  'trimmer',
+  'sprayer',
+  'mower',
+  'beekeeper',
+  'hound',
+  'pitchfork',
+] as const;
 
 /** Stable 32-bit hash so each node of a seeded run always gets the same battle. */
 export function hashString(text: string): number {

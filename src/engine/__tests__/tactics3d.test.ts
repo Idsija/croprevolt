@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { ENEMY_BLUEPRINTS } from '../../data/enemies';
 import { MAP_TEMPLATES } from '../../data/maps';
-import { canUnlockPerk, getXpToNextLevel } from '../../data/skills';
-import { ALT_WEAPONS, STARTER_UNLOCKED_WEAPONS } from '../../data/weapons';
+import { PRODUCE_BLUEPRINTS } from '../../data/produce';
+import { ALL_SKILL_PERK_IDS, HERO_SKILL_TREES, canUnlockPerk, getXpToNextLevel } from '../../data/skills';
+import { ALT_WEAPONS, ALT_WEAPONS_BY_SPECIES, STARTER_UNLOCKED_WEAPONS } from '../../data/weapons';
 import { runEnemyUnitTurn } from '../ai';
 import {
   createBattleFromMap,
+  createBattleUnitFromEnemy,
   damageBridgeAt,
   executeAbility,
   executeAttack,
@@ -20,6 +23,7 @@ import {
 import { forecastAttack } from '../combat';
 import { difficultyFor, getHeatSeedMultiplier } from '../difficulty';
 import { createCover, getAdjacentCoverBadges, posKey, tileAt } from '../grid';
+import { createRng, generateActNodes } from '../mapgen';
 import { computeDashOptions, computeMovableTiles, getLinkedBurrowDest } from '../pathfinding';
 import {
   applyBattleOutcomeToRun,
@@ -611,7 +615,7 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
 
   it('supports Armory Alternate Weapons unlocking, switching, and preserving upgrade deltas', () => {
     const run = createNewRun(defaultMetaProgress());
-    expect(ALT_WEAPONS).toHaveLength(13);
+    expect(ALT_WEAPONS).toHaveLength(16);
     for (const wid of STARTER_UNLOCKED_WEAPONS) {
       expect(run.unlockedWeaponIds).toContain(wid);
     }
@@ -850,5 +854,61 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     expect(victim.alive).toBe(false);
     expect(bystander.hp).toBeLessThan(14);
     expect(bystander.statuses.some((s) => s.kind === 'acid')).toBe(true);
+  });
+
+  it('supports 16 heroes (96 bespoke perks & 16 Armory weapons), 3 new allies, 3 new enemies, and all 3 cartoon boards', () => {
+    const allHeroes = Object.values(PRODUCE_BLUEPRINTS);
+    expect(allHeroes).toHaveLength(16);
+    expect(ALL_SKILL_PERK_IDS).toHaveLength(96);
+
+    for (const bp of allHeroes) {
+      const tree = HERO_SKILL_TREES[bp.species];
+      expect(tree).toBeDefined();
+      expect(tree.pathA.perks).toHaveLength(3);
+      expect(tree.pathB.perks).toHaveLength(3);
+      expect(ALT_WEAPONS_BY_SPECIES[bp.species]).toBeDefined();
+    }
+
+    // New Allies: Strawbina (starter bench + unlocked alt weapon), Cap-tain Shroom (launchpadCoop), Quackers (ignoresMud + knockback)
+    const run = createNewRun(defaultMetaProgress());
+    const strawbina = run.roster.find((h) => h.species === 'strawberry')!;
+    expect(strawbina).toBeDefined();
+    expect(equipHeroWeapon(run, strawbina.uid, 'berry_scatter')).toBe(true);
+    expect(strawbina.weapon.id).toBe('berry_scatter');
+
+    const shroomHero = createHeroFromBlueprint('mushroom');
+    const duckHero = createHeroFromBlueprint('duck');
+    expect(shroomHero.launchpadCoop).toBe(true);
+    expect(duckHero.ignoresMud).toBe(true);
+    expect(duckHero.weapon.knockback).toBe(1);
+
+    // New Enemies: Farmer Gus (starts Shielded), Barkley (Move 5 + dashKnockback 1), Beekeeper Bert (lobbed Burn)
+    expect(ENEMY_BLUEPRINTS.beekeeper.weapon.appliesStatus?.kind).toBe('burn');
+    expect(ENEMY_BLUEPRINTS.beekeeper.weapon.arc).toBe('lobbed');
+    const gus = createBattleUnitFromEnemy('pitchfork', 0, { x: 4, y: 4 });
+    expect(gus.hp).toBe(16);
+    expect(gus.statuses.some((s) => s.kind === 'shield')).toBe(true);
+    const barkley = createBattleUnitFromEnemy('hound', 1, { x: 2, y: 2 });
+    expect(barkley.moveRange).toBe(5);
+    expect(barkley.dashKnockback).toBe(1);
+
+    // All 3 redesigned seasonal cartoon boards generate 16 pinned spaces with guaranteed facilities and path to Boss
+    for (let actIdx = 0; actIdx < 3; actIdx++) {
+      const nodes = generateActNodes(actIdx, createRng(777 + actIdx));
+      expect(nodes).toHaveLength(16);
+      expect(nodes.some((n) => n.type === 'start')).toBe(true);
+      expect(nodes.some((n) => n.type === 'boss')).toBe(true);
+      expect(nodes.some((n) => n.type === 'shop')).toBe(true);
+      expect(nodes.some((n) => n.type === 'shrine')).toBe(true);
+      expect(nodes.some((n) => n.type === 'armory')).toBe(true);
+      expect(nodes.filter((n) => n.type === 'vault')).toHaveLength(2);
+      expect(nodes.filter((n) => n.type === 'elite')).toHaveLength(2);
+      for (const n of nodes) {
+        expect(n.boardX).toBeGreaterThanOrEqual(0.05);
+        expect(n.boardX).toBeLessThanOrEqual(0.95);
+        expect(n.boardY).toBeGreaterThanOrEqual(0.05);
+        expect(n.boardY).toBeLessThanOrEqual(0.95);
+      }
+    }
   });
 });

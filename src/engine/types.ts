@@ -108,11 +108,14 @@ export type HeroSpecies =
   | 'blackberry'
   | 'corn'
   | 'lettuce'
+  | 'strawberry'
+  | 'mushroom'
   | 'cow'
   | 'pig'
   | 'rooster'
   | 'sheep'
-  | 'goat';
+  | 'goat'
+  | 'duck';
 
 export interface ProduceBlueprint {
   id: string;
@@ -141,13 +144,25 @@ export interface ProduceBlueprint {
 export interface EnemyBlueprint {
   id: string;
   name: string;
-  archetype: 'digger' | 'trimmer' | 'sprayer' | 'mower' | 'scarecrow' | 'tractor' | 'harvester';
+  archetype:
+    | 'digger'
+    | 'trimmer'
+    | 'sprayer'
+    | 'mower'
+    | 'beekeeper'
+    | 'hound'
+    | 'pitchfork'
+    | 'scarecrow'
+    | 'tractor'
+    | 'harvester';
   title: string;
   family: ToolFamily;
   isBoss?: boolean;
+  startsShielded?: boolean;
   maxHp: number;
   moveRange: number;
   dashDamage: number;
+  dashKnockback?: number;
   weapon: WeaponDef;
   ability?: AbilityDef;
   color: string;
