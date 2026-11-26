@@ -205,6 +205,12 @@ export class PaperCraftRenderer {
   private woodBgW = 0;
   private woodBgH = 0;
   private woodDeskImg: HTMLImageElement | null = null;
+  // The static wood desk is shown as the canvas element's CSS background instead of being
+  // redrawn every frame. A full-screen drawImage at Retina resolution was the single most
+  // expensive thing in the frame (it roughly halved the frame rate on 2x displays).
+  private appliedBackdrop: HTMLCanvasElement | null = null;
+  private pendingBackdrop: HTMLCanvasElement | null = null;
+  private backdropUrl: string | null = null;
   private wcBoardPattern: CanvasPattern | null = null;
   private paperPattern: CanvasPattern | null = null;
   private dangerHatchPattern: CanvasPattern | null = null;
@@ -274,6 +280,7 @@ export class PaperCraftRenderer {
 
   public destroy(): void {
     cancelAnimationFrame(this.rafId);
+    this.clearCssBackdrop();
     this.resizeObserver.disconnect();
     this.canvas.removeEventListener('pointerdown', this.handlePointerDown);
     this.canvas.removeEventListener('pointermove', this.handlePointerMove);
@@ -506,6 +513,41 @@ export class PaperCraftRenderer {
     this.woodBgW = w;
     this.woodBgH = h;
     return c;
+  }
+
+  private applyCssBackdrop(wood: HTMLCanvasElement): void {
+    if (this.pendingBackdrop === wood || typeof wood.toBlob !== 'function') return;
+    this.pendingBackdrop = wood;
+    wood.toBlob((blob) => {
+      if (this.pendingBackdrop !== wood) return;
+      this.pendingBackdrop = null;
+      // A newer backdrop (resize / texture load) replaced this one while encoding.
+      if (!blob || this.woodBgCanvas !== wood) return;
+      const url = URL.createObjectURL(blob);
+      const style = this.canvas.style;
+      style.backgroundImage = `url("${url}")`;
+      style.backgroundSize = '100% 100%';
+      style.backgroundRepeat = 'no-repeat';
+      if (this.backdropUrl) URL.revokeObjectURL(this.backdropUrl);
+      this.backdropUrl = url;
+      // Only switch to clearRect once the image is decoded, so there is never a blank frame.
+      const img = new Image();
+      img.src = url;
+      const done = () => {
+        if (this.backdropUrl === url) this.appliedBackdrop = wood;
+      };
+      img.decode().then(done, done);
+    });
+  }
+
+  private clearCssBackdrop(): void {
+    this.pendingBackdrop = null;
+    this.appliedBackdrop = null;
+    this.canvas.style.backgroundImage = '';
+    if (this.backdropUrl) {
+      URL.revokeObjectURL(this.backdropUrl);
+      this.backdropUrl = null;
+    }
   }
 
   private resize(): void {
@@ -1556,7 +1598,13 @@ export class PaperCraftRenderer {
     ctx.scale(dpr, dpr);
 
     const wood = this.ensureWoodBackdrop(w, h);
-    ctx.drawImage(wood, 0, 0, w, h);
+    if (this.appliedBackdrop === wood) {
+      ctx.clearRect(0, 0, w, h);
+    } else {
+      // Until the CSS background for this size is ready, paint the desk directly (old behaviour).
+      ctx.drawImage(wood, 0, 0, w, h);
+      this.applyCssBackdrop(wood);
+    }
 
     if (this.shakeTimer > 0) {
       const decay = Math.min(1, this.shakeTimer / 0.22);
