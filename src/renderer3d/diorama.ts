@@ -3,6 +3,7 @@ import type { BattleState, BoardTheme, CoverKind, CoverObject, GridPos, TerrainT
 import { posKey } from '../engine/grid';
 import type { CraftTextureLibrary } from './textures';
 import { gridToWorld3D, TILE_SIZE_3D } from './types';
+import { compactMultiMaterialMesh } from './geometryUtils';
 
 export interface CoverPropVisual {
   key: string;
@@ -167,7 +168,7 @@ export class PaperDioramaWorld {
     });
 
     const slabGeo = new THREE.BoxGeometry(boardW + pad, slabH, boardH + pad);
-    const slab = new THREE.Mesh(slabGeo, [
+    const slab = compactMultiMaterialMesh(slabGeo, [
       sideCorrMat,
       sideCorrMat,
       topSlabMat,
@@ -256,7 +257,7 @@ export class PaperDioramaWorld {
         const geo = new THREE.BoxGeometry(tileFootprint, boxH, tileFootprint);
         const wallMat = elev > 0 ? cliffSideMat : sideTileMat;
 
-        const mesh = new THREE.Mesh(geo, [
+        const mesh = compactMultiMaterialMesh(geo, [
           wallMat,
           wallMat,
           topMat,
@@ -1107,16 +1108,19 @@ export class PaperDioramaWorld {
       rail2.castShadow = true;
       g.add(rail1, rail2);
 
+      // One instanced mesh for all pickets and one for all caps: two draw calls per fence
+      // run instead of two per picket.
       const posts = Math.max(3, Math.floor(length / 0.42));
+      const postMesh = new THREE.InstancedMesh(postGeo, woodMat, posts + 1);
+      const capMesh = new THREE.InstancedMesh(picketCapGeo, woodMat, posts + 1);
+      const m = new THREE.Matrix4();
       for (let i = 0; i <= posts; i++) {
         const px = -length / 2 + (i / posts) * length;
-        const p = new THREE.Mesh(postGeo, woodMat);
-        p.position.set(px, 0.23, 0.02);
-        p.castShadow = true;
-        const cap = new THREE.Mesh(picketCapGeo, woodMat);
-        cap.position.set(px, 0.51, 0.02);
-        g.add(p, cap);
+        postMesh.setMatrixAt(i, m.makeTranslation(px, 0.23, 0.02));
+        capMesh.setMatrixAt(i, m.makeTranslation(px, 0.51, 0.02));
       }
+      postMesh.castShadow = true;
+      g.add(postMesh, capMesh);
       this.sceneryGroup.add(g);
     };
 
@@ -1485,7 +1489,7 @@ export class PaperDioramaWorld {
       height = 0.78;
       const sideMat = new THREE.MeshStandardMaterial({ map: this.textures.cageSideMap, roughness: 0.88 });
       const frontMat = new THREE.MeshStandardMaterial({ map: this.textures.cageFrontMap, roughness: 0.88 });
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.88, height, 0.88), [
+      const box = compactMultiMaterialMesh(new THREE.BoxGeometry(0.88, height, 0.88), [
         sideMat,
         sideMat,
         sideMat,

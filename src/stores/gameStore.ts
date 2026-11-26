@@ -44,6 +44,7 @@ import {
   claimShrineBlessing,
   claimWeaponReward,
   clearSavedRun,
+  createDailyRun,
   createNewRun,
   equipHeroWeapon,
   finishRewardsAndReturnToMap,
@@ -397,13 +398,26 @@ export function buyMetaUnlock(key: keyof MetaProgress['unlocks']): boolean {
   return ok;
 }
 
+export function startDailyRun(): void {
+  beginRun(createDailyRun());
+}
+
+/** Start the same kind of run again: today's daily after a daily, a standard run otherwise. */
+export function playAgain(): void {
+  if (gameStore.run?.mode === 'daily') startDailyRun();
+  else startNewSeasonRun();
+}
+
 export function startNewSeasonRun(seasonId: SeasonId = 'spring'): void {
+  beginRun(createNewRun(gameStore.meta, seasonId, undefined, gameStore.meta.selectedHeat ?? 0));
+}
+
+function beginRun(run: RunState): void {
   sfx.click();
   battleSessionId += 1;
   lastUndoUnitId = null;
   clearAutoEndTimer();
   clearSavedRun();
-  const run = createNewRun(gameStore.meta, seasonId, undefined, gameStore.meta.selectedHeat ?? 0);
   gameStore.run = run;
   gameStore.battle = null;
   gameStore.enemyTurnRunning = false;

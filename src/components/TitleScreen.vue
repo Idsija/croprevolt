@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { HARVEST_HEAT_LEVELS, MAX_HARVEST_HEAT } from '../engine/difficulty';
 import { META_UNLOCK_COSTS } from '../engine/run';
+import { dailyKeyFor, loadScores, topDailyScores, topStandardScores } from '../engine/score';
 import type { MetaProgress } from '../engine/types';
 import { TitleBackdropRenderer } from '../renderer3d/TitleBackdropRenderer';
 import {
@@ -9,6 +10,7 @@ import {
   continueSavedRun,
   gameStore,
   setSelectedHeat,
+  startDailyRun,
   startNewSeasonRun,
   toggleAudioMute,
   toggleMusicMute,
@@ -17,7 +19,19 @@ import AlmanacModal from './AlmanacModal.vue';
 import CraftIcon from './CraftIcon.vue';
 import CropRevoltLogo from './CropRevoltLogo.vue';
 
-const activeModal = ref<'none' | 'shed' | 'guide' | 'almanac'>('none');
+const activeModal = ref<'none' | 'shed' | 'guide' | 'almanac' | 'scores'>('none');
+
+const todayKey = dailyKeyFor();
+const scoreTab = ref<'daily' | 'standard'>('daily');
+// Read once per visit to the title: scores only change when a run ends, which remounts this screen.
+const allScores = loadScores();
+const dailyBoard = topDailyScores(allScores, todayKey);
+const standardBoard = topStandardScores(allScores);
+const shownBoard = computed(() => (scoreTab.value === 'daily' ? dailyBoard : standardBoard));
+const dailyBest = dailyBoard[0]?.score ?? null;
+const fmt = (n: number) => n.toLocaleString('en-US');
+const shortDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const backdropCanvasRef = ref<HTMLCanvasElement | null>(null);
 const webglReady = ref(false);
 let backdropRenderer: TitleBackdropRenderer | null = null;
@@ -182,6 +196,19 @@ onBeforeUnmount(() => {
           </span>
         </button>
 
+        <div class="secondary-row daily-row">
+          <button class="paper-btn sky diecut daily-btn" @click="startDailyRun()">
+            <span class="daily-copy">
+              <strong>Daily Run</strong>
+              <small>{{ dailyBest !== null ? `Your best today: ${fmt(dailyBest)}` : 'Same garden for everyone today' }}</small>
+            </span>
+          </button>
+          <button class="paper-btn sec-btn scores-btn" @click="activeModal = 'scores'">
+            <CraftIcon name="trophy" :size="15" />
+            <span>Scores</span>
+          </button>
+        </div>
+
         <div class="secondary-row three-col">
           <button class="paper-btn sec-btn" @click="activeModal = 'shed'">
             <CraftIcon name="shed" :size="15" />
@@ -203,6 +230,62 @@ onBeforeUnmount(() => {
 
     <!-- Storybook Field Almanac Compendium Modal -->
     <AlmanacModal v-if="activeModal === 'almanac'" @close="activeModal = 'none'" />
+
+    <!-- On-Device Leaderboard Modal -->
+    <div v-if="activeModal === 'scores'" class="modal-backdrop" @click.self="activeModal = 'none'">
+      <section class="paper-card modal-sheet scroll-soft">
+        <div class="washi-tape"></div>
+        <div class="modal-head">
+          <div>
+            <h2>Harvest Scores</h2>
+            <small>Best runs played on this device</small>
+          </div>
+          <button class="paper-btn icon-only" aria-label="Close" @click="activeModal = 'none'">
+            <CraftIcon name="close" :size="17" />
+          </button>
+        </div>
+
+        <div class="score-tabs" role="tablist">
+          <button
+            class="paper-btn score-tab"
+            :class="{ gold: scoreTab === 'daily' }"
+            role="tab"
+            :aria-selected="scoreTab === 'daily'"
+            @click="scoreTab = 'daily'"
+          >
+            Today's Daily
+          </button>
+          <button
+            class="paper-btn score-tab"
+            :class="{ gold: scoreTab === 'standard' }"
+            role="tab"
+            :aria-selected="scoreTab === 'standard'"
+            @click="scoreTab = 'standard'"
+          >
+            All Runs
+          </button>
+        </div>
+
+        <ol v-if="shownBoard.length > 0" class="score-board">
+          <li v-for="(entry, i) in shownBoard" :key="entry.id" class="seed-packet score-row">
+            <span class="score-rank">{{ i + 1 }}</span>
+            <span class="score-meta">
+              <strong>{{ fmt(entry.score) }}</strong>
+              <small>
+                {{ entry.victory ? 'Garden freed' : `Fell in Act ${entry.act}` }} ·
+                {{ entry.battlesWon }} battles<template v-if="entry.heat > 0"> · Heat {{ entry.heat }}</template>
+              </small>
+            </span>
+            <small class="score-date">{{ shortDate(entry.at) }}</small>
+          </li>
+        </ol>
+        <p v-else class="score-empty">
+          {{ scoreTab === 'daily'
+            ? "No daily run finished yet today. The daily garden is the same for everyone and changes at midnight UTC."
+            : 'Finish a run to put your first score on the board.' }}
+        </p>
+      </section>
+    </div>
 
     <!-- Seed Shed Meta-Progression Modal -->
     <div v-if="activeModal === 'shed'" class="modal-backdrop" @click.self="activeModal = 'none'">
@@ -627,6 +710,89 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   padding: 0 6px;
   font-size: 0.74rem;
+}
+
+.daily-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.daily-btn {
+  justify-content: flex-start;
+  text-align: left;
+  min-height: 46px;
+}
+
+.daily-copy {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.daily-copy small {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.score-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.score-tab {
+  min-height: 40px;
+}
+
+.score-board {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.score-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  color: var(--ink);
+}
+
+.score-rank {
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 700;
+  width: 1.6em;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.score-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.score-meta strong {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-meta small,
+.score-date {
+  color: var(--ink-soft);
+}
+
+.score-empty {
+  color: var(--ink-soft);
+  text-align: center;
+  margin: 18px 6px;
 }
 
 /* Modals */
