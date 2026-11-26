@@ -1,0 +1,401 @@
+:root {
+  --wood-dark: #4f2f17;
+  --wood-mid: #82522b;
+  --wood-light: #c48d55;
+  --kraft: #c89d66;
+  --kraft-mid: #a77440;
+  --kraft-dark: #744922;
+  --paper-cream: #fcf7eb;
+  --paper-warm: #f3e6cc;
+  --paper-tan: #e5d0a7;
+  --paper-edge: #faf4e4;
+  --ink: #4a2c17;
+  --ink-soft: #6f4c2f;
+  --leaf: #68a142;
+  --leaf-dark: #3f7126;
+  --tomato: #cf5642;
+  --gold: #e4ae38;
+  --sky: #559eb4;
+  --plum: #8d60ab;
+
+  /* Clean hand-painted cold-press cotton paper, kraft, tooth, tabletop wood & washi tape */
+  --tex-paper: url('/ui/paper-cream.jpg');
+  --tex-kraft: url('/ui/kraft-paper.jpg');
+  --tex-tooth: url('/ui/paper-tooth.png');
+  --tex-wood: url('/ui/wood-desk.jpg');
+  --tex-washi: url('/ui/washi-tape.png');
+
+  /* Clean paper-cutout elevation (no cluttered multi-rings) */
+  --shadow-cardboard:
+    inset 0 1px 0 rgba(255, 254, 250, 0.9),
+    0 3px 0 #c9ad82,
+    0 8px 18px rgba(38, 17, 4, 0.24);
+  --shadow-cutout:
+    inset 0 1px 0 rgba(255, 254, 250, 0.85),
+    0 2px 0 #d2bc96,
+    0 5px 10px rgba(38, 17, 4, 0.18);
+
+  --radius-card: 14px;
+  --radius-btn: 10px;
+  --radius-tag: 11px;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Multi-ply corrugated kraft flutes matching the diorama game board slab */
+  --corrugated-flutes: repeating-linear-gradient(
+    90deg,
+    #663f1f 0px,
+    #663f1f 3.5px,
+    #aa7a48 3.5px,
+    #aa7a48 9px
+  );
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus:not(:focus-visible),
+[tabindex]:focus:not(:focus-visible) {
+  outline: none;
+}
+
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2.5px solid #f7cb45;
+  outline-offset: 2px;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  /* Hand-painted watercolor honey-oak tabletop wood desk */
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 244, 220, 0.12) 0%, rgba(44, 21, 6, 0.30) 100%),
+    var(--tex-wood) center / cover no-repeat fixed,
+    radial-gradient(circle at 50% 35%, #d6a269 0%, #9b6536 58%, #583215 100%);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+.font-display {
+  font-family: 'Fredoka', 'Trebuchet MS', sans-serif;
+  margin: 0;
+}
+
+/* ===== Clean Cold-Press Watercolor Cardstock ===== */
+.paper-card {
+  background:
+    linear-gradient(180deg, rgba(255, 253, 247, 0.84) 0%, rgba(248, 240, 222, 0.88) 100%),
+    var(--tex-paper) center / 360px 360px repeat;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-cardboard);
+  position: relative;
+}
+
+/* Subtle folded paper dog-ear corner */
+.craft-fold::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 13px;
+  height: 13px;
+  background: linear-gradient(
+    135deg,
+    rgba(229, 209, 172, 0.92) 48%,
+    rgba(74, 44, 23, 0.20) 50%,
+    rgba(253, 248, 236, 0.94) 54%
+  );
+  border-top-left-radius: 4px;
+  border-bottom-right-radius: 11px;
+  pointer-events: none;
+}
+
+/* ===== Corrugated Watercolor Cardstock Slab (Matches the Physical Game Board) ===== */
+.corrugated-slab {
+  background:
+    linear-gradient(180deg, rgba(255, 253, 247, 0.86) 0%, rgba(247, 237, 215, 0.90) 88%, rgba(235, 218, 184, 0.92) 100%),
+    var(--tex-paper) center / 360px 360px repeat;
+  border: 2px solid var(--ink);
+  border-radius: 14px 14px 10px 10px;
+  position: relative;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 250, 0.95),
+    0 9px 20px rgba(38, 17, 4, 0.28);
+  overflow: visible;
+}
+
+.corrugated-slab::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: -7px;
+  height: 7px;
+  background: var(--corrugated-flutes);
+  border: 2px solid var(--ink);
+  border-top: 1.5px solid var(--ink);
+  border-radius: 0 0 9px 9px;
+  pointer-events: none;
+}
+
+/* ===== Natural Kraft Cardstock Ribbon ===== */
+.kraft-ribbon {
+  background:
+    linear-gradient(180deg, rgba(235, 206, 162, 0.72) 0%, rgba(210, 170, 118, 0.78) 100%),
+    var(--tex-kraft) center / 320px 320px repeat;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-tag);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 249, 232, 0.55),
+    0 2px 0 #8c5f30,
+    0 5px 12px rgba(38, 17, 4, 0.22);
+  color: var(--ink);
+  position: relative;
+}
+
+/* Brass split-pin fasteners on paper corners */
+.pinned-card {
+  position: relative;
+}
+
+.brass-pin {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff4bf 0%, #dda52a 58%, #8c5a10 100%);
+  border: 1.4px solid var(--ink);
+  box-shadow: 0 1px 2px rgba(38, 17, 4, 0.30);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.brass-pin.tl { top: 6px; left: 6px; }
+.brass-pin.tr { top: 6px; right: 6px; }
+
+/* Crimped Watercolor Seed-Packet Card */
+.seed-packet {
+  background:
+    linear-gradient(180deg, rgba(255, 253, 247, 0.86) 0%, rgba(248, 239, 219, 0.88) 100%),
+    var(--tex-paper) center / 340px 340px repeat;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: var(--shadow-cutout);
+  position: relative;
+  overflow: hidden;
+}
+
+.seed-packet::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(74, 44, 23, 0.12) 0px,
+    rgba(74, 44, 23, 0.12) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  border-bottom: 1px solid rgba(74, 44, 23, 0.18);
+  pointer-events: none;
+}
+
+/* Hand-Painted Torn-Paper Watercolor Washi Masking Tape Strip */
+.washi-tape {
+  position: absolute;
+  top: -13px;
+  left: 50%;
+  transform: translateX(-50%) rotate(-1.5deg);
+  width: 112px;
+  height: 23px;
+  background: var(--tex-washi) center / 100% 100% no-repeat;
+  filter: drop-shadow(0 2px 2px rgba(42, 20, 6, 0.20));
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ===== Crisp Watercolor Cardstock Button ===== */
+.paper-btn {
+  font-family: 'Fredoka', 'Trebuchet MS', sans-serif;
+  font-weight: 600;
+  font-size: 0.86rem;
+  color: var(--ink);
+  background:
+    linear-gradient(180deg, rgba(255, 253, 247, 0.88) 0%, rgba(246, 235, 212, 0.90) 100%),
+    var(--tex-paper) center / 300px 300px repeat;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-btn);
+  padding: 6px 11px;
+  min-height: 36px;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 252, 0.88),
+    0 2px 0 #c6a87b,
+    0 4px 8px rgba(38, 17, 4, 0.15);
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.12s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  position: relative;
+}
+
+/* Optional clean matte cream die-cut cardstock halo for main hero CTAs */
+.paper-btn.diecut {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 248, 0.45),
+    0 0 0 2.5px var(--paper-edge),
+    0 3px 0 rgba(74, 44, 23, 0.82),
+    0 6px 13px rgba(38, 17, 4, 0.22);
+}
+
+.paper-btn.diecut.gold {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 232, 0.65),
+    0 0 0 2.5px var(--paper-edge),
+    0 3px 0 rgba(74, 44, 23, 0.78),
+    0 6px 13px rgba(38, 17, 4, 0.20);
+}
+
+.paper-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+.paper-btn:active:not(:disabled) {
+  transform: translateY(1.5px);
+  box-shadow: 0 1px 0 var(--ink);
+}
+
+.paper-btn:disabled {
+  opacity: 0.44;
+  cursor: not-allowed;
+  box-shadow: 0 1px 0 rgba(74, 44, 23, 0.35);
+}
+
+/* Clean leaf-green watercolor wash matching "CROP" in logo.png */
+.paper-btn.primary {
+  background:
+    var(--tex-tooth) center / 220px 220px repeat,
+    radial-gradient(ellipse at 22% 16%, rgba(176, 224, 128, 0.45) 0%, transparent 62%),
+    linear-gradient(178deg, #74af4a 0%, #589336 65%, #4a7e2c 100%);
+  color: #fffdf5;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 242, 0.38),
+    0 2px 0 #376220,
+    0 4px 8px rgba(38, 17, 4, 0.18);
+  text-shadow: 0 1px 0 rgba(42, 22, 8, 0.40);
+}
+
+/* Clean terracotta-red watercolor wash matching "REVOLT!" ribbon in logo.png */
+.paper-btn.danger {
+  background:
+    var(--tex-tooth) center / 220px 220px repeat,
+    radial-gradient(ellipse at 22% 16%, rgba(248, 152, 130, 0.38) 0%, transparent 62%),
+    linear-gradient(178deg, #dc654f 0%, #be4735 65%, #a13728 100%);
+  color: #fffdf5;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 242, 235, 0.35),
+    0 2px 0 #7e2519,
+    0 4px 8px rgba(38, 17, 4, 0.18);
+  text-shadow: 0 1px 0 rgba(42, 22, 8, 0.40);
+}
+
+/* Clean sunlit honey-gold watercolor wash */
+.paper-btn.gold {
+  background:
+    var(--tex-tooth) center / 220px 220px repeat,
+    radial-gradient(ellipse at 24% 16%, rgba(255, 246, 196, 0.50) 0%, transparent 62%),
+    linear-gradient(178deg, #f6d674 0%, #e0ae3f 68%, #cc972d 100%);
+  color: var(--ink);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 232, 0.62),
+    0 2px 0 #9f7118,
+    0 4px 8px rgba(38, 17, 4, 0.15);
+}
+
+/* Clean cerulean watercolor wash */
+.paper-btn.sky {
+  background:
+    var(--tex-tooth) center / 220px 220px repeat,
+    radial-gradient(ellipse at 24% 16%, rgba(180, 232, 244, 0.42) 0%, transparent 62%),
+    linear-gradient(178deg, #6fb6c8 0%, #4d94a8 65%, #3d7d90 100%);
+  color: #fffdf5;
+  box-shadow:
+    inset 0 1px 0 rgba(242, 253, 255, 0.38),
+    0 2px 0 #2b6070,
+    0 4px 8px rgba(38, 17, 4, 0.18);
+  text-shadow: 0 1px 0 rgba(42, 22, 8, 0.36);
+}
+
+/* Clean berry-plum watercolor wash */
+.paper-btn.plum {
+  background:
+    var(--tex-tooth) center / 220px 220px repeat,
+    radial-gradient(ellipse at 24% 16%, rgba(214, 180, 238, 0.38) 0%, transparent 62%),
+    linear-gradient(178deg, #a67ac5 0%, #8657a8 65%, #704391 100%);
+  color: #fffdf5;
+  box-shadow:
+    inset 0 1px 0 rgba(250, 240, 255, 0.36),
+    0 2px 0 #4f2a6c,
+    0 4px 8px rgba(38, 17, 4, 0.18);
+  text-shadow: 0 1px 0 rgba(42, 22, 8, 0.38);
+}
+
+/* Clean Watercolor Paper Pill Tag */
+.paper-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2.5px 9px;
+  border-radius: 999px;
+  border: 1.7px solid var(--ink);
+  background:
+    linear-gradient(180deg, rgba(255, 253, 246, 0.90) 0%, rgba(246, 236, 214, 0.92) 100%),
+    var(--tex-paper) center / 260px 260px repeat;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 600;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 250, 0.85),
+    0 1.5px 0 rgba(74, 44, 23, 0.22);
+}
+
+.scroll-soft {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wood-light) transparent;
+}
+
+@media (max-width: 640px) {
+  .paper-btn {
+    min-height: 42px;
+    padding: 6px 10px;
+    font-size: 0.84rem;
+  }
+}
