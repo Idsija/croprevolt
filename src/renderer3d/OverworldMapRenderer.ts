@@ -453,6 +453,72 @@ export class OverworldMapRenderer {
       }
     }
 
+    // Cozy tactile tabletop props resting on the oak desk outside the folding board!
+    const diceMat = new THREE.MeshStandardMaterial({
+      map: this.textures.woodTokenMap,
+      color: '#fbf0d4',
+      roughness: 0.65,
+    });
+    const pipMat = new THREE.MeshBasicMaterial({ color: '#452612' });
+    const diceConfigs: Array<{ x: number; z: number; rotY: number; pips: Array<[number, number]> }> = [
+      {
+        x: -BOARD_W / 2 - 1.15,
+        z: -BOARD_H * 0.24,
+        rotY: 0.42,
+        pips: [
+          [-0.14, -0.14],
+          [0.14, -0.14],
+          [0, 0],
+          [-0.14, 0.14],
+          [0.14, 0.14],
+        ],
+      },
+      {
+        x: BOARD_W / 2 + 1.18,
+        z: BOARD_H * 0.26,
+        rotY: -0.58,
+        pips: [
+          [-0.14, -0.14],
+          [0, 0],
+          [0.14, 0.14],
+        ],
+      },
+    ];
+    for (const dc of diceConfigs) {
+      const die = new THREE.Group();
+      die.position.set(dc.x, 0.28, dc.z);
+      die.rotation.y = dc.rotY;
+      const cube = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.56, 0.56), diceMat);
+      cube.castShadow = true;
+      cube.receiveShadow = true;
+      die.add(cube);
+      for (const [px, pz] of dc.pips) {
+        const pip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.02, 10), pipMat);
+        pip.position.set(px, 0.285, pz);
+        die.add(pip);
+      }
+      this.worldGroup.add(die);
+    }
+
+    // Miniature potted tabletop mushroom & pebble accent resting beside the board!
+    const deskMushroom = new THREE.Group();
+    deskMushroom.position.set(BOARD_W / 2 + 1.25, 0, -BOARD_H * 0.34);
+    const dmStem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.14, 0.18, 0.36, 10),
+      new THREE.MeshStandardMaterial({ map: this.textures.woodTokenMap, color: '#f8edd2', roughness: 0.85 })
+    );
+    dmStem.position.y = 0.18;
+    dmStem.castShadow = true;
+    const dmCap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.38, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+      new THREE.MeshStandardMaterial({ map: this.textures.mushroomCapMap, roughness: 0.55 })
+    );
+    dmCap.position.y = 0.34;
+    dmCap.scale.set(1, 0.65, 1);
+    dmCap.castShadow = true;
+    deskMushroom.add(dmStem, dmCap);
+    this.worldGroup.add(deskMushroom);
+
     // 3. Compute positions & build painted wooden board space medallions!
     const posById = new Map<string, THREE.Vector3>();
     for (const n of snap.nodes) {
@@ -510,12 +576,15 @@ export class OverworldMapRenderer {
       const group = new THREE.Group();
       group.position.copy(pos);
 
-      // Thick painted wood boardgame medallion base
+      // Thick painted turned-wood boardgame medallion base
       const disc = new THREE.Mesh(
         new THREE.CylinderGeometry(radius, radius + 0.05, 0.1, 24),
         new THREE.MeshStandardMaterial({
-          color: isDone && n.type !== 'start' ? 0x62a846 : isAvail ? style.hex : 0xede0c2,
-          roughness: 0.65,
+          map: this.textures.woodTokenMap,
+          color: isDone && n.type !== 'start' ? 0x67b548 : isAvail ? style.hex : 0xede0c2,
+          roughness: 0.62,
+          bumpMap: this.textures.paperBump,
+          bumpScale: 0.012,
         })
       );
       disc.position.y = 0.05;
@@ -523,12 +592,13 @@ export class OverworldMapRenderer {
       disc.receiveShadow = true;
       group.add(disc);
 
-      // Crisp cream parchment inner cap
+      // Crisp cream parchment & wood-ring inner cap
       const cap = new THREE.Mesh(
         new THREE.CylinderGeometry(radius * 0.78, radius * 0.8, 0.025, 22),
         new THREE.MeshStandardMaterial({
+          map: this.textures.woodTokenMap,
           color: isDone && n.type !== 'start' ? 0xd9f5c6 : isAvail ? 0xfff8e4 : 0xf5ebd2,
-          roughness: 0.8,
+          roughness: 0.78,
         })
       );
       cap.position.y = 0.105;

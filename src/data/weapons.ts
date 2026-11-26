@@ -222,6 +222,55 @@ export const ALT_WEAPONS: AltWeaponEntry[] = [
       description: 'Fires tin-can ordnance over cover, wrecking crates and dousing foes in Acid!',
     },
   },
+  {
+    species: 'strawberry',
+    cost: 12,
+    tagline: 'Close-range knockback seed scattergun',
+    weapon: {
+      id: 'berry_scatter',
+      name: 'Seed Scattergun',
+      arc: 'direct',
+      minRange: 1,
+      maxRange: 3,
+      damage: 6,
+      coverDamage: 5,
+      knockback: 1,
+      description: 'Explosive close-range spray of strawberry seeds that slams foes back 1 tile!',
+    },
+  },
+  {
+    species: 'mushroom',
+    cost: 12,
+    tagline: 'Piercing corrosive mycelium beam',
+    weapon: {
+      id: 'mycelium_beam',
+      name: 'Mycelium Ray',
+      arc: 'pierce',
+      minRange: 1,
+      maxRange: 5,
+      damage: 5,
+      coverDamage: 4,
+      appliesStatus: { kind: 'acid', turns: 2 },
+      description: 'Straight-line fungal beam that skewers two farmers and coats them in Acid!',
+    },
+  },
+  {
+    species: 'duck',
+    cost: 12,
+    tagline: 'Lobbed splash-knockback water balloon',
+    weapon: {
+      id: 'hydro_mortar',
+      name: 'Pond Balloon',
+      arc: 'lobbed',
+      minRange: 2,
+      maxRange: 5,
+      damage: 4,
+      coverDamage: 4,
+      aoeRadius: 1,
+      knockback: 1,
+      description: 'Lobs a giant pond-water balloon over Full Cover, splashing 3×3 and pushing foes back!',
+    },
+  },
 ];
 
 export const ALT_WEAPON_REGISTRY: Record<string, AltWeaponEntry> = Object.fromEntries(
@@ -234,8 +283,8 @@ export const ALT_WEAPONS_BY_SPECIES: Record<HeroSpecies, AltWeaponEntry> = Objec
 
 export const ALL_ALT_WEAPON_IDS: string[] = ALT_WEAPONS.map((entry) => entry.weapon.id);
 
-/** Two starter alternate weapons unlocked right away so players can test Armory builds immediately! */
-export const STARTER_UNLOCKED_WEAPONS: readonly string[] = ['milk_jug_lob', 'salad_shuriken'];
+/** Starter alternate weapons unlocked right away so players can test Armory builds immediately! */
+export const STARTER_UNLOCKED_WEAPONS: readonly string[] = ['milk_jug_lob', 'salad_shuriken', 'berry_scatter'];
 
 /**
  * Returns a hero's base weapon plus their species' alternate weapon definition.

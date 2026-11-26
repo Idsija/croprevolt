@@ -108,11 +108,14 @@ export type HeroSpecies =
   | 'blackberry'
   | 'corn'
   | 'lettuce'
+  | 'strawberry'
+  | 'mushroom'
   | 'cow'
   | 'pig'
   | 'rooster'
   | 'sheep'
-  | 'goat';
+  | 'goat'
+  | 'duck';
 
 export interface ProduceBlueprint {
   id: string;
@@ -141,13 +144,25 @@ export interface ProduceBlueprint {
 export interface EnemyBlueprint {
   id: string;
   name: string;
-  archetype: 'digger' | 'trimmer' | 'sprayer' | 'mower' | 'scarecrow' | 'tractor' | 'harvester';
+  archetype:
+    | 'digger'
+    | 'trimmer'
+    | 'sprayer'
+    | 'mower'
+    | 'beekeeper'
+    | 'hound'
+    | 'pitchfork'
+    | 'scarecrow'
+    | 'tractor'
+    | 'harvester';
   title: string;
   family: ToolFamily;
   isBoss?: boolean;
+  startsShielded?: boolean;
   maxHp: number;
   moveRange: number;
   dashDamage: number;
+  dashKnockback?: number;
   weapon: WeaponDef;
   ability?: AbilityDef;
   color: string;
@@ -556,6 +571,13 @@ export interface RewardBundle {
   claimedWeapon?: boolean;
 }
 
+export interface RunPerks {
+  breatherBonus: number;
+  marketPriceMult: number;
+  bellBonus: number;
+  graftRerollsLeft: number;
+}
+
 export interface RunState {
   id: string;
   seasonId?: SeasonId;
@@ -568,8 +590,14 @@ export interface RunState {
   harvestHeat?: number;
   /** 'daily' runs share one seed per UTC day and start from the standard loadout. */
   mode?: 'standard' | 'daily';
+  /** Seed Shed perks bought before this run started, frozen so buying mid-run changes nothing. */
+  perks?: RunPerks;
   /** UTC date (YYYY-MM-DD) of the daily run this is. */
   dailyKey?: string;
+  /** Achievements this run earned when it ended, for the summary screen. */
+  earnedAchievementIds?: string[];
+  /** Which attempt at that day's run this is on this device; only attempt 1 is scored. */
+  dailyAttempt?: number;
   /** Battle turns spent across all won and lost battles; feeds the score's speed bonus. */
   battleTurns?: number;
   /** Sum over won battles of turns finished under that battle's par. */
@@ -619,5 +647,12 @@ export interface MetaProgress {
     extraItemSatchel: boolean; // +1 Fertilizer Bomb & +1 Watering Can at run start
     heirloomSoil: boolean; // All starter heroes begin with +2 Max HP
     starterRelic: boolean; // Start every run with Rich Loam relic
+    seedPouch: boolean; // Start every run with 15 seeds
+    honeyReserve: boolean; // +1 Honey Pot at run start
+    seasonedSeedlings: boolean; // Starter heroes begin with +1 skill point
+    restfulCamp: boolean; // +1 HP to the heal after every won battle
+    marketCoupon: boolean; // Market prices are 15% lower
+    patientBell: boolean; // The Harvest Bell rings 1 turn later in every act
+    graftReroll: boolean; // Reroll a graft offer once per run
   };
 }

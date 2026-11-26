@@ -16,6 +16,7 @@ import {
   pickRelic,
   pickWeaponReward,
   purchaseMarketOffer,
+  rerollGrafts,
 } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
 import HeroBuildModal from './HeroBuildModal.vue';
@@ -232,6 +233,13 @@ function nextTierLabel(graftCount: number): string {
           <h3>
             {{ selectedGraftId ? 'Step 2: Tap a Hero to Attach Graft!' : 'Pick a Graft Mutation Sticker' }}
           </h3>
+          <button
+            v-if="(run.perks?.graftRerollsLeft ?? 0) > 0"
+            class="paper-btn sky reroll-btn"
+            @click="selectedGraftId = null; rerollGrafts()"
+          >
+            Reroll stickers (once per run)
+          </button>
           <div class="choice-grid">
             <button
               v-for="gid in reward.graftChoices"
@@ -766,5 +774,12 @@ function nextTierLabel(graftCount: number): string {
   background: #cfe8b5;
   color: #2f4f1a;
   font-weight: 700;
+}
+.reroll-btn {
+  align-self: center;
+  margin: 0 auto 10px;
+  display: block;
+  min-height: 40px;
+  padding-inline: 16px;
 }
 </style>
