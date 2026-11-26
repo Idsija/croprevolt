@@ -10,6 +10,7 @@ import {
   type BattleDifficulty,
 } from './difficulty';
 import type { Rng } from './mapgen';
+import { ROLLED_SURVIVE_TURNS, routTargetFor, type RolledObjective } from './objectives';
 import { computeParTurns } from './par';
 import {
   chebyshev,
@@ -67,6 +68,8 @@ export interface BattleSetup {
   nextBattleBuff?: { boost?: boolean; shield?: boolean; moveBonus?: number } | null;
   /** True when the player lingered past the Harvest Bell — empowers the Act Boss! */
   bossEmpowered?: boolean;
+  /** Objective rolled for this stop; replaces "defeat all" on maps that use it. */
+  objective?: RolledObjective | null;
 }
 
 function mirrorTemplate(map: MapTemplate): MapTemplate {
@@ -467,6 +470,9 @@ export function createBattleFromMap(
     ],
     undoSnapshot: null,
   };
+  if (setup?.objective && map.objective === 'defeat_all' && setup.objective !== 'defeat_all') {
+    applyRolledObjective(state, setup.objective);
+  }
   state.parTurns = computeParTurns(state);
   return state;
 }
@@ -474,6 +480,57 @@ export function createBattleFromMap(
 /**
  * Pre-Battle Tactical Prep: swap a hero onto another glowing spawn tile (swapping if occupied).
  */
+/**
+ * Turns a "defeat all" battle into a Rout, a Breakout (reach the far fence) or a Hold.
+ * Uses only existing terrain and units, so no new art is needed.
+ */
+function applyRolledObjective(state: BattleState, objective: RolledObjective): void {
+  const foes = state.units.filter((u) => u.team === 'enemy' && u.alive).length;
+  if (objective === 'rout') {
+    state.objective = 'rout';
+    state.routTarget = routTargetFor(foes);
+    state.objectiveLabel = `Rout — bonk ${state.routTarget} of ${foes} farmers`;
+  } else if (objective === 'survive') {
+    state.objective = 'survive';
+    state.surviveTurns = ROLLED_SURVIVE_TURNS;
+    state.objectiveLabel = `Hold the patch for ${ROLLED_SURVIVE_TURNS} turns`;
+  } else if (objective === 'reach_gate') {
+    // A run of 2-3 side-by-side gate tiles on the farmers' back row, as close to the middle as the board allows.
+    const mid = (state.width - 1) / 2;
+    const row = state.tiles[0];
+    const ok = (t: Tile) =>
+      !isHazardLiquid(t.terrain) &&
+      t.terrain !== 'bridge' &&
+      t.terrain !== 'burrow' &&
+      t.terrain !== 'bounce_pad' &&
+      (!t.cover || t.cover.destructible) &&
+      t.elevation === row[Math.round(mid)].elevation;
+    let candidates: Tile[] = [];
+    for (const len of [3, 2]) {
+      let bestDist = Infinity;
+      for (let x0 = 0; x0 + len <= state.width; x0++) {
+        const run = row.slice(x0, x0 + len);
+        if (!run.every(ok)) continue;
+        const dist = Math.abs(x0 + (len - 1) / 2 - mid);
+        if (dist < bestDist) {
+          bestDist = dist;
+          candidates = run;
+        }
+      }
+      if (candidates.length > 0) break;
+    }
+    if (candidates.length < 2) return; // board can't host a fence run; stay "defeat all"
+    for (const t of candidates) {
+      t.terrain = 'gate';
+      t.cover = null;
+    }
+    state.gateTiles = candidates.map((t) => ({ x: t.x, y: t.y })).sort((a, b) => a.x - b.x);
+    state.objective = 'reach_gate';
+    state.objectiveLabel = 'Breakout — get one hero through the far fence';
+  }
+  state.combatLog = [`Battle started: ${state.mapName} — ${state.objectiveLabel}`];
+}
+
 export function swapPrepHeroPositions(
   state: BattleState,
   fromPos: GridPos,
@@ -629,6 +686,16 @@ function checkBattleEnd(state: BattleState): void {
       return;
     }
     return;
+  }
+
+  if (state.objective === 'rout') {
+    const bonked = state.units.filter((u) => u.team === 'enemy' && !u.alive).length;
+    if (bonked >= (state.routTarget ?? 1)) {
+      state.status = 'victory';
+      state.pendingEvents.push({ type: 'banner', text: 'FARMERS ROUTED! VICTORY!', tone: 'victory' });
+      pushLog(state, 'The last farmers dropped their tools and fled!');
+      return;
+    }
   }
 
   if (state.objective === 'boss') {

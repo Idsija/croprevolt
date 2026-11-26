@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RELIC_REGISTRY } from '../data/relics';
 import { ACTS, HARVEST_BELL_LIMIT } from '../engine/mapgen';
+import { objectiveBlurb, rollObjectiveForNode } from '../engine/objectives';
 import { getBoardPathsForCard } from '../engine/run';
 import type { BoardTheme, BoardTravelCard, NodeType, SeasonNode } from '../engine/types';
 import { OverworldMapRenderer } from '../renderer3d/OverworldMapRenderer';
@@ -134,6 +135,13 @@ watch(
   },
   { immediate: true }
 );
+
+const selectedObjective = computed(() => {
+  const node = selectedNode.value;
+  if (!node || node.completed) return null;
+  const rolled = rollObjectiveForNode(run.value.seed, node);
+  return rolled ? objectiveBlurb(rolled) : null;
+});
 
 const selectedNode = computed<SeasonNode | null>(() => {
   const id = selectedNodeId.value;
@@ -529,6 +537,7 @@ onBeforeUnmount(() => {
             </div>
             <small>
               {{ selectedNode.subtitle }}
+              <template v-if="selectedObjective"> · {{ selectedObjective }}</template>
               <template v-if="isSelectedAvailable && selectedHopCount > 0">
                 · {{ selectedHopCount }} hop{{ selectedHopCount > 1 ? 's' : '' }}
               </template>

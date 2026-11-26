@@ -699,6 +699,12 @@ function onVisibilityChange(): void {
   }
 }
 
+const routLeft = computed(() => {
+  void gameStore.eventQueueVersion;
+  const bonked = battle.value.units.filter((u) => u.team === 'enemy' && !u.alive).length;
+  return Math.max(0, (battle.value.routTarget ?? 0) - bonked);
+});
+
 const victoryGrade = computed(() =>
   battle.value.status === 'victory' ? gradeBattle(toRaw(battle.value)) : null
 );
@@ -1157,6 +1163,9 @@ onBeforeUnmount(() => {
           </small>
           <small v-else-if="battle.objective === 'escort' && escortCart">
             🛒 Seed Cart {{ escortCart.hp }}/{{ escortCart.maxHp }} HP · {{ aliveEnemiesCount }} foes
+          </small>
+          <small v-else-if="battle.objective === 'rout'">
+            🏃 Rout · bonk {{ routLeft }} more · {{ aliveEnemiesCount }} foes
           </small>
           <small v-else>{{ battle.objectiveLabel }} · {{ aliveEnemiesCount }} foes left</small>
         </div>
