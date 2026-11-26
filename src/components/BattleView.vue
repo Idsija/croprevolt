@@ -15,6 +15,7 @@ import {
   getMatchup,
   getMaxDashesForUnit,
   getMaxOverwatchCharges,
+  getRemainingMove,
   hasRelic,
 } from '../engine/hooks';
 import { computeDashOptions, computeTeamJumpOptions } from '../engine/pathfinding';
@@ -554,6 +555,7 @@ const heroDoneMap = computed(() => {
   for (const u of playerUnits.value) {
     void u.alive;
     void u.actions.hasMoved;
+    void u.actions.moveSpent;
     void u.actions.hasAttacked;
     void u.actions.hasUsedSkill;
     void u.abilityCooldown;
@@ -695,6 +697,8 @@ function onVisibilityChange(): void {
     handleTabAwayFocusClear();
   }
 }
+
+const selectedMoveLeft = computed(() => (selectedUnit.value ? getRemainingMove(selectedUnit.value) : 0));
 
 const remainingDashesForSelected = computed(() => {
   const u = selectedUnit.value;
@@ -1573,7 +1577,10 @@ onBeforeUnmount(() => {
               <div class="mr-action-pips" title="Move · Weapon · Technique">
                 <span
                   class="mr-pip move"
-                  :class="{ spent: !u.alive || u.actions.hasMoved }"
+                  :class="{
+                    spent: !u.alive || u.actions.hasMoved,
+                    partial: u.alive && !u.actions.hasMoved && (u.actions.moveSpent ?? 0) > 0,
+                  }"
                 ></span>
                 <span
                   class="mr-pip atk"
@@ -2033,7 +2040,13 @@ onBeforeUnmount(() => {
                   <span class="act-keycap desktop-only">M</span>
                   <CraftIcon name="move" :size="15" />
                   <div class="act-copy">
-                    <span class="act-title">{{ selectedUnit.actions.hasMoved ? 'Moved' : 'Move' }}</span>
+                    <span class="act-title">{{
+                      selectedUnit.actions.hasMoved
+                        ? 'Moved'
+                        : (selectedUnit.actions.moveSpent ?? 0) > 0
+                          ? `Move ${selectedMoveLeft}`
+                          : 'Move'
+                    }}</span>
                     <small v-if="dashHintCount > 0 || jumpHintCount > 0" class="act-sub">
                       {{ dashHintCount > 0 ? `⚡${remainingDashesForSelected}` : '' }}
                       {{ jumpHintCount > 0 ? `★${jumpHintCount}` : '' }}
@@ -3167,6 +3180,10 @@ onBeforeUnmount(() => {
 .mr-pip.spent {
   background: #cfc0a5;
   opacity: 0.45;
+}
+.mr-pip.partial {
+  opacity: 0.6;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
 }
 
 /* Bottom-Center Mario + Rabbids Command Deck */

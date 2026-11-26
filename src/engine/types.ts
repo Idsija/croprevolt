@@ -246,7 +246,10 @@ export interface RosterHero {
 }
 
 export interface UnitActions {
+  /** True once the unit's movement budget for this turn is used up. */
   hasMoved: boolean;
+  /** Movement points spent this turn. Walking, dashing and the walk-up to a team jump all draw from one budget. */
+  moveSpent?: number;
   hasDashed: boolean;
   dashesUsed?: number;
   dashedEnemyIds?: string[];
@@ -338,12 +341,16 @@ export interface JumpOption {
   allyId: string;
   allyPos: GridPos;
   approachPos: GridPos;
+  /** Movement points spent walking to the springboard ally (the jump itself is free). */
+  approachCost: number;
 }
 
 export interface DashOption {
   enemyId: string;
   enemyPos: GridPos;
   stopPos: GridPos;
+  /** Movement points spent reaching the stop tile next to the target. */
+  cost: number;
   damage: number;
   knockback?: number;
   appliesStatus?: StatusKind;

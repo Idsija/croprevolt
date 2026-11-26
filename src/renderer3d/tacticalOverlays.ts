@@ -143,7 +143,7 @@ export class TacticalOverlaySystem3D {
       snap.selectedUnit?.id ?? '-',
       snap.selectedUnit ? `${snap.selectedUnit.pos.x},${snap.selectedUnit.pos.y}` : '-',
       snap.selectedUnit
-        ? `${snap.selectedUnit.actions.hasMoved ? 1 : 0}${snap.selectedUnit.actions.hasAttacked ? 1 : 0}${snap.selectedUnit.actions.hasDashed ? 1 : 0}${snap.selectedUnit.actions.hasUsedSkill ? 1 : 0}`
+        ? `${snap.selectedUnit.actions.hasMoved ? 1 : 0}:${snap.selectedUnit.actions.moveSpent ?? 0}:${snap.selectedUnit.actions.hasAttacked ? 1 : 0}${snap.selectedUnit.actions.hasDashed ? 1 : 0}${snap.selectedUnit.actions.hasUsedSkill ? 1 : 0}`
         : '-',
       snap.inspectedEnemy?.id ?? '-',
       snap.mode,

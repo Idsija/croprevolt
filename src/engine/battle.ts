@@ -31,6 +31,7 @@ import {
   hasGraft,
   hasRelic,
   hasStatus,
+  spendMove,
 } from './hooks';
 import {
   computeDashOptions,
@@ -152,6 +153,7 @@ function promoteToVeteran(unit: BattleUnit): void {
 function emptyActions() {
   return {
     hasMoved: false,
+    moveSpent: 0,
     hasDashed: false,
     dashesUsed: 0,
     dashedEnemyIds: [] as string[],
@@ -1386,7 +1388,7 @@ export function executeMove(state: BattleState, unitId: string, dest: GridPos): 
     unit.facing = dest.x > unit.pos.x ? 'right' : 'left';
   }
   unit.pos = { ...dest };
-  unit.actions.hasMoved = true;
+  spendMove(unit, node.cost);
 
   state.pendingEvents.push({
     type: 'move',
@@ -1428,7 +1430,7 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
   if (state.status !== 'ongoing' || state.prepPhase) return false;
   const unit = getUnitById(state, unitId);
   const dashesUsed = unit?.actions.dashesUsed ?? (unit?.actions.hasDashed ? 1 : 0);
-  if (!unit || !unit.alive || unit.isEscortCart || dashesUsed >= getMaxDashesForUnit(unit) || unit.actions.hasMoved) {
+  if (!unit || !unit.alive || unit.isEscortCart || dashesUsed >= getMaxDashesForUnit(unit)) {
     return false;
   }
 
@@ -1448,8 +1450,10 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
     unit.facing = target.pos.x > unit.pos.x ? 'right' : 'left';
   }
 
-  // Move to stopPos adjacent to enemy; hero can STILL Multi-Dash, Move, or Team-Jump afterwards!
+  // Move to stopPos adjacent to enemy, paying for the steps out of this turn's movement budget.
+  // The hero keeps whatever movement is left to Multi-Dash, walk on, or Team-Jump.
   unit.pos = { ...opt.stopPos };
+  spendMove(unit, opt.cost);
   const nextDashes = dashesUsed + 1;
   unit.actions.dashesUsed = nextDashes;
   unit.actions.dashedEnemyIds = [...(unit.actions.dashedEnemyIds ?? []), target.id];
@@ -1505,7 +1509,7 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
 export function executeTeamJump(state: BattleState, unitId: string, dest: GridPos): boolean {
   if (state.status !== 'ongoing' || state.prepPhase) return false;
   const unit = getUnitById(state, unitId);
-  if (!unit || !unit.alive || unit.isEscortCart || unit.team !== 'player' || unit.actions.hasMoved || unit.actions.hasJumped) {
+  if (!unit || !unit.alive || unit.isEscortCart || unit.team !== 'player' || unit.actions.hasJumped) {
     return false;
   }
 
@@ -1521,7 +1525,9 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
   }
   unit.pos = { ...dest };
   unit.actions.hasJumped = true;
-  unit.actions.hasMoved = true;
+  // Walking up to the springboard ally costs movement; the launch itself is free,
+  // so the hero can keep walking with whatever budget is left after landing.
+  spendMove(unit, opt.approachCost);
 
   let coopBoost: string | undefined;
   if (hasRelic(state.relicIds, 'bouncy_mulch')) {
@@ -2082,6 +2088,7 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
   }
   if (fx.skillGrantsFreeMove && unit.alive) {
     unit.actions.hasMoved = false;
+    unit.actions.moveSpent = 0;
     pushLog(state, `${unit.name} gained a FREE Move from ${ab.name}!`);
   }
 

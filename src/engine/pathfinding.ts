@@ -12,7 +12,7 @@ import {
 import {
   getEffectiveDashDamage,
   getEffectiveJumpRange,
-  getEffectiveMoveRange,
+  getRemainingMove,
   getMaxDashesForUnit,
   getUnitPerkEffects,
   hasGraft,
@@ -45,7 +45,7 @@ export function getLinkedBurrowDest(state: BattleState, pos: GridPos): GridPos |
  */
 export function computeReachableMap(state: BattleState, unit: BattleUnit): Map<string, ReachableNode> {
   const result = new Map<string, ReachableNode>();
-  const maxMove = getEffectiveMoveRange(unit);
+  const maxMove = getRemainingMove(unit);
   const startKey = posKey(unit.pos);
   result.set(startKey, { pos: unit.pos, cost: 0, path: [unit.pos] });
 
@@ -168,7 +168,7 @@ export function computeMovableTiles(state: BattleState, unit: BattleUnit): Map<s
 export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOption[] {
   const dashesUsed = unit.actions.dashesUsed ?? (unit.actions.hasDashed ? 1 : 0);
   const maxDashes = getMaxDashesForUnit(unit);
-  if (unit.isEscortCart || dashesUsed >= maxDashes || unit.actions.hasMoved || hasStatus(unit, 'rooted')) return [];
+  if (unit.isEscortCart || dashesUsed >= maxDashes || hasStatus(unit, 'rooted')) return [];
 
   const fx = getUnitPerkEffects(unit);
   const alreadyDashed = new Set(unit.actions.dashedEnemyIds ?? []);
@@ -203,6 +203,7 @@ export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOp
         enemyId: target.id,
         enemyPos: target.pos,
         stopPos: bestNode.pos,
+        cost: bestNode.cost,
         damage: getEffectiveDashDamage(unit) + dashBonus,
         knockback: dashKb > 0 ? dashKb : undefined,
         appliesStatus: dashStatus,
@@ -222,7 +223,6 @@ export function computeTeamJumpOptions(state: BattleState, unit: BattleUnit): Ma
   if (
     unit.isEscortCart ||
     unit.team !== 'player' ||
-    unit.actions.hasMoved ||
     unit.actions.hasJumped ||
     hasStatus(unit, 'rooted')
   ) {
@@ -232,7 +232,7 @@ export function computeTeamJumpOptions(state: BattleState, unit: BattleUnit): Ma
   const reachable = computeReachableMap(state, unit);
 
   // Find every alive ally that this unit can reach adjacent to (or walk through)
-  const springboardAllies: Array<{ ally: BattleUnit; approach: GridPos }> = [];
+  const springboardAllies: Array<{ ally: BattleUnit; approach: GridPos; approachCost: number }> = [];
   for (const ally of state.units) {
     if (!ally.alive || ally.team !== unit.team || ally.id === unit.id) continue;
 
@@ -245,11 +245,11 @@ export function computeTeamJumpOptions(state: BattleState, unit: BattleUnit): Ma
       }
     }
     if (bestApproach) {
-      springboardAllies.push({ ally, approach: bestApproach.pos });
+      springboardAllies.push({ ally, approach: bestApproach.pos, approachCost: bestApproach.cost });
     }
   }
 
-  for (const { ally, approach } of springboardAllies) {
+  for (const { ally, approach, approachCost } of springboardAllies) {
     const jumpRange = getEffectiveJumpRange(unit, ally);
     for (let y = 0; y < state.height; y++) {
       for (let x = 0; x < state.width; x++) {
@@ -271,6 +271,7 @@ export function computeTeamJumpOptions(state: BattleState, unit: BattleUnit): Ma
             allyId: ally.id,
             allyPos: ally.pos,
             approachPos: approach,
+            approachCost,
           });
         }
       }

@@ -406,7 +406,7 @@ describe('Crop Revolt! Tactical Engine', () => {
     // 5. Moving when NO enemies are in attack range NEVER auto-uses or auto-switches to Skill!
     selectBattleUnit(spud.id, false);
     handleBattleTileTap({ x: 1, y: 7 }, 'mouse');
-    expect(spud.actions.hasMoved).toBe(true);
+    expect(spud.actions.moveSpent ?? 0).toBeGreaterThan(0);
     expect(spud.actions.hasUsedSkill).toBe(false);
     expect(gameStore.mode).toBe('move');
 
