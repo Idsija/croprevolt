@@ -215,7 +215,7 @@ export const ENEMY_BLUEPRINTS: Record<string, EnemyBlueprint> = {
     family: 'blade',
     isBoss: true,
     maxHp: 44,
-    moveRange: 3,
+    moveRange: 4,
     dashDamage: 4,
     weapon: {
       id: 'thresher_ram',

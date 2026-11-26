@@ -719,8 +719,12 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     const heat0 = difficultyFor(0, 1, 'skirmish', 0);
     const heat5 = difficultyFor(0, 1, 'skirmish', 5);
     expect(heat5.hpMult).toBeGreaterThan(heat0.hpMult);
-    expect(heat5.damageBonus).toBeGreaterThan(heat0.damageBonus);
-    expect(heat5.veterans).toBeGreaterThan(heat0.veterans);
+    // Heat 5 sharpens bosses and Veterans; Heat 2 adds a Veteran to elites and late floors.
+    expect(heat5.veteranDamageBonus).toBe(1);
+    expect(difficultyFor(0, 5, 'boss', 5).damageBonus).toBeGreaterThan(difficultyFor(0, 5, 'boss', 0).damageBonus);
+    expect(difficultyFor(0, 1, 'elite', 5).veterans).toBeGreaterThan(difficultyFor(0, 1, 'elite', 0).veterans);
+    expect(difficultyFor(0, 4, 'skirmish', 5).veterans).toBeGreaterThan(heat0.veterans);
+    expect(heat5.veterans).toBe(0);
     expect(getHeatSeedMultiplier(5)).toBeGreaterThan(getHeatSeedMultiplier(0));
 
     // Heat 3+ makes wooden crates start cracked (-2 HP)!

@@ -1,24 +1,30 @@
 /**
- * Headless run simulator for balance checks. A simple bot plays whole runs through the
- * real engine: it travels the board, fights every battle, and takes the first reward on
- * offer. The bot is much weaker than a person (it never uses abilities, items, team jumps,
- * overwatch or skill perks), so read its numbers as a comparison between acts, floors and
- * heat levels, not as the win rate a player would get.
+ * Headless run simulator for balance checks. A bot plays whole runs through the real
+ * engine: it travels the board, fights every battle and takes the first reward on offer.
+ * In battle it dashes, moves to cover and high ground, steps off boss warning tiles, and
+ * uses abilities and items. It still plays worse than a person (no team jumps, overwatch,
+ * skill perks or market shopping), so read its numbers as a comparison between stages,
+ * maps and heat levels, and treat its run win rate as a floor for what a player gets.
  */
 import { RECRUITABLE_BLUEPRINT_IDS } from '../data/produce';
 import { runEnemyUnitTurn } from '../engine/ai';
 import {
   createBattleFromMap,
+  executeAbility,
   executeAttack,
   executeDash,
+  executeItem,
   executeMove,
   finishPrepPhase,
+  getAbilityTargetTiles,
+  getItemTargetTiles,
   startPhase,
 } from '../engine/battle';
 import { forecastAttack } from '../engine/combat';
 import { battleRng, difficultyFor } from '../engine/difficulty';
 import { leaveEvent, openEventNode, resolveEventChoice } from '../engine/events';
-import { evaluateCover, manhattan, tileAt } from '../engine/grid';
+import { ITEM_REGISTRY } from '../data/items';
+import { chebyshev, evaluateCover, manhattan, tileAt } from '../engine/grid';
 import { ACTS, createRng, HARVEST_BELL_LIMIT, type Rng } from '../engine/mapgen';
 import { computeDashOptions, computeMovableTiles } from '../engine/pathfinding';
 import {
@@ -111,7 +117,95 @@ function goalTiles(state: BattleState): GridPos[] {
   return state.units.filter((u) => u.team === 'enemy' && u.alive).map((u) => u.pos);
 }
 
+/** How safe a tile is: cover against each nearby farmer, plus high ground. Mirrors the farmers' own AI. */
+function safetyScore(state: BattleState, pos: GridPos): number {
+  let score = 0;
+  for (const enemy of state.units) {
+    if (enemy.team !== 'enemy' || !enemy.alive) continue;
+    const level = evaluateCover(state, enemy.pos, pos).level;
+    if (level === 'full') score += 9;
+    else if (level === 'half') score += 5;
+    // Standing next to a brawler invites a dash.
+    if (manhattan(enemy.pos, pos) <= 1 && enemy.weapon.arc === 'melee') score -= 4;
+  }
+  score += (tileAt(state, pos)?.elevation ?? 0) * 4.5;
+  score = Math.min(24, score);
+  // Never end the turn on a red boss warning tile.
+  for (const tel of state.bossTelegraphs ?? []) {
+    if (tel.tiles.some((t) => t.x === pos.x && t.y === pos.y)) score -= tel.damage * 12;
+  }
+  return score;
+}
+
+function aliveUnits(state: BattleState, team: 'player' | 'enemy'): BattleUnit[] {
+  return state.units.filter((u) => u.team === team && u.alive && !u.isEscortCart);
+}
+
+/** Best tile for an area effect: most farmers caught, and never one that catches an ally. */
+function bestBlastTile(state: BattleState, tiles: GridPos[], radius: number): GridPos | null {
+  const enemies = aliveUnits(state, 'enemy');
+  const allies = aliveUnits(state, 'player');
+  let best: GridPos | null = null;
+  let bestHits = 0;
+  for (const t of tiles) {
+    if (allies.some((a) => chebyshev(a.pos, t) <= radius)) continue;
+    const hits = enemies.filter((e) => chebyshev(e.pos, t) <= radius).length;
+    if (hits > bestHits) {
+      bestHits = hits;
+      best = t;
+    }
+  }
+  return best;
+}
+
+/** Use the hero's ability, or failing that an item, when it clearly helps. */
+function useSkillOrItem(state: BattleState, hero: BattleUnit): void {
+  if (hero.isEscortCart || hero.actions.hasUsedSkill) return;
+  const enemies = aliveUnits(state, 'enemy');
+  const allies = aliveUnits(state, 'player');
+  const ab = hero.ability;
+  const tiles = getAbilityTargetTiles(state, hero);
+  if (ab && tiles.length > 0) {
+    const nearestEnemy = Math.min(99, ...enemies.map((e) => manhattan(e.pos, hero.pos)));
+    if (ab.targetType === 'self' || ab.targetType === 'aoe_self') {
+      // Buffs and shields are worth it once the fight is close.
+      if (nearestEnemy <= 6 && executeAbility(state, hero.id, hero.pos)) return;
+    } else if (ab.targetType === 'ally') {
+      const hurt = allies
+        .filter((a) => tiles.some((t) => t.x === a.pos.x && t.y === a.pos.y) && a.maxHp - a.hp >= Math.min(3, ab.heal ?? 3))
+        .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
+      if (hurt && executeAbility(state, hero.id, hurt.pos)) return;
+    } else if (ab.targetType === 'enemy') {
+      const target = enemies
+        .filter((e) => tiles.some((t) => t.x === e.pos.x && t.y === e.pos.y))
+        .sort((a, b) => a.hp - b.hp)[0];
+      if (target && executeAbility(state, hero.id, target.pos)) return;
+    } else {
+      const target = bestBlastTile(state, tiles, ab.aoeRadius ?? 0);
+      if (target && executeAbility(state, hero.id, target)) return;
+    }
+  }
+  for (const itemId of Object.keys(state.items)) {
+    if ((state.items[itemId] ?? 0) <= 0) continue;
+    const item = ITEM_REGISTRY[itemId];
+    if (!item) continue;
+    const itemTiles = getItemTargetTiles(state, hero, itemId);
+    if (itemTiles.length === 0) continue;
+    if (item.targetType === 'ally') {
+      const hurt = allies
+        .filter((a) => itemTiles.some((t) => t.x === a.pos.x && t.y === a.pos.y) && a.maxHp - a.hp >= (item.heal ?? 0))
+        .sort((a, b) => a.hp - b.hp)[0];
+      if (hurt && executeItem(state, hero.id, itemId, hurt.pos)) return;
+    } else {
+      const target = bestBlastTile(state, itemTiles, item.aoeRadius ?? 0);
+      const caught = target ? enemies.filter((e) => chebyshev(e.pos, target) <= (item.aoeRadius ?? 0)).length : 0;
+      if (target && caught >= 2 && executeItem(state, hero.id, itemId, target)) return;
+    }
+  }
+}
+
 function playHeroTurn(state: BattleState, hero: BattleUnit, rng: Rng): void {
+  const holding = state.objective === 'survive';
   if (!hero.isEscortCart) {
     const dashes = computeDashOptions(state, hero);
     if (dashes.length > 0) {
@@ -132,7 +226,15 @@ function playHeroTurn(state: BattleState, hero: BattleUnit, rng: Rng): void {
     const goalDist = goals.length > 0 ? Math.min(...goals.map((g) => manhattan(pos, g))) : 0;
     const gateRun = state.objective === 'reach_gate' || hero.isEscortCart;
     let score = attack ? attack.score : 0;
-    score -= goalDist * (attack && !gateRun ? 0.5 : 4);
+    if (hero.isEscortCart) {
+      score -= goalDist * 4;
+    } else if (holding) {
+      // Holding the patch: sit in cover and let the farmers come.
+      score += safetyScore(state, pos) * 1.5 + Math.min(goalDist, 5);
+    } else {
+      score += safetyScore(state, pos);
+      score -= goalDist * (attack && !gateRun ? 0.5 : 4);
+    }
     if (score > bestScore) {
       bestScore = score;
       bestPos = pos;
@@ -140,6 +242,8 @@ function playHeroTurn(state: BattleState, hero: BattleUnit, rng: Rng): void {
   }
   if (bestPos !== hero.pos) executeMove(state, hero.id, bestPos);
   if (state.status !== 'ongoing' || !hero.alive || hero.isEscortCart) return;
+  useSkillOrItem(state, hero);
+  if (state.status !== 'ongoing' || !hero.alive) return;
   const attack = bestAttackFrom(state, hero, hero.pos);
   if (attack) executeAttack(state, hero.id, attack.target, rng);
 }
