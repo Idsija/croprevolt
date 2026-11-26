@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { bondStatuses } from '../engine/bonds';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import {
@@ -36,6 +37,11 @@ onMounted(() => window.addEventListener('keydown', onModalKeyDown));
 onBeforeUnmount(() => window.removeEventListener('keydown', onModalKeyDown));
 
 const run = computed(() => gameStore.run!);
+const squadBonds = computed(() =>
+  bondStatuses(run.value.roster.filter((h) => !h.harvested && run.value.activeSquadUids.includes(h.uid)))
+);
+const openBondId = ref<string | null>(null);
+const openBond = computed(() => squadBonds.value.find((b) => b.def.id === openBondId.value) ?? null);
 
 const selectedUid = ref<string>(
   props.initialHeroUid ??
@@ -153,6 +159,30 @@ function unlockedCountInPath(path: SkillPathDef): number {
           <CraftIcon name="close" :size="17" />
         </button>
       </header>
+
+      <!-- Squad Bonds: what this mix of heroes earns at the start of a battle -->
+      <div class="bond-strip">
+        <span class="bond-strip-label">Squad Bonds</span>
+        <button
+          v-for="sb in squadBonds"
+          :key="sb.def.id"
+          class="bond-chip"
+          :class="{ on: sb.tier > 0, two: sb.tier > 1, open: openBondId === sb.def.id }"
+          @click="openBondId = openBondId === sb.def.id ? null : sb.def.id"
+        >
+          <span>{{ sb.def.icon }}</span>
+          <span>{{ sb.def.name }}{{ sb.tier > 1 ? ' II' : sb.tier === 0 ? ` ${sb.count}/${sb.def.thresholds[0]}` : '' }}</span>
+        </button>
+        <p v-if="openBond" class="bond-detail">
+          <strong>{{ openBond.def.icon }} {{ openBond.def.name }}</strong>
+          ({{ openBond.def.who }}: {{ openBond.count }}).
+          <template v-if="openBond.tier > 0">Active: {{ openBond.effect }}</template>
+          <template v-else>At {{ openBond.def.thresholds[0] }}: {{ openBond.def.tiers[0] }}</template>
+          <template v-if="openBond.tier > 0 && openBond.missing > 0">
+            At {{ openBond.def.thresholds[openBond.tier] }}: {{ openBond.def.tiers[openBond.tier] }}
+          </template>
+        </p>
+      </div>
 
       <div class="build-body">
         <!-- Left Roster Strip -->
@@ -1081,5 +1111,51 @@ function unlockedCountInPath(path: SkillPathDef): number {
   .tree-paths-grid {
     grid-template-columns: 1fr;
   }
+}
+.bond-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.bond-strip-label {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.bond-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1.6px dashed #8a7a5c;
+  background: #f4ecd8;
+  color: #6b5a3c;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bond-chip.on {
+  border: 1.8px solid var(--ink);
+  background: linear-gradient(180deg, #ffe9a0 0%, #f6cf58 100%);
+  color: #3e2600;
+}
+.bond-chip.two {
+  background: linear-gradient(180deg, #ffd27a 0%, #f0a325 100%);
+}
+.bond-chip.open {
+  outline: 2px solid #c98a1b;
+  outline-offset: 1px;
+}
+.bond-detail {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  color: var(--ink);
 }
 </style>

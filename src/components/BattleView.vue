@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue';
+import { bondStatuses, type BondStatus } from '../engine/bonds';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
 import { RELIC_REGISTRY } from '../data/relics';
@@ -377,12 +378,15 @@ const worldForecastInteractive = computed(() =>
   Boolean(showWorldForecastPill.value && gameStore.previewTile && isCombatPreview.value && previewOptions.value.length > 0)
 );
 
+const worldForecastRef = ref<HTMLElement | null>(null);
 const worldForecastStyle = computed(() => {
   if (!focusAnchor.value) return {};
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
   const cx = Math.max(134, Math.min(vw - 134, focusAnchor.value.x));
-  const cy = Math.max(96, Math.min(vh - 210, focusAnchor.value.y - 16));
+  // Keep the whole card below the top bar: its bottom edge sits at cy, so leave room for its height.
+  const pillH = worldForecastRef.value?.offsetHeight ?? 150;
+  const cy = Math.max(64 + pillH, Math.min(vh - 210, focusAnchor.value.y - 16));
   return {
     transform: `translate3d(${cx}px, ${cy}px, 0) translate(-50%, -100%)`,
   };
@@ -666,6 +670,62 @@ function inspectRelic(rid: string): void {
   const r = RELIC_REGISTRY[rid];
   if (!r) return;
   inspectedNote.value = { title: `${r.icon} ${r.name}`, desc: r.description };
+}
+
+const objectiveLine = computed(() => {
+  const b = battle.value;
+  const foes = aliveEnemiesCount.value;
+  if (b.objective === 'survive') {
+    const total = b.surviveTurns ?? 4;
+    return `🛡️ Hold Turn ${Math.min(b.turn, total)}/${total} · ${foes} foes`;
+  }
+  if (b.objective === 'escort' && escortCart.value) {
+    return `🛒 Seed Cart ${escortCart.value.hp}/${escortCart.value.maxHp} HP · ${foes} foes`;
+  }
+  if (b.objective === 'rout') return `🏃 Rout · bonk ${routLeft.value} more · ${foes} foes`;
+  return `${b.objectiveLabel} · ${foes} foes left`;
+});
+
+/** Squad Bonds for the heroes on the board: live while deploying, fixed once Turn 1 starts. */
+const squadBonds = computed<BondStatus[]>(() => {
+  const b = battle.value;
+  if (!b) return [];
+  const heroes = b.units.filter((u) => u.team === 'player' && !u.isEscortCart);
+  const all = bondStatuses(heroes);
+  if (!b.bondsApplied) return all;
+  const locked = new Map((b.activeBonds ?? []).map((a) => [a.id, a.tier]));
+  return all
+    .map((s) => {
+      const tier = (locked.get(s.def.id) ?? 0) as 0 | 1 | 2;
+      return { ...s, tier, effect: s.def.tiers[Math.max(0, tier - 1)] ?? s.def.tiers[0] };
+    })
+    .filter((s) => s.tier > 0);
+});
+const activeSquadBonds = computed(() => squadBonds.value.filter((s) => s.tier > 0));
+
+function bondChipLabel(s: BondStatus): string {
+  if (s.tier > 0) return `${s.def.name}${s.tier > 1 ? ' II' : ''}`;
+  return `${s.def.name} ${s.count}/${s.def.thresholds[0]}`;
+}
+
+function inspectBond(s: BondStatus): void {
+  const next =
+    s.tier > 0 && s.missing > 0
+      ? ` Add ${s.missing} more for: ${s.def.tiers[s.tier]}`
+      : s.tier === 0
+        ? ` Needs ${s.def.thresholds[0]} (${s.def.who}); you have ${s.count}.`
+        : '';
+  inspectedNote.value = {
+    title: `${s.def.icon} ${s.def.name}${s.tier > 1 ? ' II' : ''} · Squad Bond`,
+    desc: `${s.effect}${next}`,
+  };
+}
+
+function inspectAllBonds(): void {
+  inspectedNote.value = {
+    title: 'Squad Bonds',
+    desc: activeSquadBonds.value.map((s) => `${s.def.icon} ${s.def.name}${s.tier > 1 ? ' II' : ''}: ${s.effect}`).join(' '),
+  };
 }
 
 function inspectCoop(name: string, passive: string): void {
@@ -991,6 +1051,7 @@ onBeforeUnmount(() => {
     <!-- Floating World-Space Mario + Rabbids Target Forecast Pill (Anchored to 3D Target!) -->
     <div
       v-if="showWorldForecastPill"
+      ref="worldForecastRef"
       class="world-forecast-pill"
       :class="{ interactive: worldForecastInteractive }"
       :style="worldForecastStyle"
@@ -1158,16 +1219,7 @@ onBeforeUnmount(() => {
         </span>
         <div class="status-copy">
           <strong>{{ battle.mapName }}</strong>
-          <small v-if="battle.objective === 'survive'">
-            🛡️ Hold Turn {{ Math.min(battle.turn, battle.surviveTurns ?? 4) }}/{{ battle.surviveTurns ?? 4 }} · {{ aliveEnemiesCount }} foes
-          </small>
-          <small v-else-if="battle.objective === 'escort' && escortCart">
-            🛒 Seed Cart {{ escortCart.hp }}/{{ escortCart.maxHp }} HP · {{ aliveEnemiesCount }} foes
-          </small>
-          <small v-else-if="battle.objective === 'rout'">
-            🏃 Rout · bonk {{ routLeft }} more · {{ aliveEnemiesCount }} foes
-          </small>
-          <small v-else>{{ battle.objectiveLabel }} · {{ aliveEnemiesCount }} foes left</small>
+          <small>{{ objectiveLine }}</small>
         </div>
         <span
           v-if="battle.parTurns"
@@ -1177,6 +1229,15 @@ onBeforeUnmount(() => {
         >
           Par {{ battle.parTurns }}
         </span>
+        <button
+          v-if="!battle.prepPhase && activeSquadBonds.length > 0"
+          class="cam-mode-pill bonds"
+          title="Squad Bonds"
+          aria-label="Show Squad Bonds"
+          @click="inspectAllBonds"
+        >
+          {{ activeSquadBonds.map((s) => s.def.icon).join('') }}
+        </button>
         <span v-if="(battle.harvestHeat ?? 0) > 0" class="cam-mode-pill heat">
           🔥 H{{ battle.harvestHeat }}
         </span>
@@ -1288,6 +1349,11 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
+    <!-- Phones: the objective gets its own full-width line under the top bar -->
+    <div v-if="battle.status === 'ongoing'" class="objective-strip mobile-only" role="status">
+      {{ objectiveLine }}
+    </div>
+
     <!-- Boss Telegraphed Super-Attack Alert Pill -->
     <div
       v-if="activeBossTelegraphs.length > 0 && battle.status === 'ongoing'"
@@ -1303,7 +1369,15 @@ onBeforeUnmount(() => {
 
     <!-- Turn-1 Sticky-Note Coachmarks -->
     <div
-      v-if="!battle.prepPhase && coachStep >= 0 && battle.phase === 'player' && battle.status === 'ongoing'"
+      v-if="
+        !battle.prepPhase &&
+        coachStep >= 0 &&
+        battle.phase === 'player' &&
+        battle.status === 'ongoing' &&
+        gameStore.mode === 'move' &&
+        !gameStore.previewTile &&
+        !inspectedEnemy
+      "
       class="coach-note paper-card pinned-card"
     >
       <span class="brass-pin tl"></span>
@@ -1683,6 +1757,20 @@ onBeforeUnmount(() => {
               >
                 <img :src="`/sprites/${bh.species}.png`" :alt="bh.name" />
                 <span>{{ bh.name.split(' ')[0] }} L{{ bh.level }}</span>
+              </button>
+            </div>
+
+            <div v-if="squadBonds.length > 0" class="prep-bench-row prep-bond-row">
+              <span class="prep-bench-label">Squad Bonds:</span>
+              <button
+                v-for="sb in squadBonds"
+                :key="sb.def.id"
+                class="bond-chip"
+                :class="{ on: sb.tier > 0, two: sb.tier > 1 }"
+                @click="inspectBond(sb)"
+              >
+                <span>{{ sb.def.icon }}</span>
+                <span>{{ bondChipLabel(sb) }}</span>
               </button>
             </div>
 
@@ -3952,12 +4040,44 @@ onBeforeUnmount(() => {
     padding: 3px 6px;
   }
 
-  .status-copy strong {
-    font-size: 0.8rem;
+  /* Phones: the top bar keeps the turn and pills; the objective has its own strip below. */
+  .status-copy {
+    display: none;
   }
 
-  .status-copy small {
-    font-size: 0.68rem;
+  .mr-top-banner {
+    flex: 0 1 auto;
+  }
+
+  .coach-note,
+  .boss-telegraph-strip {
+    top: calc(90px + var(--safe-top));
+  }
+
+  .objective-strip {
+    position: fixed;
+    display: block;
+    z-index: 19;
+    top: calc(58px + var(--safe-top));
+    left: calc(8px + var(--safe-left));
+    max-width: calc(100% - 16px - var(--safe-left) - var(--safe-right));
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1.6px solid var(--ink);
+    background: rgba(255, 250, 235, 0.94);
+    font-family: 'Fredoka', sans-serif;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+  }
+
+  /* The bottom deck already carries FIRE and target cycling on phones. */
+  .wf-quick-bar {
+    display: none;
   }
 
   .top-actions {
@@ -4264,6 +4384,35 @@ onBeforeUnmount(() => {
   background: #cfe8b5;
   color: #2f4f1a;
   font-weight: 700;
+}
+.cam-mode-pill.bonds {
+  background: #fff3c4;
+  color: #42240d;
+  cursor: pointer;
+  pointer-events: auto;
+  letter-spacing: 1px;
+}
+.bond-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1.6px dashed #8a7a5c;
+  background: #f4ecd8;
+  color: #6b5a3c;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.bond-chip.on {
+  border: 1.8px solid var(--ink);
+  background: linear-gradient(180deg, #ffe9a0 0%, #f6cf58 100%);
+  color: #3e2600;
+}
+.bond-chip.two {
+  background: linear-gradient(180deg, #ffd27a 0%, #f0a325 100%);
 }
 .cam-mode-pill.heat {
   background: linear-gradient(180deg, #ff7a33 0%, #c8331a 100%);

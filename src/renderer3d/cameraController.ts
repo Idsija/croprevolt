@@ -245,7 +245,9 @@ export class TacticalCameraController {
       const backAngle = Math.atan2(-shotDir.x, -shotDir.z) + 0.24;
       this.desiredYaw = backAngle;
       this.desiredPitch = 0.48; // ~27.5 deg dramatic angle keeping HUD clearance clean
-      this.desiredDistance = THREE.MathUtils.clamp(dist * 0.84 + 6.9, 8.2, 14.0);
+      // On portrait phones the narrow view would crop both fighters, so pull back in proportion.
+      const portrait = Math.max(0, 1 - this.camera.aspect);
+      this.desiredDistance = THREE.MathUtils.clamp(dist * 0.84 + 6.9, 8.2, 14.0) * (1 + portrait * 0.9);
       // Focus point sits ~42% from attacker toward target, shifted slightly down-plane so subjects ride higher
       this.desiredTarget.lerpVectors(this.aimOrigin, this.aimTarget, 0.42);
       this.desiredTarget.y = 0.32;
