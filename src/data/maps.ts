@@ -750,10 +750,14 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 2, y: 5, terrain: 'sunbeam', elevation: 1 },
         { x: 6, y: 5, terrain: 'sunbeam', elevation: 1 },
         { x: 4, y: 1, terrain: 'sunbeam', elevation: 2 },
-        { x: 0, y: 6, terrain: 'compost' },
+        { x: 0, y: 8, terrain: 'bounce_pad', elevation: 0 },
+        { x: 8, y: 8, terrain: 'bounce_pad', elevation: 0 },
+        { x: 4, y: 9, terrain: 'compost', elevation: 0 },
       ],
-      // Explosive apiary grid
+      // Explosive apiary grid + fairer starting cover
       [
+        { x: 2, y: 9, cover: 'crate' },
+        { x: 6, y: 9, cover: 'crate' },
         { x: 3, y: 8, cover: 'crate' },
         { x: 5, y: 8, cover: 'stone' },
         { x: 2, y: 4, cover: 'beehive' },
@@ -772,9 +776,9 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
     ],
     enemySpawns: [
       { blueprintId: 'digger', x: 1, y: 4 },
-      { blueprintId: 'mower', x: 7, y: 4 },
-      { blueprintId: 'beekeeper', x: 4, y: 2 },
-      { blueprintId: 'trimmer', x: 5, y: 1 },
+      { blueprintId: 'goose', x: 7, y: 4 },
+      { blueprintId: 'beekeeper', x: 4, y: 4 },
+      { blueprintId: 'trimmer', x: 5, y: 3 },
     ],
   },
 
@@ -1068,6 +1072,195 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { x: 3, y: 0 },
       { x: 4, y: 0 },
       { x: 5, y: 0 },
+    ],
+  },
+
+  duck_pond_meadow: {
+    id: 'duck_pond_meadow',
+    name: 'Duck Pond Meadow',
+    subtitle: 'Cross lily-pad footbridges, warp through mole burrows & dunk farmhands into the spring pond!',
+    theme: 'spring',
+    objective: 'defeat_all',
+    objectiveLabel: 'Clear the meadow watchcrew',
+    width: 9,
+    height: 11,
+    burrowPairs: [
+      [
+        { x: 1, y: 9 },
+        { x: 7, y: 2 },
+      ],
+      [
+        { x: 7, y: 9 },
+        { x: 1, y: 2 },
+      ],
+    ],
+    tiles: mergeTiles(
+      // Winding central lily-pad duck pond with center islet & 4 wooden footbridges
+      rect(2, 4, 6, 6, { terrain: 'water', elevation: 0 }),
+      rect(3, 5, 5, 5, { terrain: 'grass', elevation: 0 }),
+      [
+        { x: 4, y: 4, terrain: 'bridge', elevation: 0 },
+        { x: 4, y: 6, terrain: 'bridge', elevation: 0 },
+        { x: 2, y: 5, terrain: 'bridge', elevation: 0 },
+        { x: 6, y: 5, terrain: 'bridge', elevation: 0 },
+        { x: 4, y: 5, terrain: 'sunbeam', elevation: 0 },
+      ],
+      // Flanking raised grassy banks (elevation 1) with ramps & bounce pad
+      rect(0, 3, 1, 7, { terrain: 'grass', elevation: 1 }),
+      rect(7, 3, 8, 7, { terrain: 'grass', elevation: 1 }),
+      [
+        { x: 0, y: 8, terrain: 'ramp', elevation: 0 },
+        { x: 8, y: 8, terrain: 'ramp', elevation: 0 },
+        { x: 0, y: 2, terrain: 'ramp', elevation: 0 },
+        { x: 8, y: 2, terrain: 'ramp', elevation: 0 },
+        { x: 4, y: 8, terrain: 'bounce_pad', elevation: 0 },
+        { x: 1, y: 9, terrain: 'burrow', elevation: 0 },
+        { x: 7, y: 2, terrain: 'burrow', elevation: 0 },
+        { x: 7, y: 9, terrain: 'burrow', elevation: 0 },
+        { x: 1, y: 2, terrain: 'burrow', elevation: 0 },
+        { x: 3, y: 8, terrain: 'compost', elevation: 0 },
+      ],
+      // Storybook meadow cover & hazards
+      [
+        { x: 2, y: 8, cover: 'crate' },
+        { x: 6, y: 8, cover: 'crate' },
+        { x: 1, y: 5, cover: 'stone' },
+        { x: 7, y: 5, cover: 'stone' },
+        { x: 3, y: 5, cover: 'beehive' },
+        { x: 5, y: 5, cover: 'sprinkler' },
+        { x: 3, y: 2, cover: 'haystack' },
+        { x: 5, y: 2, cover: 'crate' },
+      ]
+    ),
+    playerSpawns: [
+      { x: 2, y: 10 },
+      { x: 3, y: 9 },
+      { x: 5, y: 9 },
+      { x: 6, y: 10 },
+    ],
+    enemySpawns: [
+      { blueprintId: 'goose', x: 2, y: 2 },
+      { blueprintId: 'mole', x: 6, y: 2 },
+      { blueprintId: 'digger', x: 0, y: 4 },
+      { blueprintId: 'trimmer', x: 8, y: 4 },
+    ],
+  },
+
+  botanical_rotunda: {
+    id: 'botanical_rotunda',
+    name: 'Botanical Rotunda',
+    subtitle: 'Seize the elevated central sunbeam pedestal while dodging Tin-Can Tank’s pressure blasts!',
+    theme: 'greenhouse',
+    objective: 'defeat_all',
+    objectiveLabel: 'Liberate the glasshouse rotunda',
+    width: 9,
+    height: 11,
+    tiles: mergeTiles(
+      // Raised central glasshouse rotunda (elevation 1) + high sunlit dome plinth (elevation 2)
+      rect(2, 3, 6, 7, { terrain: 'barn_floor', elevation: 1 }),
+      rect(3, 4, 5, 6, { terrain: 'grass', elevation: 1 }),
+      [
+        { x: 4, y: 5, terrain: 'sunbeam', elevation: 2 },
+        { x: 4, y: 6, terrain: 'ramp', elevation: 1 },
+        { x: 4, y: 4, terrain: 'ramp', elevation: 1 },
+        // Four cardinal ramps into the rotunda
+        { x: 4, y: 8, terrain: 'ramp', elevation: 0 },
+        { x: 4, y: 2, terrain: 'ramp', elevation: 0 },
+        { x: 1, y: 5, terrain: 'ramp', elevation: 0 },
+        { x: 7, y: 5, terrain: 'ramp', elevation: 0 },
+        // Flanking bounce pads & garden pools
+        { x: 1, y: 7, terrain: 'bounce_pad', elevation: 0 },
+        { x: 7, y: 7, terrain: 'bounce_pad', elevation: 0 },
+        { x: 0, y: 4, terrain: 'water', elevation: 0 },
+        { x: 0, y: 6, terrain: 'water', elevation: 0 },
+        { x: 8, y: 4, terrain: 'water', elevation: 0 },
+        { x: 8, y: 6, terrain: 'water', elevation: 0 },
+        { x: 2, y: 8, terrain: 'compost', elevation: 0 },
+        { x: 6, y: 8, terrain: 'sunbeam', elevation: 0 },
+      ],
+      // Potted cover ring & hazards
+      [
+        { x: 3, y: 8, cover: 'crate' },
+        { x: 5, y: 8, cover: 'crate' },
+        { x: 2, y: 6, cover: 'stone' },
+        { x: 6, y: 6, cover: 'stone' },
+        { x: 2, y: 4, cover: 'beehive' },
+        { x: 6, y: 4, cover: 'sprinkler' },
+        { x: 3, y: 3, cover: 'pumpkin' },
+        { x: 5, y: 3, cover: 'pumpkin' },
+        { x: 3, y: 1, cover: 'haystack' },
+        { x: 5, y: 1, cover: 'crate' },
+      ]
+    ),
+    playerSpawns: [
+      { x: 1, y: 10 },
+      { x: 3, y: 9 },
+      { x: 5, y: 9 },
+      { x: 7, y: 10 },
+    ],
+    enemySpawns: [
+      { blueprintId: 'kettlebot', x: 4, y: 2 },
+      { blueprintId: 'beekeeper', x: 2, y: 2 },
+      { blueprintId: 'goose', x: 6, y: 2 },
+      { blueprintId: 'sprayer', x: 4, y: 0 },
+    ],
+  },
+
+  cider_mill_yard: {
+    id: 'cider_mill_yard',
+    name: 'Cider Mill Courtyard',
+    subtitle: 'Storm the autumn millstream bridges, bowl heirloom pumpkins & topple the armored mill guards!',
+    theme: 'autumn',
+    objective: 'defeat_all',
+    objectiveLabel: 'Clear the Cider Mill courtyard',
+    width: 9,
+    height: 12,
+    tiles: mergeTiles(
+      // Autumn millstream crossing y=7 with 3 wooden bridges
+      rect(0, 7, 8, 7, { terrain: 'water', elevation: 0 }),
+      [
+        { x: 1, y: 7, terrain: 'bridge', elevation: 0 },
+        { x: 4, y: 7, terrain: 'bridge', elevation: 0 },
+        { x: 7, y: 7, terrain: 'bridge', elevation: 0 },
+      ],
+      // Mid-level stone mill apron (elevation 1) & elevated Cider Loft (elevation 2)
+      rect(1, 3, 7, 5, { terrain: 'soil', elevation: 1 }),
+      rect(5, 0, 8, 2, { terrain: 'barn_floor', elevation: 2 }),
+      [
+        { x: 2, y: 6, terrain: 'ramp', elevation: 0 },
+        { x: 6, y: 6, terrain: 'ramp', elevation: 0 },
+        { x: 5, y: 3, terrain: 'ramp', elevation: 1 },
+        { x: 4, y: 8, terrain: 'bounce_pad', elevation: 0 },
+        { x: 7, y: 5, terrain: 'bounce_pad', elevation: 1 },
+        { x: 2, y: 4, terrain: 'sunbeam', elevation: 1 },
+        { x: 6, y: 1, terrain: 'sunbeam', elevation: 2 },
+        { x: 3, y: 9, terrain: 'compost', elevation: 0 },
+        { x: 0, y: 5, terrain: 'mud', elevation: 0 },
+      ],
+      // Barrels, rolling pumpkins, haystacks & mill crates
+      [
+        { x: 2, y: 9, cover: 'crate' },
+        { x: 6, y: 9, cover: 'haystack' },
+        { x: 3, y: 5, cover: 'pumpkin' },
+        { x: 5, y: 5, cover: 'crate' },
+        { x: 2, y: 3, cover: 'stone' },
+        { x: 4, y: 3, cover: 'beehive' },
+        { x: 6, y: 3, cover: 'pumpkin' },
+        { x: 6, y: 2, cover: 'crate' },
+        { x: 7, y: 2, cover: 'haystack' },
+      ]
+    ),
+    playerSpawns: [
+      { x: 1, y: 11 },
+      { x: 3, y: 10 },
+      { x: 5, y: 10 },
+      { x: 7, y: 11 },
+    ],
+    enemySpawns: [
+      { blueprintId: 'digger', x: 6, y: 1 },
+      { blueprintId: 'mole', x: 2, y: 2 },
+      { blueprintId: 'kettlebot', x: 4, y: 4 },
+      { blueprintId: 'goose', x: 7, y: 4 },
     ],
   },
 };

@@ -1148,9 +1148,201 @@ export const HERO_SKILL_TREES: Record<HeroSpecies, HeroSkillTreeDef> = {
       ],
     },
   },
+
+  pumpkin: {
+    species: 'pumpkin',
+    pathA: {
+      key: 'pathA',
+      name: 'Iron Rind',
+      icon: '🛡️',
+      color: '#b8601c',
+      accent: '#ffe8d1',
+      tagline: 'Immovable living fortress with thorns & automatic opening armor',
+      perks: [
+        makePerk(
+          'pumpkin', 'pathA', 1, 'pmk_bucket_guard', 'Bucket Visor', '🪣',
+          '+4 Max HP · Start Shielded (2t)',
+          'Reinforced oak bucket armor adds +4 Max HP and opens every battle with Shield (-2 DMG)!',
+          { bonusHp: 4, startShieldTurns: 2 }
+        ),
+        makePerk(
+          'pumpkin', 'pathA', 2, 'pmk_briar_rind', 'Living Wall & Thorns', '🌵',
+          'Living Full Cover · 3 Thorns DMG',
+          'Upgrades Patch to Living Full Cover for allies and reflects 3 Thorns damage to close attackers!',
+          { livingFullCover: true, thornsDmg: 3, bonusHp: 2 },
+          'pmk_bucket_guard'
+        ),
+        makePerk(
+          'pumpkin', 'pathA', 3, 'pmk_harvest_bastion', 'Harvest Bastion', '🏰',
+          'Gourd Slam Heals +4 & Cleanses',
+          'Gourd Slam heals Patch +4 HP, cleanses debuffs on allies, recharges 1 turn faster & expands +1!',
+          { healOnSkillCast: 4, cleanseOnSkillCast: true, skillCdDelta: -1, skillRadiusDelta: 1 },
+          'pmk_briar_rind'
+        ),
+      ],
+    },
+    pathB: {
+      key: 'pathB',
+      name: 'Cider Smasher',
+      icon: '🔨',
+      color: '#c94322',
+      accent: '#ffe0d4',
+      tagline: 'Earthshaking mallet knockbacks, cover explosions & burning slams',
+      perks: [
+        makePerk(
+          'pumpkin', 'pathB', 1, 'pmk_oak_impact', 'Heavy Oak Head', '💥',
+          '+1 Knockback · +2 Bump DMG',
+          'Cider Mallet sends farmers flying +1 tile farther and deals +2 bonus Bump damage into walls!',
+          { extraKnockback: 1, bonusBumpDmg: 2, bonusCoverDmg: 3 }
+        ),
+        makePerk(
+          'pumpkin', 'pathB', 2, 'pmk_ember_slam', 'Jack-o-Ignition', '🔥',
+          'Attacks Apply Burn · 1-Shot Cover',
+          'Every mallet swing ignites foes with Burn and shatters crates in 1 hit (+2 splash damage)!',
+          { attackStatus: 'burn', oneShotCover: true, coverBreakSplash: 2 },
+          'pmk_oak_impact'
+        ),
+        makePerk(
+          'pumpkin', 'pathB', 3, 'pmk_pumpkin_quake', 'Pumpkin Quake', '🎃',
+          'Jump Stomp 4 DMG · +3 Burn Detonate',
+          'Team-Jump landings quake adjacent foes for 4 DMG; hitting Burning foes detonates for +3 bonus DMG!',
+          { jumpStompDmg: 4, jumpStompBoost: true, burnDetonateBonus: 3, bonusAttack: 1 },
+          'pmk_ember_slam'
+        ),
+      ],
+    },
+  },
+
+  blueberry: {
+    species: 'blueberry',
+    pathA: {
+      key: 'pathA',
+      name: 'Shadow Vine',
+      icon: '🥷',
+      color: '#3c5296',
+      accent: '#dce6ff',
+      tagline: 'Lightning-fast flanker who resets Dashes on KO and ignores Half Cover',
+      perks: [
+        makePerk(
+          'blueberry', 'pathA', 1, 'blu_silent_step', 'Dewdrop Footwork', '💨',
+          '+1 Move · +2 Flank Crit · Bypass Half Cover',
+          'Gain +1 Move, +2 bonus Flank Crit damage, and dart straight past Half Cover on flanked angles!',
+          { bonusMove: 1, bonusFlankCrit: 2, ignoreHalfCoverOnFlank: true }
+        ),
+        makePerk(
+          'blueberry', 'pathA', 2, 'blu_phantom_dash', 'Shadow Chain-Dash', '⚡',
+          '2× Dash (+2 DMG) · KO Refreshes Dash',
+          'Dash 2 farmers per turn (+2 Dash DMG), and defeating any farmer immediately refreshes Dash!',
+          { extraDashes: 1, bonusDashDmg: 2, killRefreshesDash: true },
+          'blu_silent_step'
+        ),
+        makePerk(
+          'blueberry', 'pathA', 3, 'blu_vanish_strike', 'Smoke Vanish', '🌙',
+          'Skill Grants Free Move · KO Refunds CD',
+          'Casting Indigo Smoke grants a free reposition move; scoring a KO refunds Skill cooldown + +1 ATK!',
+          { skillGrantsFreeMove: true, killRefundsCd: true, bonusAttack: 1 },
+          'blu_phantom_dash'
+        ),
+      ],
+    },
+    pathB: {
+      key: 'pathB',
+      name: 'Tart Alchemist',
+      icon: '🧪',
+      color: '#6e3fa3',
+      accent: '#efe0ff',
+      tagline: 'Acidic chain-reactions, wide smoke clouds & lethal follow-up darts',
+      perks: [
+        makePerk(
+          'blueberry', 'pathB', 1, 'blu_concentrated_juice', 'Concentrated Juice', '🫐',
+          '+1 Range · +2 Skill DMG · -1 CD',
+          'Rose-Thorn Darts reach +1 tile farther; Indigo Smoke hits +2 harder and recharges 1 turn faster!',
+          { bonusRange: 1, skillDmgDelta: 2, skillCdDelta: -1 }
+        ),
+        makePerk(
+          'blueberry', 'pathB', 2, 'blu_berry_burst', 'Acidic Detonation', '☢️',
+          'Acid Kills Explode 3×3 · +1 Smoke Radius',
+          'Defeating an Acid-coated farmer erupts in a 3×3 berry burst; Indigo Smoke spreads +1 tile wider!',
+          { acidExplosionOnKill: true, skillRadiusDelta: 1 },
+          'blu_concentrated_juice'
+        ),
+        makePerk(
+          'blueberry', 'pathB', 3, 'blu_kunai_crossfire', 'Kunai Crossfire', '★',
+          '2× Overwatch · Range-2 Assist (+2)',
+          'Fire 2 Overwatch ambush darts per enemy turn and trigger Range-2 Partner Assists (+2 DMG)!',
+          { bonusOverwatchShots: 1, bonusOverwatchDmg: 1, assistRange: 2, bonusAssistDmg: 1 },
+          'blu_berry_burst'
+        ),
+      ],
+    },
+  },
+
+  owl: {
+    species: 'owl',
+    pathA: {
+      key: 'pathA',
+      name: 'Night Watch',
+      icon: '🦉',
+      color: '#7a522c',
+      accent: '#f7ead6',
+      tagline: 'Perched cliff-top sniper with rooting Overwatch & piercing precision',
+      perks: [
+        makePerk(
+          'owl', 'pathA', 1, 'owl_brass_lens', 'Brass Spectacles', '▲',
+          '+1 Range · +2 High Ground DMG',
+          'Quill Longbow stretches +1 tile farther and deals +2 extra High Ground damage from elevated tiles!',
+          { bonusRange: 1, bonusHighGroundDmg: 2 }
+        ),
+        makePerk(
+          'owl', 'pathA', 2, 'owl_talon_watch', 'Owl Overwatch', '👁️',
+          '2× Overwatch (+2 DMG) · Shots Root',
+          'Hero Sight fires twice per enemy turn with +2 DMG and pins spotted farmhands with Rooted!',
+          { bonusOverwatchShots: 1, bonusOverwatchDmg: 2, overwatchRoots: true },
+          'owl_brass_lens'
+        ),
+        makePerk(
+          'owl', 'pathA', 3, 'owl_keen_strike', 'Deadeye Swoop', '🎯',
+          '+2 vs Rooted · +2 Flank · Ignore Half Cover',
+          'Deal +2 bonus DMG to Rooted targets, +2 Flank Crit, +1 ATK, and bypass Half Cover on flanks!',
+          { rootedTargetBonus: 2, bonusFlankCrit: 2, ignoreHalfCoverOnFlank: true, bonusAttack: 1 },
+          'owl_talon_watch'
+        ),
+      ],
+    },
+    pathB: {
+      key: 'pathB',
+      name: 'Field Marshal',
+      icon: '🪶',
+      color: '#2e8a6b',
+      accent: '#d8f7ec',
+      tagline: 'Squad-wide healing rallies, long-range Assists & uplifting Team-Jumps',
+      perks: [
+        makePerk(
+          'owl', 'pathB', 1, 'owl_feather_balm', 'Satchel Poultice', '💚',
+          'Scout Rally +2 Heal & Cleanse · -1 CD',
+          'Scout Rally heals +2 more HP, cleanses all debuffs from rallied allies, and recharges faster!',
+          { skillHealDelta: 2, cleanseOnSkillCast: true, skillCdDelta: -1 }
+        ),
+        makePerk(
+          'owl', 'pathB', 2, 'owl_updraft_wings', 'Updraft Wings', '🌬️',
+          'Allies Jumping Off Owl Heal +4 & Boost',
+          'Teammates Team-Jumping off Barnaby heal +4 HP, gain Boosted, and Barnaby gains +1 Move & +1 Jump!',
+          { allyJumpHeal: 4, allyJumpBoost: true, bonusMove: 1, bonusJump: 1 },
+          'owl_feather_balm'
+        ),
+        makePerk(
+          'owl', 'pathB', 3, 'owl_grand_command', 'Grand Tactician', '⭐',
+          'Range-2 Assist (+2) · Rally +1 Radius & Push',
+          'Cover teammates with Range-2 Partner Assists (+2 DMG); Scout Rally expands +1 & pushes foes away!',
+          { assistRange: 2, bonusAssistDmg: 1, skillRadiusDelta: 1, skillPushes: true, startBoostTurns: 2 },
+          'owl_updraft_wings'
+        ),
+      ],
+    },
+  },
 };
 
-/** Flat registry of all 96 bespoke character perks by ID. */
+/** Flat registry of all 114 bespoke character perks by ID. */
 export const SKILL_PERKS: Record<string, SkillPerkDef> = {};
 for (const tree of Object.values(HERO_SKILL_TREES)) {
   for (const perk of [...tree.pathA.perks, ...tree.pathB.perks]) {

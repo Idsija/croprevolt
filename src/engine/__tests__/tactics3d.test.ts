@@ -615,7 +615,7 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
 
   it('supports Armory Alternate Weapons unlocking, switching, and preserving upgrade deltas', () => {
     const run = createNewRun(defaultMetaProgress());
-    expect(ALT_WEAPONS).toHaveLength(16);
+    expect(ALT_WEAPONS).toHaveLength(19);
     for (const wid of STARTER_UNLOCKED_WEAPONS) {
       expect(run.unlockedWeaponIds).toContain(wid);
     }
@@ -860,10 +860,10 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     expect(bystander.statuses.some((s) => s.kind === 'acid')).toBe(true);
   });
 
-  it('supports 16 heroes (96 bespoke perks & 16 Armory weapons), 3 new allies, 3 new enemies, and all 3 cartoon boards', () => {
+  it('supports all 19 heroes (114 bespoke perks & 19 Armory weapons), new allies, new enemies, and all 3 watercolor boards', () => {
     const allHeroes = Object.values(PRODUCE_BLUEPRINTS);
-    expect(allHeroes).toHaveLength(16);
-    expect(ALL_SKILL_PERK_IDS).toHaveLength(96);
+    expect(allHeroes).toHaveLength(19);
+    expect(ALL_SKILL_PERK_IDS).toHaveLength(114);
 
     for (const bp of allHeroes) {
       const tree = HERO_SKILL_TREES[bp.species];

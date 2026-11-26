@@ -85,7 +85,7 @@ export function getEffectiveMoveRange(unit: BattleUnit): number {
 
 /** Movement points left this turn after walking, dashing and team-jump approaches. */
 export function getRemainingMove(unit: BattleUnit): number {
-  return Math.max(0, getEffectiveMoveRange(unit) - (unit.actions.moveSpent ?? 0));
+  return Math.max(0, getEffectiveMoveRange(unit) + (unit.actions.bonusMove ?? 0) - (unit.actions.moveSpent ?? 0));
 }
 
 /** Spends movement points and marks movement as finished once the budget is gone. */
@@ -94,17 +94,25 @@ export function spendMove(unit: BattleUnit, cost: number): void {
   unit.actions.hasMoved = getRemainingMove(unit) <= 0;
 }
 
-export function getEffectiveJumpRange(unit: BattleUnit, springboardAlly?: BattleUnit): number {
+export function getEffectiveJumpRange(
+  unit: BattleUnit,
+  springboardAlly?: BattleUnit,
+  relicIds?: string[]
+): number {
   const launchBonus = springboardAlly?.launchpadCoop ? 2 : 0;
-  return unit.jumpRange + launchBonus;
+  const relicBonus =
+    unit.team === 'player' && relicIds && hasRelic(relicIds, 'copper_weathervane') ? 1 : 0;
+  return unit.jumpRange + launchBonus + relicBonus;
 }
 
 export function getMaxDashesForUnit(unit: BattleUnit): number {
   return 1 + getUnitPerkEffects(unit).extraDashes;
 }
 
-export function getMaxOverwatchCharges(unit: BattleUnit): number {
-  return 1 + getUnitPerkEffects(unit).bonusOverwatchShots;
+export function getMaxOverwatchCharges(unit: BattleUnit, relicIds?: string[]): number {
+  const relicBonus =
+    unit.team === 'player' && relicIds && hasRelic(relicIds, 'heirloom_pocketwatch') ? 1 : 0;
+  return 1 + getUnitPerkEffects(unit).bonusOverwatchShots + relicBonus;
 }
 
 export function getEffectiveDashDamage(unit: BattleUnit): number {

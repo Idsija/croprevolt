@@ -9,7 +9,7 @@ import {
   getWeaponRangeTiles,
   unitHasMeaningfulAction,
 } from '../engine/combat';
-import { chebyshev, manhattan, posKey, samePos, tileAt, unitAt } from '../engine/grid';
+import { chebyshev, getAdjacentCoverBadges, manhattan, posKey, samePos, tileAt, unitAt } from '../engine/grid';
 import {
   computeDashOptions,
   computeMovableTiles,
@@ -38,6 +38,7 @@ import {
   SPRITE_DEFAULT_FACING,
   UNIT_WORLD_HEIGHTS,
   type PaperStandeeRig,
+  type SpriteVariantKind,
 } from './textures';
 import {
   gridToWorld3D,
@@ -51,7 +52,7 @@ import {
 } from './types';
 
 interface PathMoveAnim {
-  kind: 'path' | 'dash' | 'jump' | 'knockback';
+  kind: 'path' | 'dash' | 'jump' | 'bounce' | 'knockback';
   points: THREE.Vector3[];
   elapsed: number;
   duration: number;
@@ -59,6 +60,8 @@ interface PathMoveAnim {
   spinFull?: boolean;
   leanAngle?: number;
 }
+
+type ActionPoseKind = 'none' | 'attack' | 'skill' | 'dash' | 'jump' | 'bounce';
 
 interface UnitVisualEntry {
   id: string;
@@ -69,6 +72,10 @@ interface UnitVisualEntry {
   hitCylinder: THREE.Mesh;
   hitFlash: number;
   hitPoseTimer: number;
+  actionPoseTimer: number;
+  actionPoseDuration: number;
+  actionPoseKind: ActionPoseKind;
+  coverBlend: number;
   squash: number;
   anim: PathMoveAnim | null;
   koTimer: number; // > 0 means playing Paper Mario KO flutter tumble!
@@ -581,6 +588,9 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       entry.anim = null;
       entry.hitFlash = 0;
       entry.hitPoseTimer = 0;
+      entry.actionPoseTimer = 0;
+      entry.actionPoseDuration = 0.5;
+      entry.actionPoseKind = 'none';
       entry.squash = 0;
     }
     this.hitstopTimer = 0;
@@ -596,6 +606,17 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     }
     if (bigImpact) {
       this.hitstopTimer = Math.max(this.hitstopTimer, 0.075);
+    }
+  }
+
+  private triggerUnitActionPose(unitId: string, kind: ActionPoseKind, duration = 0.54): void {
+    const entry = this.unitMap.get(unitId);
+    if (!entry) return;
+    entry.actionPoseKind = kind;
+    entry.actionPoseDuration = duration;
+    entry.actionPoseTimer = duration;
+    if (kind === 'attack' || kind === 'skill') {
+      entry.squash = Math.max(entry.squash, 0.55);
     }
   }
 
@@ -664,6 +685,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
               arcHeight: 0.24,
               leanAngle: 0.34,
             };
+            this.triggerUnitActionPose(ev.unitId, 'dash', 0.42);
           }
           this.triggerUnitHit(ev.targetId, false);
           this.cameraCtrl.triggerShake(0.22, 0.18);
@@ -689,6 +711,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
               spinFull: true,
             };
             entry.squash = 0.9;
+            this.triggerUnitActionPose(ev.unitId, 'jump', 0.58);
           }
           const allyUnit = unitAt(b, ev.allyPos);
           if (allyUnit) {
@@ -757,6 +780,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           const pFrom = this.worldPointForTile(b, ev.from, 0.72);
           const pTo = this.worldPointForTile(b, ev.to, 0.55);
           const lobbed = ev.arc === 'lobbed';
+          this.triggerUnitActionPose(ev.attackerId, 'attack', 0.54);
           this.spawnProjectile3D(pFrom, pTo, ev.arc, ev.attackerKind);
           this.focusOnGrid(ev.to);
           if (lobbed) sfx.lob();
@@ -809,6 +833,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           const pTo = this.worldPointForTile(b, ev.to, 0.6);
           const name = ev.type === 'ability' ? ev.abilityName : ev.itemName;
           const isHeal = Boolean(ev.heal && !ev.damage);
+          this.triggerUnitActionPose(ev.unitId, 'skill', 0.62);
           this.spawnBurst(
             pTo,
             isHeal ? ['#66bb6a', '#b9f6ca', '#fbf3df'] : ['#ab47bc', '#ffd54f', '#fbf3df'],
@@ -904,6 +929,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         case 'overwatch_shot': {
           const pFrom = this.worldPointForTile(b, ev.from, 0.72);
           const pTo = this.worldPointForTile(b, ev.to, 0.56);
+          this.triggerUnitActionPose(ev.attackerId, 'attack', 0.54);
           this.spawnProjectile3D(pFrom, pTo, 'direct', ev.attackerKind);
           this.triggerUnitHit(ev.targetId, true);
           this.cameraCtrl.triggerShake(0.24, 0.18);
@@ -1015,6 +1041,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           const allyEntry = this.unitMap.get(ev.allyId);
           if (allyEntry) {
             allyEntry.squash = 0.7;
+            this.triggerUnitActionPose(ev.allyId, 'attack', 0.48);
           }
           this.spawnProjectile3D(pFrom, pTo, 'direct', ev.allyKind);
           this.triggerUnitHit(ev.targetId, false);
@@ -1036,13 +1063,15 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           const entry = this.unitMap.get(ev.unitId);
           if (entry) {
             entry.anim = {
-              kind: 'path',
+              kind: 'bounce',
               points: [this.worldPointForTile(b, ev.from, 0), this.worldPointForTile(b, ev.to, 0)],
               elapsed: 0,
-              duration: 0.42,
-              arcHeight: 1.95,
+              duration: 0.46,
+              arcHeight: 2.05,
+              spinFull: true,
               leanAngle: 0.24,
             };
+            this.triggerUnitActionPose(ev.unitId, 'bounce', 0.54);
           }
           this.spawnBurst(pFrom, ['#ff4fa3', '#ffe066', '#fff8e2'], 16, 'confetti');
           this.spawnPopup(pTo.clone().add(new THREE.Vector3(0, 1.0, 0)), 'BOING!', '#8c1448', '#ffd9ec', 1.15);
@@ -1552,6 +1581,10 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           hitCylinder,
           hitFlash: 0,
           hitPoseTimer: 0,
+          actionPoseTimer: 0,
+          actionPoseDuration: 0.5,
+          actionPoseKind: 'none',
+          coverBlend: 0,
           squash: 0,
           anim: null,
           koTimer: 0,
@@ -1562,29 +1595,92 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
 
       entry.hitCylinder.userData.gridPos = { x: u.pos.x, y: u.pos.y };
 
-      // 1. Expressive Variant Sprite State Machine (_hit -> Boss Phase-2 _enraged -> _lowhp -> base)!
+      // 1. Live Status, Cover & Expressive Battle Pose State Machine!
       if (entry.hitPoseTimer > 0) {
         entry.hitPoseTimer = Math.max(0, entry.hitPoseTimer - dt);
       }
+      if (entry.actionPoseTimer > 0) {
+        entry.actionPoseTimer = Math.max(0, entry.actionPoseTimer - dt);
+        if (entry.actionPoseTimer <= 0) {
+          entry.actionPoseKind = 'none';
+        }
+      }
+
       const hpRatio = u.hp / Math.max(1, u.maxHp);
       const isLowHp = hpRatio <= 0.35;
       const isBossEnraged = Boolean(u.isBoss && (b.bossPhase ?? 1) >= 2);
+      const isSelected = u.id === view.selectedUnitId;
+      const isAimingHero =
+        isSelected &&
+        (view.mode === 'attack' || view.mode === 'ability' || view.mode === 'item') &&
+        b.phase === 'player';
+      const isInspected = u.id === view.inspectedEnemyId;
+      const isDashTarget = tac.dashEnemyIds.has(u.id);
+      const isDone = tac.doneUnitIds.has(u.id);
+      const isCelebrating = b.status === 'victory' && u.team === 'player';
+      const isOverwatching = u.statuses.some((s) => s.kind === 'overwatch');
+      const isAirborneAnim =
+        entry.anim?.kind === 'jump' || entry.anim?.kind === 'bounce';
+      const isDashingAnim = entry.anim?.kind === 'dash';
 
-      let desiredVariant: 'base' | 'hit' | 'lowhp' | 'enraged' = 'base';
+      // Check whether this unit is currently hunkered behind adjacent Half or Full cover!
+      const coverBadges = !entry.anim && !u.isEscortCart
+        ? getAdjacentCoverBadges(b, u.pos, u.team)
+        : [];
+      const hasFullCover = coverBadges.some((c) => c.level === 'full');
+      const hasAnyCover = coverBadges.length > 0;
+      const isTakingCover =
+        hasAnyCover &&
+        !entry.anim &&
+        entry.hitPoseTimer <= 0 &&
+        entry.actionPoseTimer <= 0 &&
+        !isAimingHero &&
+        !isOverwatching &&
+        !isCelebrating &&
+        !u.isBoss;
+
+      entry.coverBlend = THREE.MathUtils.lerp(
+        entry.coverBlend,
+        isTakingCover ? 1 : 0,
+        1 - Math.exp(-dt * 12)
+      );
+
+      let desiredVariant: SpriteVariantKind = 'base';
       if (entry.hitPoseTimer > 0) {
         desiredVariant = 'hit';
       } else if (isBossEnraged) {
         desiredVariant = 'enraged';
+      } else if (
+        entry.actionPoseTimer > 0 ||
+        isAirborneAnim ||
+        isDashingAnim ||
+        isAimingHero ||
+        isOverwatching ||
+        isCelebrating
+      ) {
+        desiredVariant = hasVariantSprite(u.visualKind, 'action')
+          ? 'action'
+          : isLowHp && !isCelebrating
+            ? 'lowhp'
+            : 'base';
+      } else if (isTakingCover) {
+        desiredVariant = hasVariantSprite(u.visualKind, 'cover')
+          ? 'cover'
+          : isLowHp
+            ? 'lowhp'
+            : 'base';
       } else if (isLowHp && b.status !== 'victory') {
         desiredVariant = 'lowhp';
       }
       entry.rig.setSpriteKey(resolveVariantSpriteKey(u.visualKind, desiredVariant));
 
-      // 2. Position & Paper Mario Movement Animations
+      // 2. Position & Paper Mario Movement / Jump / Bounce Animations
       const restingPos = this.worldPointForTile(b, u.pos, 0);
       let hopY = 0;
       let tiltZ = 0;
       let extraSpinY = 0;
+      let airStretch = 0;
+      let airPitchX = 0;
 
       if (entry.anim) {
         const anim = entry.anim;
@@ -1596,12 +1692,21 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
             const p = t / 0.32;
             entry.rig.root.position.lerpVectors(anim.points[0], anim.points[1], p);
             hopY = Math.sin(p * Math.PI) * 0.48;
+            airStretch = Math.sin(p * Math.PI) * 0.14;
           } else {
             const p = (t - 0.32) / 0.68;
             entry.rig.root.position.lerpVectors(anim.points[1], anim.points[2], p);
             hopY = Math.sin(p * Math.PI) * anim.arcHeight;
             extraSpinY = p * Math.PI * 2;
+            airStretch = Math.sin(p * Math.PI) * 0.2;
+            airPitchX = Math.sin(p * Math.PI) * 0.18;
           }
+        } else if (anim.kind === 'bounce' && anim.points.length >= 2) {
+          entry.rig.root.position.lerpVectors(anim.points[0], anim.points[1], t);
+          hopY = Math.sin(t * Math.PI) * anim.arcHeight;
+          extraSpinY = t * Math.PI * 2;
+          airStretch = Math.sin(t * Math.PI) * 0.22;
+          airPitchX = Math.sin(t * Math.PI) * 0.2;
         } else if (anim.points.length >= 2) {
           const segCount = anim.points.length - 1;
           const scaled = t * segCount;
@@ -1610,11 +1715,14 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           entry.rig.root.position.lerpVectors(anim.points[segIdx], anim.points[segIdx + 1], segT);
           hopY = Math.sin(segT * Math.PI) * anim.arcHeight;
           tiltZ = Math.sin(segT * Math.PI) * (anim.leanAngle ?? 0.14);
+          if (anim.kind === 'dash') {
+            airPitchX = 0.22;
+          }
         }
 
         if (t >= 1) {
           entry.anim = null;
-          entry.squash = Math.max(entry.squash, 0.55);
+          entry.squash = Math.max(entry.squash, isAirborneAnim ? 0.92 : 0.55);
         }
       } else {
         entry.rig.root.position.lerp(restingPos, 1 - Math.exp(-dt * 18));
@@ -1627,23 +1735,40 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       const hasFeared = u.statuses.some((s) => s.kind === 'feared');
       const hasShield = u.statuses.some((s) => s.kind === 'shield');
       const hasBoosted = u.statuses.some((s) => s.kind === 'boosted');
-      const isOverwatching = u.statuses.some((s) => s.kind === 'overwatch');
 
-      // 4. Expressive Idle Breathe, Victory Celebration Dance, Pop-Up Fold-In, Aim Lean & Hit Recoil!
-      const isSelected = u.id === view.selectedUnitId;
-      const isAimingHero = isSelected && view.mode === 'attack' && b.phase === 'player';
-      const isInspected = u.id === view.inspectedEnemyId;
-      const isDashTarget = tac.dashEnemyIds.has(u.id);
-      const isDone = tac.doneUnitIds.has(u.id);
-      const isCelebrating = b.status === 'victory' && u.team === 'player';
+      // 4. Expressive Battle Poses: Cover Crouch & Peek, Action Lunge, Skill Flourish, Overwatch Brace & Celebration!
+      let actionHopY = 0;
+      let actionLungeX = 0;
+      let actionTiltZ = 0;
+      let actionStretchY = 0;
+      if (entry.actionPoseTimer > 0 && !entry.anim) {
+        const p = 1 - entry.actionPoseTimer / Math.max(0.01, entry.actionPoseDuration);
+        if (entry.actionPoseKind === 'attack') {
+          // Crisp forward snap lunge then rebound!
+          const lungeWave = Math.sin(p * Math.PI);
+          actionLungeX = lungeWave * 0.22;
+          actionHopY = lungeWave * 0.12;
+          actionTiltZ = (u.facing === 'right' ? -1 : 1) * lungeWave * 0.16;
+          actionStretchY = lungeWave * 0.08;
+        } else if (entry.actionPoseKind === 'skill') {
+          // Celebratory rising Paper Mario flourish hop + twirl!
+          const flourish = Math.sin(p * Math.PI);
+          actionHopY = flourish * 0.42;
+          extraSpinY += p * Math.PI * 2;
+          actionStretchY = flourish * 0.14;
+        }
+      }
 
       const breatheSpeed = isCelebrating ? 7.8 : isLowHp ? 6.2 : isSelected ? 4.4 : 2.6;
       const idlePhase = this.elapsedTotal * breatheSpeed + u.pos.x * 0.9 + u.pos.y * 1.3;
+      const coverDampen = 1 - entry.coverBlend * 0.6;
       const idleBounce = entry.anim
         ? 0
         : isCelebrating
           ? Math.abs(Math.sin(idlePhase)) * 0.34
-          : Math.abs(Math.sin(idlePhase)) * (isSelected ? 0.085 : isLowHp ? 0.04 : 0.025);
+          : Math.abs(Math.sin(idlePhase)) *
+            (isSelected ? 0.085 : isLowHp ? 0.04 : 0.025) *
+            coverDampen;
       if (isCelebrating && !entry.anim) {
         extraSpinY += Math.sin(idlePhase * 0.5) * 0.55;
       }
@@ -1651,16 +1776,22 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       const camPitch = this.cameraCtrl.getCurrentPitch();
       const tacticamTiltX = -Math.max(0, (camPitch - 0.72) * 0.52);
       const popUpFoldX = popUp < 1 ? (1 - popUpEase) * (-Math.PI * 0.45) : 0;
-      const aimLeanX = isAimingHero ? 0.13 : 0;
+      const aimLeanX = isAimingHero ? 0.14 : isOverwatching ? 0.1 : 0;
+      const coverDuckX = entry.coverBlend * (hasFullCover ? 0.09 : 0.05);
       const lowHpDroopX = isLowHp && !isCelebrating && !entry.anim ? 0.08 + Math.sin(idlePhase) * 0.03 : 0;
       const hitRecoilX = entry.hitPoseTimer > 0 ? -Math.sin((entry.hitPoseTimer / 0.44) * Math.PI) * 0.28 : 0;
 
-      const targetTiltX = tacticamTiltX + popUpFoldX + aimLeanX + lowHpDroopX + hitRecoilX;
+      const targetTiltX =
+        tacticamTiltX + popUpFoldX + aimLeanX + coverDuckX + lowHpDroopX + hitRecoilX + airPitchX + actionLungeX;
+
+      const coverPeekSwayZ =
+        entry.coverBlend * Math.sin(this.elapsedTotal * 2.2 + u.pos.x * 1.7 + u.pos.y) * 0.055;
+      const coverSettleY = -entry.coverBlend * (hasFullCover ? 0.045 : 0.028);
 
       entry.rig.tiltGroup.position.x = hasFeared
         ? Math.sin(this.elapsedTotal * 44 + u.pos.x) * 0.036
         : 0;
-      entry.rig.tiltGroup.position.y = hopY + idleBounce;
+      entry.rig.tiltGroup.position.y = Math.max(-0.05, hopY + idleBounce + actionHopY + coverSettleY);
       entry.rig.tiltGroup.rotation.x = THREE.MathUtils.lerp(
         entry.rig.tiltGroup.rotation.x,
         targetTiltX,
@@ -1668,12 +1799,16 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       );
       entry.rig.tiltGroup.rotation.z =
         tiltZ +
+        actionTiltZ +
+        coverPeekSwayZ +
         (entry.anim
           ? 0
-          : Math.sin(idlePhase * 0.5) * (isCelebrating ? 0.14 : isSelected ? 0.045 : isLowHp ? 0.04 : 0.018)) +
+          : Math.sin(idlePhase * 0.5) *
+            (isCelebrating ? 0.14 : isSelected ? 0.045 : isLowHp ? 0.04 : 0.018) *
+            coverDampen) +
         (entry.hitPoseTimer > 0 ? Math.sin(entry.hitPoseTimer * 42) * 0.1 : 0);
 
-      // Squash, Stretch & Paper-Accordion Hit Ripple
+      // Squash, Stretch, Cover Hunker & Paper-Accordion Hit Ripple
       if (entry.squash > 0) {
         entry.squash = Math.max(0, entry.squash - dt * 4.5);
       }
@@ -1683,9 +1818,14 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           ? Math.sin(entry.hitPoseTimer * 36) * 0.16 * (entry.hitPoseTimer / 0.44)
           : 0;
       const lowHpPantY = isLowHp && !entry.anim ? Math.sin(idlePhase) * 0.04 : 0;
+      // Only squash vertically for units WITHOUT bespoke _cover PNGs (keep subtle 5% hunker on bespoke _cover art!)
+      const hasCustomCoverArt = hasVariantSprite(u.visualKind, 'cover');
+      const coverSquashY = entry.coverBlend * (hasCustomCoverArt ? 0.04 : hasFullCover ? 0.13 : 0.09);
+      const coverSpreadX = entry.coverBlend * (hasCustomCoverArt ? 0.03 : hasFullCover ? 0.09 : 0.06);
+
       entry.rig.tiltGroup.scale.set(
-        1 + sq * 0.75 + accordionX,
-        1 - sq - lowHpPantY,
+        1 + sq * 0.75 + accordionX + coverSpreadX - airStretch * 0.55,
+        Math.max(0.68, 1 - sq - lowHpPantY - coverSquashY + airStretch + actionStretchY),
         1 + sq * 0.4
       );
 

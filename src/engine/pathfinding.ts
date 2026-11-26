@@ -258,7 +258,7 @@ export function computeTeamJumpOptions(state: BattleState, unit: BattleUnit): Ma
   }
 
   for (const { ally, approach, approachCost } of springboardAllies) {
-    const jumpRange = getEffectiveJumpRange(unit, ally);
+    const jumpRange = getEffectiveJumpRange(unit, ally, state.relicIds);
     for (let y = 0; y < state.height; y++) {
       for (let x = 0; x < state.width; x++) {
         const dest = { x, y };

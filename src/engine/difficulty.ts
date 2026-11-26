@@ -149,6 +149,9 @@ export const REGULAR_ENEMY_POOL = [
   'beekeeper',
   'hound',
   'pitchfork',
+  'goose',
+  'mole',
+  'kettlebot',
 ] as const;
 
 /** Stable 32-bit hash so each node of a seeded run always gets the same battle. */

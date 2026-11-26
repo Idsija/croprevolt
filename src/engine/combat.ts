@@ -109,11 +109,13 @@ export function forecastAttack(
   const matchup = getMatchup(attacker.family, defender.family);
   const mult = getMatchupMultiplier(matchup, attacker.team, state.relicIds);
 
-  // Elevation Advantage (Mario + Rabbids High Ground + hero-specific perch bonuses!)
+  // Elevation Advantage (Mario + Rabbids High Ground + Copper Weathervane + hero perch bonuses!)
   const attackerElev = attackerTile?.elevation ?? 0;
   const defenderElev = targetTile?.elevation ?? 0;
   const elevationDiff = attackerElev - defenderElev;
-  const highGroundBonus = elevationDiff > 0 ? 2 + fx.bonusHighGroundDmg : 0;
+  const weathervaneBonus =
+    attacker.team === 'player' && hasRelic(state.relicIds, 'copper_weathervane') ? 1 : 0;
+  const highGroundBonus = elevationDiff > 0 ? 2 + weathervaneBonus + fx.bonusHighGroundDmg : 0;
 
   // Discrete Mario + Rabbids cover resolution (including Living Cover + High Ground + Wind Slicer override!)
   let coverEval = evaluateCover(state, attacker.pos, defender.pos, defender.team);
@@ -155,11 +157,12 @@ export function forecastAttack(
   if (hasStatus(defender, 'shield')) dmg -= 2;
   dmg = Math.max(1, dmg);
 
-  // Mario + Rabbids Partner Follow-Up Assist (supports Range-2 & +2 Assist character perks!)
+  // Mario + Rabbids Partner Follow-Up Assist (supports Straw Hat Trophy + character perks!)
   let partnerAssistUnitId: string | undefined;
   let partnerAssistUnitName: string | undefined;
   let partnerAssistDamage = 0;
   if (attacker.team === 'player' && hitChance > 0) {
+    const hasTrophy = hasRelic(state.relicIds, 'straw_hat_trophy');
     let bestAlly: BattleUnit | undefined;
     let bestAssistDmg = 0;
     for (const u of state.units) {
@@ -167,8 +170,9 @@ export function forecastAttack(
       if (hasStatus(u, 'rooted')) continue;
       const allyFx = getUnitPerkEffects(u);
       const d = manhattan(u.pos, defender.pos);
-      if (d <= allyFx.assistRange) {
-        const assistAmt = 1 + allyFx.bonusAssistDmg;
+      const effRange = allyFx.assistRange + (hasTrophy ? 1 : 0);
+      if (d <= effRange) {
+        const assistAmt = 1 + allyFx.bonusAssistDmg + (hasTrophy ? 2 : 0);
         if (assistAmt > bestAssistDmg) {
           bestAssistDmg = assistAmt;
           bestAlly = u;

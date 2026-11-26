@@ -49,6 +49,38 @@ export const RELIC_REGISTRY: Record<string, RelicDef> = {
     icon: '🍀',
     description: '50% Half-Cover shots upgrade to 70% accuracy for your squad.',
   },
+  dewdrop_compass: {
+    id: 'dewdrop_compass',
+    name: 'Dewdrop Compass',
+    effect: 'dewdrop_compass',
+    color: '#3b9ea8',
+    icon: '🧭',
+    description: 'All heroes gain +1 Move range on Turn 1 of every battle for rapid opening flanks.',
+  },
+  copper_weathervane: {
+    id: 'copper_weathervane',
+    name: 'Copper Weathervane',
+    effect: 'copper_weathervane',
+    color: '#c47b3a',
+    icon: '🐓',
+    description: 'High Ground bonus increases from +2 to +3 damage, and all heroes gain +1 Team-Jump range.',
+  },
+  heirloom_pocketwatch: {
+    id: 'heirloom_pocketwatch',
+    name: 'Heirloom Pocketwatch',
+    effect: 'heirloom_pocketwatch',
+    color: '#b89438',
+    icon: '⏱️',
+    description: 'Hero Sight Overwatch triggers +1 extra ambush shot per enemy turn for every hero!',
+  },
+  straw_hat_trophy: {
+    id: 'straw_hat_trophy',
+    name: 'Straw Hat Trophy',
+    effect: 'straw_hat_trophy',
+    color: '#d49e35',
+    icon: '👒',
+    description: 'Partner Assist follow-up shots deal +2 extra damage and trigger from 1 tile farther away!',
+  },
 };
 
 export const ALL_RELIC_IDS = Object.keys(RELIC_REGISTRY);

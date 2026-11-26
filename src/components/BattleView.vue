@@ -316,16 +316,35 @@ function isLowHpUnit(u: { alive: boolean; hp: number; maxHp: number }): boolean 
 }
 
 function unitPortraitSrc(u: {
+  id?: string;
   visualKind: string;
   alive: boolean;
   hp: number;
   maxHp: number;
   isBoss?: boolean;
+  pos?: { x: number; y: number };
+  team?: 'player' | 'enemy';
+  statuses?: Array<{ kind: string; turns: number }>;
 }): string {
   // Zero-404 guard: seed_cart is rendered procedurally in 3D and as an emoji badge in HUD.
   if (u.visualKind === 'seed_cart') return '/sprites/potato.png';
   const isBossEnraged = Boolean(u.isBoss && (battle.value.bossPhase ?? 1) >= 2);
-  const variant = isBossEnraged ? 'enraged' : isLowHpUnit(u) ? 'lowhp' : 'base';
+  if (isBossEnraged) return `/sprites/${resolveVariantSpriteKey(u.visualKind, 'enraged')}.png`;
+  const isOverwatching = Boolean(u.statuses?.some((s) => s.kind === 'overwatch' && s.turns > 0));
+  const isAimingThis =
+    Boolean(u.id && u.id === gameStore.selectedUnitId) &&
+    (gameStore.mode === 'attack' || gameStore.mode === 'ability' || gameStore.mode === 'item') &&
+    battle.value.phase === 'player';
+  if (isAimingThis || isOverwatching) {
+    return `/sprites/${resolveVariantSpriteKey(u.visualKind, 'action')}.png`;
+  }
+  if (u.alive && u.pos && u.team && !u.isBoss) {
+    const badges = getAdjacentCoverBadges(toRaw(battle.value), u.pos, u.team);
+    if (badges.length > 0) {
+      return `/sprites/${resolveVariantSpriteKey(u.visualKind, 'cover')}.png`;
+    }
+  }
+  const variant = isLowHpUnit(u) ? 'lowhp' : 'base';
   return `/sprites/${resolveVariantSpriteKey(u.visualKind, variant)}.png`;
 }
 
@@ -875,8 +894,52 @@ const remainingDashesForSelected = computed(() => {
 });
 
 const overwatchChargesForSelected = computed(() =>
-  selectedUnit.value ? getMaxOverwatchCharges(selectedUnit.value) : 1
+  selectedUnit.value ? getMaxOverwatchCharges(selectedUnit.value, battle.value.relicIds) : 1
 );
+
+/** Live positioning & pose pills shown on the Command Deck for the active hero. */
+const selectedStanceBadges = computed<Array<{ id: string; label: string; tone: string; desc: string }>>(() => {
+  void gameStore.eventQueueVersion;
+  const u = selectedUnit.value;
+  if (!u || !u.alive) return [];
+  const raw = toRaw(battle.value);
+  const badges: Array<{ id: string; label: string; tone: string; desc: string }> = [];
+  const adjCover = getAdjacentCoverBadges(raw, u.pos, u.team);
+  if (adjCover.some((c) => c.level === 'full')) {
+    badges.push({
+      id: 'full_cover',
+      label: '🛡️ Full Cover',
+      tone: 'cover-full',
+      desc: 'Taking Full Cover — blocks direct gunfire from covered sides (0% hit). Watch out for lobbed attacks and flanks!',
+    });
+  } else if (adjCover.length > 0) {
+    badges.push({
+      id: 'half_cover',
+      label: '◐ Half Cover',
+      tone: 'cover-half',
+      desc: 'Taking Half Cover — lowers incoming direct gunfire to 50% hit chance from covered angles.',
+    });
+  }
+  const t = tileAt(raw, u.pos);
+  if (t && (t.elevation ?? 0) > 0) {
+    const hgDmg = 2 + (hasRelic(raw.relicIds, 'copper_weathervane') ? 1 : 0);
+    badges.push({
+      id: 'high_ground',
+      label: `▲ High Ground +${hgDmg}`,
+      tone: 'high-ground',
+      desc: `Elevated perch (Height ${t.elevation}): +${hgDmg} Attack damage & ignores enemy Half Cover below you!`,
+    });
+  }
+  if (t?.terrain === 'sunbeam') {
+    badges.push({
+      id: 'sunbeam',
+      label: '☀️ Sunbeam +2',
+      tone: 'sunbeam',
+      desc: 'Standing in a warm Sunbeam: +2 bonus Attack damage on every shot!',
+    });
+  }
+  return badges;
+});
 
 function handleTriggerOverwatch(): void {
   showItemsMenu.value = false;
@@ -2271,6 +2334,16 @@ onBeforeUnmount(() => {
 
                 <div class="slot-pills">
                   <button
+                    v-for="badge in selectedStanceBadges"
+                    :key="badge.id"
+                    class="stance-chip"
+                    :class="badge.tone"
+                    :title="badge.desc"
+                    @click.stop="inspectedNote = { title: badge.label, desc: badge.desc }"
+                  >
+                    {{ badge.label }}
+                  </button>
+                  <button
                     v-if="battle.undoSnapshot && battle.phase === 'player' && !gameStore.enemyTurnRunning"
                     class="undo-thumb-chip"
                     title="Undo Move (Z)"
@@ -3594,6 +3667,21 @@ onBeforeUnmount(() => {
 .status-chip.feared { background: #eed9ff; color: #5c1f7a; }
 .status-chip.shield { background: #d4ecff; color: #134a78; }
 .status-chip.boosted { background: #fff0b3; color: #7a4a00; }
+
+.stance-chip {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1.5px solid #5c3a1e;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(74, 44, 23, 0.35);
+}
+.stance-chip.cover-full { background: #d8ecf6; color: #174c6b; border-color: #2f6c8f; }
+.stance-chip.cover-half { background: #f8edd0; color: #6e4814; border-color: #a1712a; }
+.stance-chip.high-ground { background: #e1f2d8; color: #245c20; border-color: #468038; }
+.stance-chip.sunbeam { background: #fff4c2; color: #7d4e06; border-color: #c28820; }
 
 /* 6-Button Mario + Rabbids Action Row */
 .mr-action-bar {

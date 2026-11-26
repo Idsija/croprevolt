@@ -70,9 +70,11 @@ const activeVisualKind = computed(() =>
 const availableVariants = computed<Array<{ kind: SpriteVariantKind; label: string }>>(() => {
   const vk = activeVisualKind.value;
   const list: Array<{ kind: SpriteVariantKind; label: string }> = [{ kind: 'base', label: 'Base' }];
-  if (hasVariantSprite(vk, 'lowhp')) list.push({ kind: 'lowhp', label: 'Wounded' });
-  if (hasVariantSprite(vk, 'hit')) list.push({ kind: 'hit', label: 'Hit Recoil' });
-  if (hasVariantSprite(vk, 'enraged')) list.push({ kind: 'enraged', label: 'Phase 2 Enraged' });
+  if (hasVariantSprite(vk, 'cover')) list.push({ kind: 'cover', label: '🛡️ Cover' });
+  if (hasVariantSprite(vk, 'action')) list.push({ kind: 'action', label: '⚡ Jump / Action' });
+  if (hasVariantSprite(vk, 'lowhp')) list.push({ kind: 'lowhp', label: '🩹 Wounded' });
+  if (hasVariantSprite(vk, 'hit')) list.push({ kind: 'hit', label: '💥 Hit Recoil' });
+  if (hasVariantSprite(vk, 'enraged')) list.push({ kind: 'enraged', label: '🔥 Enraged' });
   return list;
 });
 

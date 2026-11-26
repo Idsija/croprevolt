@@ -57,7 +57,7 @@ export const ACTS: ActDef[] = [
     trailTitle: 'Spring Meadow Tabletop',
     trailHint: 'Play a Travel Card to march along the brook, clover hills & orchard toward Captain Scarecrow.',
     mapPools: {
-      skirmish: ['creek_crossing', 'canyon_terrace', 'barnyard_siege', 'vegetable_patch'],
+      skirmish: ['creek_crossing', 'duck_pond_meadow', 'canyon_terrace', 'barnyard_siege', 'vegetable_patch'],
       escape: ['patch_breakout', 'harvest_railroad'],
       barn_rescue: ['barn_raid'],
       elite: ['tool_shed_ambush', 'molten_furnace'],
@@ -97,7 +97,7 @@ export const ACTS: ActDef[] = [
     trailTitle: 'Sunlit Conservatory Tabletop',
     trailHint: 'Chart a route across arched canal bridges & sunflower loops to Baron Combine’s Glasshouse.',
     mapPools: {
-      skirmish: ['greenhouse_entry', 'molten_furnace', 'canyon_terrace', 'barnyard_siege'],
+      skirmish: ['botanical_rotunda', 'greenhouse_entry', 'molten_furnace', 'canyon_terrace', 'barnyard_siege'],
       escape: ['irrigation_run', 'harvest_railroad'],
       barn_rescue: ['barn_raid'],
       elite: ['apiary_ambush', 'molten_furnace'],
@@ -138,10 +138,10 @@ export const ACTS: ActDef[] = [
     trailTitle: 'Autumn Harvest Tabletop',
     trailHint: 'Traverse Pumpkin Hollow, mossy walls & timber bridges to reach Lord Bramblecoat’s Keep.',
     mapPools: {
-      skirmish: ['canyon_terrace', 'creek_crossing', 'barnyard_siege', 'greenhouse_entry', 'vegetable_patch'],
+      skirmish: ['cider_mill_yard', 'duck_pond_meadow', 'botanical_rotunda', 'canyon_terrace', 'creek_crossing', 'barnyard_siege'],
       escape: ['patch_breakout', 'harvest_railroad', 'irrigation_run'],
       barn_rescue: ['barn_raid'],
-      elite: ['molten_furnace', 'tool_shed_ambush', 'apiary_ambush'],
+      elite: ['cider_mill_yard', 'molten_furnace', 'tool_shed_ambush', 'apiary_ambush'],
     },
     subtitles: {
       skirmish: 'Skirmish / Siege — Clear the harvest crew or hold the orchard patch!',
@@ -389,11 +389,45 @@ const TRAVEL_CARD_TEMPLATES: Omit<BoardTravelCard, 'id'>[] = [
     tint: 'mint',
   },
   {
+    name: "Forager's Detour",
+    steps: 1,
+    bonus: 'item',
+    icon: '🧺',
+    desc: 'Advance 1 space · Forage a free Bag Item!',
+    tint: 'plum',
+  },
+  {
     name: 'Garden Trot',
     steps: 2,
     bonus: 'seeds3',
     icon: '🐾',
     desc: 'Advance 2 spaces · Gather +3 Run Seeds',
+    tint: 'gold',
+  },
+  {
+    name: 'Orchard Guard',
+    steps: 2,
+    bonus: 'shield',
+    icon: '🛡️',
+    desc: 'Advance 2 spaces · Start next fight Shielded!',
+    tint: 'mint',
+  },
+  {
+    name: 'Burrow Shortcut',
+    steps: 2,
+    flexible: true,
+    bonus: 'flex',
+    icon: '🕳️',
+    desc: 'Hop 1 or 2 spaces along any branch!',
+    tint: 'plum',
+  },
+  {
+    name: 'Windmill Gust',
+    steps: 2,
+    flexible: true,
+    bonus: 'seeds3',
+    icon: '🌾',
+    desc: 'Glide 1–2 spaces with the breeze · +3 Seeds',
     tint: 'gold',
   },
   {
@@ -405,13 +439,13 @@ const TRAVEL_CARD_TEMPLATES: Omit<BoardTravelCard, 'id'>[] = [
     tint: 'crimson',
   },
   {
-    name: 'Burrow Shortcut',
-    steps: 2,
+    name: 'Hayride Express',
+    steps: 3,
     flexible: true,
-    bonus: 'flex',
-    icon: '🕳️',
-    desc: 'Hop 1 or 2 spaces along any branch!',
-    tint: 'plum',
+    bonus: 'move1',
+    icon: '🚜',
+    desc: 'Ride 1–3 spaces · +1 Move in next fight!',
+    tint: 'gold',
   },
 ];
 
@@ -419,18 +453,27 @@ let travelCardUid = 1;
 
 /**
  * Draws a crisp 3-card Travel Hand for the boardgame overworld.
- * Always includes a 1-step Stroll so players can ALWAYS stop at adjacent Markets, Shrines, or the Boss!
+ * Slot 1 is ALWAYS a 1-step card (Stroll or Forager's Detour) so players can always stop
+ * at adjacent Markets, Shrines, or the Act Boss!
  */
 export function drawTravelHand(rng: Rng = Math.random): BoardTravelCard[] {
-  const stroll = TRAVEL_CARD_TEMPLATES[0];
-  const trot = TRAVEL_CARD_TEMPLATES[1];
-  const sprint = TRAVEL_CARD_TEMPLATES[2];
-  const burrow = TRAVEL_CARD_TEMPLATES[3];
+  const step1Pool = [TRAVEL_CARD_TEMPLATES[0], TRAVEL_CARD_TEMPLATES[1]];
+  const step2Pool = [
+    TRAVEL_CARD_TEMPLATES[2],
+    TRAVEL_CARD_TEMPLATES[3],
+    TRAVEL_CARD_TEMPLATES[4],
+    TRAVEL_CARD_TEMPLATES[5],
+  ];
+  const step3Pool = [TRAVEL_CARD_TEMPLATES[6], TRAVEL_CARD_TEMPLATES[7], TRAVEL_CARD_TEMPLATES[2]];
 
-  const card2 = rng() < 0.45 ? burrow : trot;
-  const card3 = rng() < 0.7 ? sprint : trot;
+  const card1 = rng() < 0.72 ? step1Pool[0] : step1Pool[1];
+  const card2 = pick(rng, step2Pool);
+  let card3 = pick(rng, step3Pool);
+  if (card3.name === card2.name) {
+    card3 = TRAVEL_CARD_TEMPLATES[6];
+  }
 
-  return [stroll, card2, card3].map((tpl) => ({
+  return [card1, card2, card3].map((tpl) => ({
     ...tpl,
     id: `tcard_${travelCardUid++}_${Math.floor(rng() * 1e5)}`,
   }));

@@ -454,6 +454,16 @@ export function applyTravelCardMove(
     run.seeds += 3;
   } else if (card.bonus === 'boost') {
     run.nextBattleBuff = { ...(run.nextBattleBuff ?? {}), boost: true };
+  } else if (card.bonus === 'shield') {
+    run.nextBattleBuff = { ...(run.nextBattleBuff ?? {}), shield: true };
+  } else if (card.bonus === 'move1') {
+    run.nextBattleBuff = {
+      ...(run.nextBattleBuff ?? {}),
+      moveBonus: (run.nextBattleBuff?.moveBonus ?? 0) + 1,
+    };
+  } else if (card.bonus === 'item') {
+    const pickedItemId = ALL_ITEM_IDS[Math.floor(rng() * ALL_ITEM_IDS.length)] ?? 'watering_can';
+    run.items[pickedItemId] = (run.items[pickedItemId] ?? 0) + 1;
   }
 
   run.boardTurn = (run.boardTurn ?? 0) + 1;
@@ -515,17 +525,19 @@ export function generateMarketOffers(run: RunState, rng = Math.random): MarketOf
     });
   }
 
-  const bomb = ITEM_REGISTRY.fertilizer_bomb;
+  const specialtyPool = ['fertilizer_bomb', 'honey_pot', 'cider_flask', 'acorn_smoke', 'bramble_snare'];
+  const specialtyId = pickRandomDistinct(specialtyPool, 1, rng)[0] ?? 'fertilizer_bomb';
+  const specialty = ITEM_REGISTRY[specialtyId] ?? ITEM_REGISTRY.fertilizer_bomb;
   const can = ITEM_REGISTRY.watering_can;
   offers.push(
     {
-      id: 'mkt_item_bomb',
+      id: `mkt_item_${specialty.id}`,
       kind: 'item',
-      title: `+1 ${bomb.name}`,
-      desc: bomb.description,
-      icon: bomb.icon,
+      title: `+1 ${specialty.name}`,
+      desc: specialty.description,
+      icon: specialty.icon,
       cost: 6,
-      itemId: 'fertilizer_bomb',
+      itemId: specialty.id,
       purchased: false,
     },
     {

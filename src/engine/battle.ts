@@ -159,6 +159,7 @@ function emptyActions() {
   return {
     hasMoved: false,
     moveSpent: 0,
+    bonusMove: 0,
     hasDashed: false,
     dashesUsed: 0,
     dashedEnemyIds: [] as string[],
@@ -391,6 +392,9 @@ export function createBattleFromMap(
     // Apply battle-start relics & grafts
     if (hasRelic(relicIds, 'rich_loam')) {
       unit.hp = Math.min(unit.maxHp, unit.hp + 2);
+    }
+    if (hasRelic(relicIds, 'dewdrop_compass')) {
+      unit.actions.bonusMove = (unit.actions.bonusMove ?? 0) + 1;
     }
     if (hasGraft(unit, 'pumpkin_rind')) {
       applyStatusToUnit(unit, 'shield', 1);
@@ -1447,7 +1451,7 @@ export function executeOverwatch(state: BattleState, unitId: string): boolean {
 
   saveUndoSnapshot(state);
   unit.actions.hasAttacked = true;
-  unit.actions.overwatchCharges = getMaxOverwatchCharges(unit);
+  unit.actions.overwatchCharges = getMaxOverwatchCharges(unit, state.relicIds);
   applyStatusToUnit(unit, 'overwatch', 1);
 
   state.pendingEvents.push({
@@ -2118,11 +2122,18 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
         affectedIds.push(ally.id);
       }
     }
-    if (fx.skillPushes) {
+    if (effDmg > 0 || ab.knockback || fx.skillPushes) {
       for (const foe of state.units) {
         if (!foe.alive || foe.team === unit.team) continue;
         if (manhattan(unit.pos, foe.pos) <= Math.max(1, effRadius)) {
-          applyKnockback(state, foe, computePushDirection(unit.pos, foe.pos), undefined, new Set(), fx.bonusBumpDmg);
+          if (effDmg > 0) {
+            foe.hp -= effDmg;
+            handleUnitKO(state, foe);
+            affectedIds.push(foe.id);
+          }
+          if (foe.alive && (ab.knockback || fx.skillPushes)) {
+            applyKnockback(state, foe, computePushDirection(unit.pos, foe.pos), undefined, new Set(), fx.bonusBumpDmg);
+          }
         }
       }
     }
@@ -2249,12 +2260,32 @@ export function executeItem(
   const affectedIds: string[] = [];
 
   if (item.targetType === 'ally') {
-    const ally = unitAt(state, targetPos);
-    if (!ally || ally.team !== unit.team) return false;
-    if (item.heal) {
-      ally.hp = Math.min(ally.maxHp, ally.hp + item.heal);
+    const r = item.aoeRadius ?? 0;
+    const targets =
+      r > 0
+        ? state.units.filter(
+            (u) => u.alive && u.team === unit.team && chebyshev(targetPos, u.pos) <= r
+          )
+        : [unitAt(state, targetPos)].filter((u): u is BattleUnit => Boolean(u && u.team === unit.team));
+    if (targets.length === 0) return false;
+    for (const ally of targets) {
+      if (item.heal) {
+        ally.hp = Math.min(ally.maxHp, ally.hp + item.heal);
+      }
+      if (item.cleanse) {
+        ally.statuses = ally.statuses.filter(
+          (s) => s.kind !== 'burn' && s.kind !== 'acid' && s.kind !== 'rooted' && s.kind !== 'feared'
+        );
+      }
+      if (item.appliesStatus) {
+        applyStatusToUnit(ally, item.appliesStatus.kind, item.appliesStatus.turns);
+      }
+      if (item.refreshMove && item.refreshMove > 0) {
+        ally.actions.bonusMove = (ally.actions.bonusMove ?? 0) + item.refreshMove;
+        ally.actions.hasMoved = false;
+      }
+      affectedIds.push(ally.id);
     }
-    affectedIds.push(ally.id);
   } else {
     const r = item.aoeRadius;
     for (let y = targetPos.y - r; y <= targetPos.y + r; y++) {
@@ -2286,6 +2317,12 @@ export function executeItem(
           }
           if (item.appliesStatus && enemy.alive) {
             applyStatusToUnit(enemy, item.appliesStatus.kind, item.appliesStatus.turns);
+          }
+          if (item.knockback && enemy.alive) {
+            const dir = samePos(p, targetPos)
+              ? computePushDirection(unit.pos, p)
+              : computePushDirection(targetPos, p);
+            applyKnockback(state, enemy, dir, rosterLookup, new Set());
           }
           affectedIds.push(enemy.id);
         }

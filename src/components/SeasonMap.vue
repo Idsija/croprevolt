@@ -221,6 +221,12 @@ function cardBonusShort(card: BoardTravelCard): string {
       return '🌱 +3 Seeds';
     case 'boost':
       return '⚡ Next +2 ATK';
+    case 'shield':
+      return '🛡️ Next Shielded';
+    case 'move1':
+      return '🚜 Next +1 Move';
+    case 'item':
+      return '🧺 +1 Free Item';
     case 'flex':
       return '🕳️ 1–2 Spaces';
   }

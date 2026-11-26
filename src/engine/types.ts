@@ -110,12 +110,15 @@ export type HeroSpecies =
   | 'lettuce'
   | 'strawberry'
   | 'mushroom'
+  | 'pumpkin'
+  | 'blueberry'
   | 'cow'
   | 'pig'
   | 'rooster'
   | 'sheep'
   | 'goat'
-  | 'duck';
+  | 'duck'
+  | 'owl';
 
 export interface ProduceBlueprint {
   id: string;
@@ -152,6 +155,9 @@ export interface EnemyBlueprint {
     | 'beekeeper'
     | 'hound'
     | 'pitchfork'
+    | 'goose'
+    | 'mole'
+    | 'kettlebot'
     | 'scarecrow'
     | 'tractor'
     | 'harvester';
@@ -201,7 +207,11 @@ export type RelicEffectKind =
   | 'bouncy_mulch'
   | 'heirloom_fertilizer'
   | 'sharp_trowel'
-  | 'lucky_clover';
+  | 'lucky_clover'
+  | 'dewdrop_compass'
+  | 'copper_weathervane'
+  | 'heirloom_pocketwatch'
+  | 'straw_hat_trophy';
 
 export interface RelicDef {
   id: string;
@@ -221,6 +231,9 @@ export interface ItemDef {
   heal?: number;
   damage?: number;
   coverDamage?: number;
+  knockback?: number;
+  cleanse?: boolean;
+  refreshMove?: number;
   appliesStatus?: StatusEffect;
   color: string;
   icon: string;
@@ -265,6 +278,8 @@ export interface UnitActions {
   hasMoved: boolean;
   /** Movement points spent this turn. Walking, dashing and the walk-up to a team jump all draw from one budget. */
   moveSpent?: number;
+  /** Temporary bonus movement points granted for the current turn (Dewdrop Compass / Acorn Smoke Bomb). */
+  bonusMove?: number;
   hasDashed: boolean;
   dashesUsed?: number;
   dashedEnemyIds?: string[];
@@ -516,7 +531,7 @@ export interface SeasonNode {
   completed: boolean;
 }
 
-export type TravelCardBonus = 'heal2' | 'seeds3' | 'boost' | 'flex';
+export type TravelCardBonus = 'heal2' | 'seeds3' | 'boost' | 'flex' | 'move1' | 'shield' | 'item';
 
 export interface BoardTravelCard {
   id: string;
