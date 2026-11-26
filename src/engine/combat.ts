@@ -3,8 +3,8 @@ import {
   getEffectiveCoverDamage,
   getMatchup,
   getMatchupMultiplier,
+  getUnitPerkEffects,
   hasGraft,
-  hasPerk,
   hasRelic,
   hasStatus,
 } from './hooks';
@@ -33,6 +33,7 @@ export function forecastAttack(
 ): CombatForecast {
   const dist = manhattan(attacker.pos, targetPos);
   const w = attacker.weapon;
+  const fx = getUnitPerkEffects(attacker);
   const targetUnit = unitAt(state, targetPos);
   const targetTile = tileAt(state, targetPos);
 
@@ -108,18 +109,17 @@ export function forecastAttack(
   const matchup = getMatchup(attacker.family, defender.family);
   const mult = getMatchupMultiplier(matchup, attacker.team, state.relicIds);
 
-  // Elevation Advantage (Mario + Rabbids High Ground!)
+  // Elevation Advantage (Mario + Rabbids High Ground + hero-specific perch bonuses!)
   const attackerElev = attackerTile?.elevation ?? 0;
   const defenderElev = targetTile?.elevation ?? 0;
   const elevationDiff = attackerElev - defenderElev;
-  const highGroundBonus = elevationDiff > 0 ? 2 : 0;
+  const highGroundBonus = elevationDiff > 0 ? 2 + fx.bonusHighGroundDmg : 0;
 
-  // Discrete Mario + Rabbids cover resolution (including Living Wool Sheep half cover + High Ground override!)
+  // Discrete Mario + Rabbids cover resolution (including Living Cover + High Ground + Wind Slicer override!)
   let coverEval = evaluateCover(state, attacker.pos, defender.pos, defender.team);
   let hitChance = 100;
 
   if (w.arc === 'lobbed') {
-    // Lobbed mortars arc right OVER Half & Full cover!
     coverEval = { level: 'none' };
     hitChance = 100;
   } else if (w.arc === 'melee') {
@@ -129,11 +129,9 @@ export function forecastAttack(
       hitChance = 100;
     }
   } else {
-    // High Ground shoots right over Half Cover!
-    if (elevationDiff > 0 && coverEval.level === 'half') {
+    if ((elevationDiff > 0 || fx.ignoreHalfCoverOnFlank) && coverEval.level === 'half') {
       coverEval = { level: 'none' };
     }
-    // Shooting steeply uphill (+2 levels) grants defender ledge half-cover if exposed
     if (elevationDiff <= -2 && coverEval.level === 'none') {
       coverEval = { level: 'half' };
     }
@@ -147,41 +145,49 @@ export function forecastAttack(
     }
   }
 
-  // Final damage calculation (+ High Ground + Flank Breaker Critical!)
-  const isCriticalFlank = hitChance >= 100 && hasPerk(attacker, 'cover_buster');
+  // Final damage calculation (+ High Ground + Flank Crit + Rooted/Burn synergies!)
+  const isCriticalFlank = hitChance >= 100 && fx.bonusFlankCrit > 0;
   let dmg = Math.round((rawBase + highGroundBonus) * mult);
-  if (isCriticalFlank) dmg += 2;
+  if (isCriticalFlank) dmg += fx.bonusFlankCrit;
+  if (fx.rootedTargetBonus > 0 && hasStatus(defender, 'rooted')) dmg += fx.rootedTargetBonus;
+  if (fx.burnDetonateBonus > 0 && hasStatus(defender, 'burn')) dmg += fx.burnDetonateBonus;
   if (hasStatus(defender, 'acid')) dmg += 2;
   if (hasStatus(defender, 'shield')) dmg -= 2;
   dmg = Math.max(1, dmg);
 
-  // Mario + Rabbids Partner Follow-Up Assist!
-  // If another living non-rooted player hero is orthogonally adjacent to the enemy, they pile on +1 bonus DMG!
+  // Mario + Rabbids Partner Follow-Up Assist (supports Range-2 & +2 Assist character perks!)
   let partnerAssistUnitId: string | undefined;
   let partnerAssistUnitName: string | undefined;
   let partnerAssistDamage = 0;
   if (attacker.team === 'player' && hitChance > 0) {
-    const assistAlly = state.units.find(
-      (u) =>
-        u.alive &&
-        u.team === 'player' &&
-        !u.isEscortCart &&
-        u.id !== attacker.id &&
-        !hasStatus(u, 'rooted') &&
-        manhattan(u.pos, defender.pos) === 1
-    );
-    if (assistAlly) {
-      partnerAssistUnitId = assistAlly.id;
-      partnerAssistUnitName = assistAlly.name;
-      partnerAssistDamage = 1;
+    let bestAlly: BattleUnit | undefined;
+    let bestAssistDmg = 0;
+    for (const u of state.units) {
+      if (!u.alive || u.team !== 'player' || u.isEscortCart || u.id === attacker.id) continue;
+      if (hasStatus(u, 'rooted')) continue;
+      const allyFx = getUnitPerkEffects(u);
+      const d = manhattan(u.pos, defender.pos);
+      if (d <= allyFx.assistRange) {
+        const assistAmt = 1 + allyFx.bonusAssistDmg;
+        if (assistAmt > bestAssistDmg) {
+          bestAssistDmg = assistAmt;
+          bestAlly = u;
+        }
+      }
+    }
+    if (bestAlly) {
+      partnerAssistUnitId = bestAlly.id;
+      partnerAssistUnitName = bestAlly.name;
+      partnerAssistDamage = bestAssistDmg;
     }
   }
 
   const appliesStatus =
     w.appliesStatus?.kind ??
+    fx.attackStatus ??
     (hitChance === 100 && hasGraft(attacker, 'spicy_shot') ? 'burn' : undefined);
 
-  const effectiveKnockback = (w.knockback ?? 0) + (hasPerk(attacker, 'cover_buster') ? 1 : 0);
+  const effectiveKnockback = (w.knockback ?? 0) + fx.extraKnockback;
   let knockbackDir: GridPos | undefined;
   let knockbackWillBump = false;
   let knockbackHazard: CombatForecast['knockbackHazard'];
@@ -194,7 +200,7 @@ export function forecastAttack(
     if (!inBounds(state, dest) || Boolean(destTile?.cover) || Boolean(unitAt(state, dest))) {
       knockbackWillBump = true;
       knockbackHazard = 'bump';
-      extraHazardDmg = 2;
+      extraHazardDmg = 2 + fx.bonusBumpDmg;
     } else if (destTile?.terrain === 'lava') {
       knockbackWillBump = true;
       knockbackHazard = 'lava';

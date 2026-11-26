@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RELIC_REGISTRY } from '../data/relics';
-import { ACTS, FLOORS_PER_ACT } from '../engine/mapgen';
-import { getAvailableNextNodeIds } from '../engine/run';
-import type { BoardTheme, NodeType, SeasonNode } from '../engine/types';
+import { ACTS, HARVEST_BELL_LIMIT } from '../engine/mapgen';
+import { getBoardPathsForCard } from '../engine/run';
+import type { BoardTheme, BoardTravelCard, NodeType, SeasonNode } from '../engine/types';
 import { OverworldMapRenderer } from '../renderer3d/OverworldMapRenderer';
 import {
   enterSeasonNode,
   gameStore,
+  pickShrineBlessing,
   returnToTitle,
   toggleMusicMute,
 } from '../stores/gameStore';
@@ -25,6 +26,7 @@ const webglCanvasRef = ref<HTMLCanvasElement | null>(null);
 const overlayCanvasRef = ref<HTMLCanvasElement | null>(null);
 const webglFailed = ref(false);
 
+const selectedCardId = ref<string | null>(null);
 const selectedNodeId = ref<string | null>(null);
 const hoveredNodeId = ref<string | null>(null);
 const showBuildModal = ref(false);
@@ -35,14 +37,67 @@ const isTraveling = ref(false);
 
 let mapRenderer: OverworldMapRenderer | null = null;
 
-const availableIds = computed(() => new Set(getAvailableNextNodeIds(run.value)));
+const travelHand = computed<BoardTravelCard[]>(() => run.value.travelHand ?? []);
+
+// Ensure a valid travel card is always selected
+watch(
+  travelHand,
+  (hand) => {
+    if (hand.length === 0) {
+      selectedCardId.value = null;
+      return;
+    }
+    if (!selectedCardId.value || !hand.some((c) => c.id === selectedCardId.value)) {
+      selectedCardId.value = hand[0].id;
+    }
+  },
+  { immediate: true, deep: true }
+);
+
+const selectedCard = computed<BoardTravelCard | null>(
+  () => travelHand.value.find((c) => c.id === selectedCardId.value) ?? travelHand.value[0] ?? null
+);
+
+const activeCardPaths = computed<Map<string, string[]>>(() =>
+  getBoardPathsForCard(run.value, selectedCard.value?.id)
+);
+
+const availableIds = computed(() => new Set(activeCardPaths.value.keys()));
 const completedIds = computed(() => new Set(run.value.completedNodeIds));
 
 const availableNodes = computed(() =>
   run.value.nodes
     .filter((n) => availableIds.value.has(n.id))
-    .sort((a, b) => a.lane - b.lane)
+    .sort((a, b) => (a.boardX ?? a.lane) - (b.boardX ?? b.lane))
 );
+
+const previewPathIds = computed<string[]>(() => {
+  const hov = hoveredNodeId.value;
+  if (hov && activeCardPaths.value.has(hov)) {
+    return activeCardPaths.value.get(hov) ?? [];
+  }
+  const sel = selectedNodeId.value;
+  if (sel && activeCardPaths.value.has(sel)) {
+    return activeCardPaths.value.get(sel) ?? [];
+  }
+  return [];
+});
+
+const boardTurn = computed(() => run.value.boardTurn ?? 0);
+const bellLimit = computed(() => run.value.harvestBellLimit ?? HARVEST_BELL_LIMIT);
+const turnsLeft = computed(() => bellLimit.value - boardTurn.value);
+const isBellOverdue = computed(() => turnsLeft.value < 0);
+const isBellUrgent = computed(() => turnsLeft.value >= 0 && turnsLeft.value <= 2);
+
+const nextBattleBuffLabel = computed(() => {
+  const b = run.value.nextBattleBuff;
+  if (!b) return '';
+  const parts: string[] = [];
+  if (b.boost) parts.push('Boosted (+2 ATK)');
+  if (b.shield) parts.push('Shield');
+  if (b.moveBonus) parts.push(`+${b.moveBonus} Move`);
+  return parts.length > 0 ? `Next Battle: ${parts.join(' · ')}` : '';
+});
 
 const activeHeroes = computed(() =>
   run.value.activeSquadUids
@@ -53,14 +108,6 @@ const activeHeroes = computed(() =>
 const totalUnspentSp = computed(() =>
   run.value.roster.reduce((sum, h) => sum + (h.harvested ? 0 : h.skillPoints), 0)
 );
-
-const currentFloorDisplay = computed(() => {
-  if (run.value.completedNodeIds.length === 0) return 1;
-  const last = run.value.nodes.find(
-    (n) => n.id === run.value.completedNodeIds[run.value.completedNodeIds.length - 1]
-  );
-  return Math.min(FLOORS_PER_ACT + 1, (last?.stage ?? 0) + 2);
-});
 
 const leadHeroKind = computed(() => {
   const first = activeHeroes.value[0] ?? run.value.roster[0];
@@ -73,14 +120,16 @@ const bossKind = computed(() => {
   return 'scarecrow';
 });
 
-// Auto-pick the first reachable stop whenever available stops change!
+// Auto-pick the first reachable space whenever the active card or board changes
 watch(
-  availableNodes,
-  (list) => {
-    if (!selectedNodeId.value || !run.value.nodes.some((n) => n.id === selectedNodeId.value)) {
-      selectedNodeId.value = list[0]?.id ?? run.value.nodes[0]?.id ?? null;
-    } else if (list.length > 0 && !availableIds.value.has(selectedNodeId.value)) {
-      selectedNodeId.value = list[0].id;
+  [availableNodes, selectedCardId],
+  ([list]) => {
+    if (list.length > 0) {
+      if (!selectedNodeId.value || !availableIds.value.has(selectedNodeId.value)) {
+        selectedNodeId.value = list[0].id;
+      }
+    } else if (!selectedNodeId.value) {
+      selectedNodeId.value = run.value.currentNodeId ?? run.value.nodes[0]?.id ?? null;
     }
   },
   { immediate: true }
@@ -100,16 +149,43 @@ const isSelectedCompleted = computed(() =>
   Boolean(selectedNode.value && completedIds.value.has(selectedNode.value.id))
 );
 
+const selectedHopCount = computed(() => {
+  if (!selectedNode.value) return 0;
+  const path = activeCardPaths.value.get(selectedNode.value.id);
+  return path ? Math.max(0, path.length - 1) : 0;
+});
+
 const NODE_META: Record<NodeType, { label: string; icon: string; tone: string }> = {
+  start: { label: 'Trailhead', icon: '⚑', tone: 'green' },
   skirmish: { label: 'Battle', icon: '⚔️', tone: 'battle' },
-  escape: { label: 'Breakout', icon: '🏃', tone: 'sky' },
+  escape: { label: 'Convoy', icon: '🏃', tone: 'sky' },
   barn_rescue: { label: 'Barn Rescue', icon: '🔓', tone: 'gold' },
   elite: { label: 'Elite Fight', icon: '💀', tone: 'elite' },
   shop: { label: 'Market', icon: '🛒', tone: 'green' },
-  vault: { label: 'Seed Vault', icon: '🌱', tone: 'gold' },
-  event: { label: 'Mystery', icon: '❓', tone: 'plum' },
+  shrine: { label: 'Watering Shrine', icon: '💧', tone: 'teal' },
+  armory: { label: 'Armory Wagon', icon: '⚒️', tone: 'gold' },
+  vault: { label: 'Supply Camp', icon: '⛺', tone: 'gold' },
+  event: { label: 'Lucky Clover', icon: '🍀', tone: 'plum' },
   boss: { label: 'Act Boss', icon: '👑', tone: 'boss' },
 };
+
+function selectTravelCard(cardId: string): void {
+  if (isTraveling.value) return;
+  selectedCardId.value = cardId;
+}
+
+function cardBonusShort(card: BoardTravelCard): string {
+  switch (card.bonus) {
+    case 'heal2':
+      return '💚 +2 Squad HP';
+    case 'seeds3':
+      return '🌱 +3 Seeds';
+    case 'boost':
+      return '⚡ Next +2 ATK';
+    case 'flex':
+      return '🕳️ 1–2 Spaces';
+  }
+}
 
 function syncRenderer(): void {
   if (!mapRenderer) return;
@@ -119,24 +195,33 @@ function syncRenderer(): void {
     nodes: run.value.nodes,
     completedIds: completedIds.value,
     availableIds: availableIds.value,
+    previewPathIds: previewPathIds.value,
     currentNodeId: run.value.currentNodeId,
     selectedNodeId: selectedNode.value?.id ?? null,
     leadHeroKind: leadHeroKind.value,
     bossKind: bossKind.value,
+    boardTurn: boardTurn.value,
+    harvestBellLimit: bellLimit.value,
   });
 }
 
 async function travelAndEnterNode(nodeId: string): Promise<void> {
   if (isTraveling.value || !availableIds.value.has(nodeId)) return;
+  const cardId = selectedCard.value?.id;
+  const hopPath = activeCardPaths.value.get(nodeId) ?? [];
   isTraveling.value = true;
   try {
     if (mapRenderer && !webglFailed.value) {
-      await mapRenderer.hopLeaderToNode(nodeId);
+      if (hopPath.length >= 2) {
+        await mapRenderer.hopLeaderAlongPath(hopPath);
+      } else {
+        await mapRenderer.hopLeaderToNode(nodeId);
+      }
     }
   } finally {
     isTraveling.value = false;
   }
-  enterSeasonNode(nodeId);
+  enterSeasonNode(nodeId, cardId);
 }
 
 function selectStop(nodeId: string, enterIfReady = false): void {
@@ -163,12 +248,28 @@ function recenterMap(): void {
   mapRenderer?.recenter(false);
 }
 
+function onMapKeyDown(e: KeyboardEvent): void {
+  if (showBuildModal.value || showAlmanac.value || run.value.status === 'shrine' || isTraveling.value) {
+    return;
+  }
+  if (e.key === '1' || e.key === '2' || e.key === '3') {
+    const idx = Number(e.key) - 1;
+    const card = travelHand.value[idx];
+    if (card) selectTravelCard(card.id);
+  } else if (e.key === 'Enter' && isSelectedAvailable.value) {
+    enterSelectedStop();
+  }
+}
+
 watch(
   [
     () => run.value.act,
     () => run.value.completedNodeIds.length,
     () => run.value.currentNodeId,
+    () => run.value.boardTurn,
+    selectedCardId,
     selectedNodeId,
+    hoveredNodeId,
     leadHeroKind,
   ],
   () => {
@@ -177,6 +278,7 @@ watch(
 );
 
 onMounted(() => {
+  window.addEventListener('keydown', onMapKeyDown);
   if (!webglCanvasRef.value) return;
   try {
     mapRenderer = new OverworldMapRenderer(webglCanvasRef.value, overlayCanvasRef.value, {
@@ -189,12 +291,13 @@ onMounted(() => {
     });
     syncRenderer();
   } catch (err) {
-    console.warn('3D Overworld WebGL unavailable, using compact trail fallback:', err);
+    console.warn('3D Overworld WebGL unavailable, using compact board fallback:', err);
     webglFailed.value = true;
   }
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onMapKeyDown);
   mapRenderer?.destroy();
   mapRenderer = null;
 });
@@ -202,7 +305,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="overworld-shell">
-    <!-- Full-Viewport Interactive 3D Paper Mario Act Diorama -->
+    <!-- Full-Viewport Interactive 3D Watercolor Boardgame Tabletop -->
     <template v-if="!webglFailed">
       <canvas ref="webglCanvasRef" class="overworld-canvas"></canvas>
       <canvas ref="overlayCanvasRef" class="overworld-overlay"></canvas>
@@ -218,7 +321,7 @@ onBeforeUnmount(() => {
             v-for="node in availableNodes"
             :key="node.id"
             class="paper-btn gold"
-            @click="enterSeasonNode(node.id)"
+            @click="enterSeasonNode(node.id, selectedCard?.id)"
           >
             {{ NODE_META[node.type].icon }} {{ node.name }} →
           </button>
@@ -226,18 +329,60 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Minimal Floating Top Bar -->
+    <!-- Slim Watercolor Top Bar -->
     <header class="ow-top-bar">
-      <div class="kraft-ribbon ow-act-pill">
-        <span class="act-stamp">ACT {{ run.act + 1 }}/3</span>
-        <div class="act-copy">
-          <strong>{{ actDef.name }}</strong>
-          <small>Stop {{ currentFloorDisplay }}/{{ FLOORS_PER_ACT + 1 }} · Drag to explore · Click a lit stop</small>
+      <div class="ow-left-cluster">
+        <div class="kraft-ribbon ow-act-pill">
+          <span class="act-stamp">ACT {{ run.act + 1 }}/3</span>
+          <div class="act-copy">
+            <strong>{{ actDef.name }}</strong>
+            <small>Pick a Travel Card · Click a lit space to hop</small>
+          </div>
         </div>
+
+        <!-- Brass Harvest Bell Turn Pressure Dial -->
+        <div
+          class="bell-dial"
+          :class="{ urgent: isBellUrgent, overdue: isBellOverdue }"
+          :title="
+            isBellOverdue
+              ? 'Harvest Bell tolled! The Act Boss is Empowered (+3 HP & +1 ATK).'
+              : `Beat the Act Boss within ${turnsLeft} more board turn(s) for +15 Swift Harvest Seeds!`
+          "
+        >
+          <span class="bell-icon">{{ isBellOverdue ? '⚠️' : '🔔' }}</span>
+          <div class="bell-copy">
+            <strong>
+              {{
+                isBellOverdue
+                  ? 'Farmers Alerted!'
+                  : turnsLeft === 0
+                    ? 'Final Bell Turn!'
+                    : `${turnsLeft} ${turnsLeft === 1 ? 'Turn' : 'Turns'} Left`
+              }}
+            </strong>
+            <small>
+              {{ isBellOverdue ? 'Boss Empowered' : 'Swift Bonus: +15 🌱' }}
+            </small>
+          </div>
+        </div>
+
+        <!-- Active Next-Battle Blessing / Sprint Buff Pill -->
+        <span
+          v-if="nextBattleBuffLabel"
+          class="paper-pill ow-buff-pill"
+          :title="nextBattleBuffLabel"
+        >
+          ✨ {{ nextBattleBuffLabel }}
+        </span>
       </div>
 
       <div class="ow-top-right">
-        <span v-if="(run.harvestHeat ?? 0) > 0" class="paper-pill ow-heat-pill" :title="`Harvest Heat ${run.harvestHeat}`">
+        <span
+          v-if="(run.harvestHeat ?? 0) > 0"
+          class="paper-pill ow-heat-pill"
+          :title="`Harvest Heat ${run.harvestHeat}`"
+        >
           🔥 Heat {{ run.harvestHeat }}
         </span>
 
@@ -250,7 +395,7 @@ onBeforeUnmount(() => {
           class="paper-pill ow-relic-btn"
           @click="showRelicsPopover = !showRelicsPopover"
         >
-          🏅 {{ run.relicIds.length }} Relic{{ run.relicIds.length > 1 ? 's' : '' }}
+          🏅 {{ run.relicIds.length }}
         </button>
 
         <button
@@ -274,8 +419,8 @@ onBeforeUnmount(() => {
         <button
           v-if="!webglFailed"
           class="paper-btn icon-tool"
-          title="Recenter Camera"
-          aria-label="Recenter camera"
+          title="Recenter Board"
+          aria-label="Recenter board"
           @click="recenterMap"
         >
           <CraftIcon name="center" :size="15" />
@@ -299,15 +444,15 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Floating Bottom Dock: Left Squad Strip + Center Selected Stop Card -->
+    <!-- Floating Bottom Tabletop Dock: Squad (Left) + 3-Card Travel Hand Fan (Center) + Space CTA (Right) -->
     <footer class="ow-bottom-dock">
-      <!-- Compact Bottom-Left Squad & Skill Tree Bar -->
+      <!-- Bottom-Left Squad & Skill Trees -->
       <div class="ow-squad-dock">
         <button
           v-for="hero in activeHeroes"
           :key="hero.uid"
           class="ow-hero-chip"
-          :title="`${hero.name} (Lv.${hero.level}) — Open Skill Tree & Squad`"
+          :title="`${hero.name} (Lv.${hero.level}) — Open Skill Tree & Armory`"
           @click="openHeroBuilds(hero.uid)"
         >
           <div class="ow-hero-img-wrap">
@@ -328,14 +473,40 @@ onBeforeUnmount(() => {
           :class="{ gold: totalUnspentSp > 0 }"
           @click="openHeroBuilds()"
         >
-          <span>★ Builds</span>
-          <span v-if="totalUnspentSp > 0" class="sp-count-pill">{{ totalUnspentSp }} SP</span>
+          <span>★ Trees</span>
+          <span v-if="totalUnspentSp > 0" class="sp-count-pill">{{ totalUnspentSp }}</span>
         </button>
       </div>
 
-      <!-- Crisp Floating Selected Stop Card -->
+      <!-- Bottom-Center Tactile Watercolor Travel Hand Card Fan -->
+      <div v-if="travelHand.length > 0" class="travel-hand-fan" aria-label="Travel Hand Cards">
+        <button
+          v-for="(card, idx) in travelHand"
+          :key="card.id"
+          class="travel-card"
+          :class="[
+            card.tint,
+            { active: selectedCard?.id === card.id, tiltedLeft: idx === 0, tiltedRight: idx === 2 },
+          ]"
+          :title="card.desc"
+          :disabled="isTraveling"
+          @click="selectTravelCard(card.id)"
+        >
+          <div class="tc-top">
+            <span class="tc-key">{{ idx + 1 }}</span>
+            <span class="tc-pips" :title="card.flexible ? `1–${card.steps} spaces` : `${card.steps} space(s)`">
+              <template v-if="card.flexible">1–{{ card.steps }}</template>
+              <template v-else>{{ '●'.repeat(card.steps) }}</template>
+            </span>
+          </div>
+          <div class="tc-icon">{{ card.icon }}</div>
+          <strong class="tc-name">{{ card.name }}</strong>
+          <span class="tc-bonus">{{ cardBonusShort(card) }}</span>
+        </button>
+      </div>
+
+      <!-- Bottom-Right Crisp Selected Space Preview & March CTA -->
       <div v-if="selectedNode" class="corrugated-slab ow-stop-card">
-        <!-- Quick switcher pills when multiple next stops are available -->
         <div v-if="availableNodes.length > 1" class="next-tabs">
           <button
             v-for="opt in availableNodes"
@@ -356,7 +527,12 @@ onBeforeUnmount(() => {
               </span>
               <strong>{{ selectedNode.name }}</strong>
             </div>
-            <small>{{ selectedNode.subtitle }}</small>
+            <small>
+              {{ selectedNode.subtitle }}
+              <template v-if="isSelectedAvailable && selectedHopCount > 0">
+                · {{ selectedHopCount }} hop{{ selectedHopCount > 1 ? 's' : '' }}
+              </template>
+            </small>
           </div>
 
           <button
@@ -365,19 +541,57 @@ onBeforeUnmount(() => {
             :disabled="isTraveling"
             @click="enterSelectedStop"
           >
-            <span>{{ isTraveling ? 'Hopping...' : 'Go →' }}</span>
+            <span>{{ isTraveling ? 'Hopping...' : 'March →' }}</span>
           </button>
           <span v-else-if="isSelectedCompleted" class="paper-pill stop-state done">
             ✓ Cleared
           </span>
           <span v-else class="paper-pill stop-state locked">
-            Ahead
+            Out of Card Reach
           </span>
         </div>
       </div>
     </footer>
 
-    <!-- Hero Level-Up & 3-Branch Skill Tree Drawer -->
+    <!-- Watering Shrine 3-Blessing Overlay Modal -->
+    <div v-if="run.status === 'shrine'" class="shrine-backdrop">
+      <section class="corrugated-slab shrine-sheet pinned-card">
+        <div class="washi-tape"></div>
+        <span class="brass-pin tl"></span>
+        <span class="brass-pin tr"></span>
+
+        <div class="shrine-head">
+          <span class="shrine-badge">💧 WATERING SHRINE</span>
+          <h2>Choose a Spring Blessing</h2>
+          <p>Cool mossy springwater shimmers beside the painted trail. Take one blessing before marching on:</p>
+        </div>
+
+        <div class="shrine-grid">
+          <button class="shrine-opt heal" @click="pickShrineBlessing('heal')">
+            <span class="so-icon">💧</span>
+            <strong>Full Squad Heal</strong>
+            <small>Restore every active &amp; benched hero to 100% Max HP.</small>
+            <span class="paper-btn primary so-cta">Drink Fresh Water</span>
+          </button>
+
+          <button class="shrine-opt blessing" @click="pickShrineBlessing('blessing')">
+            <span class="so-icon">✨</span>
+            <strong>Sunlit Battle Blessing</strong>
+            <small>Next battle: all heroes start with +2 ATK, Shield (2t), and +1 Move!</small>
+            <span class="paper-btn gold so-cta">Receive Blessing</span>
+          </button>
+
+          <button class="shrine-opt seeds" @click="pickShrineBlessing('seeds')">
+            <span class="so-icon">🌱</span>
+            <strong>Heirloom Seed Offering</strong>
+            <small>Gather +14 Run Seeds from the shrine's wishing trough for Market &amp; Armory stops.</small>
+            <span class="paper-btn so-cta">Collect +14 Seeds</span>
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Illustrated 2-Path Unique Hero Skill Trees & Armory Drawer -->
     <HeroBuildModal
       v-if="showBuildModal"
       :initial-hero-uid="buildModalHeroUid"
@@ -395,7 +609,7 @@ onBeforeUnmount(() => {
   height: 100dvh;
   position: relative;
   overflow: hidden;
-  background: #6a4424;
+  background: #5a3a20;
 }
 
 .overworld-canvas {
@@ -437,7 +651,7 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
-/* ===== Minimal Floating Top Bar ===== */
+/* ===== Slim Top Bar ===== */
 .ow-top-bar {
   position: fixed;
   top: calc(10px + var(--safe-top));
@@ -451,24 +665,28 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.ow-act-pill,
+.ow-left-cluster,
 .ow-top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   pointer-events: auto;
+  flex-wrap: wrap;
 }
 
 .ow-act-pill {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
+  gap: 9px;
+  padding: 6px 12px;
 }
 
 .act-stamp {
   background: #4e321a;
   color: #ffe891;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 900;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border-radius: 8px;
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -481,19 +699,66 @@ onBeforeUnmount(() => {
 }
 
 .act-copy strong {
-  font-size: 0.96rem;
+  font-size: 0.92rem;
   color: var(--ink);
 }
 
 .act-copy small {
-  font-size: 0.72rem;
+  font-size: 0.69rem;
   color: var(--ink-soft);
 }
 
-.ow-top-right {
+/* Brass Harvest Bell Countdown Dial */
+.bell-dial {
   display: flex;
   align-items: center;
   gap: 7px;
+  padding: 5px 11px;
+  border-radius: 13px;
+  border: 2.2px solid #5c3a16;
+  background: linear-gradient(180deg, #fff6d6 0%, #f1d382 100%);
+  box-shadow: 0 3px 0 #5c3a16, 0 6px 14px rgba(24, 12, 4, 0.25);
+  line-height: 1.12;
+}
+
+.bell-dial.urgent {
+  background: linear-gradient(180deg, #ffe7b3 0%, #f5a642 100%);
+  border-color: #7a2d0a;
+}
+
+.bell-dial.overdue {
+  background: linear-gradient(180deg, #ff7961 0%, #c92b24 100%);
+  border-color: #4f0e0b;
+  color: #fff8eb;
+}
+
+.bell-icon {
+  font-size: 1.08rem;
+}
+
+.bell-copy {
+  display: flex;
+  flex-direction: column;
+}
+
+.bell-copy strong {
+  font-size: 0.78rem;
+  font-weight: 900;
+  color: inherit;
+}
+
+.bell-copy small {
+  font-size: 0.65rem;
+  opacity: 0.85;
+  font-weight: 700;
+}
+
+.ow-buff-pill {
+  background: linear-gradient(180deg, #e2f9ff 0%, #b5ebff 100%);
+  border-color: #1f6b8a;
+  color: #114357;
+  font-size: 0.74rem;
+  font-weight: 800;
 }
 
 .ow-seed-pill {
@@ -507,15 +772,23 @@ onBeforeUnmount(() => {
   font-weight: 800;
 }
 
+.ow-heat-pill {
+  background: linear-gradient(180deg, #ff7a33 0%, #c8331a 100%);
+  color: #fff8e6;
+  border-color: #4f160a;
+  font-weight: 900;
+  font-size: 0.76rem;
+}
+
 .icon-tool {
-  padding: 7px 11px;
-  min-height: 36px;
-  font-size: 0.8rem;
+  padding: 6px 10px;
+  min-height: 34px;
+  font-size: 0.78rem;
 }
 
 .relics-pop {
   position: fixed;
-  top: calc(60px + var(--safe-top));
+  top: calc(58px + var(--safe-top));
   right: calc(14px + var(--safe-right));
   width: min(310px, calc(100vw - 28px));
   padding: 12px;
@@ -552,12 +825,12 @@ onBeforeUnmount(() => {
   font-size: 0.73rem;
 }
 
-/* ===== Floating Bottom Dock ===== */
+/* ===== Bottom Tabletop Dock ===== */
 .ow-bottom-dock {
   position: fixed;
   left: calc(12px + var(--safe-left));
   right: calc(12px + var(--safe-right));
-  bottom: calc(12px + var(--safe-bottom));
+  bottom: calc(10px + var(--safe-bottom));
   z-index: 15;
   display: flex;
   align-items: flex-end;
@@ -567,6 +840,7 @@ onBeforeUnmount(() => {
 }
 
 .ow-squad-dock,
+.travel-hand-fan,
 .ow-stop-card {
   pointer-events: auto;
 }
@@ -575,18 +849,18 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(251, 243, 223, 0.94);
-  border: 2.5px solid var(--ink);
-  border-radius: 15px;
+  background: rgba(251, 243, 223, 0.93);
+  border: 2.2px solid var(--ink);
+  border-radius: 14px;
   padding: 6px 8px;
-  box-shadow: 0 4px 0 var(--ink), 0 10px 22px rgba(24, 12, 4, 0.35);
+  box-shadow: 0 4px 0 var(--ink), 0 10px 22px rgba(24, 12, 4, 0.32);
 }
 
 .ow-hero-chip {
   background: #f2e3c3;
   border: 2px solid var(--ink);
-  border-radius: 11px;
-  padding: 4px;
+  border-radius: 10px;
+  padding: 3px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -602,16 +876,16 @@ onBeforeUnmount(() => {
 
 .ow-hero-img-wrap {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .ow-hero-img-wrap img {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   object-fit: contain;
 }
 
@@ -621,7 +895,7 @@ onBeforeUnmount(() => {
   left: -4px;
   background: #4a2c17;
   color: #ffe891;
-  font-size: 0.56rem;
+  font-size: 0.54rem;
   font-weight: 900;
   padding: 0 3px;
   border-radius: 4px;
@@ -634,14 +908,14 @@ onBeforeUnmount(() => {
   background: #e89b14;
   color: #fffef5;
   border: 1.5px solid var(--ink);
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   font-weight: 900;
   padding: 0 4px;
   border-radius: 999px;
 }
 
 .ow-hp-mini {
-  width: 34px;
+  width: 32px;
   height: 4px;
   border-radius: 999px;
   background: #cfbe9c;
@@ -654,8 +928,8 @@ onBeforeUnmount(() => {
 }
 
 .ow-builds-btn {
-  padding: 8px 11px;
-  font-size: 0.8rem;
+  padding: 7px 10px;
+  font-size: 0.78rem;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -664,24 +938,136 @@ onBeforeUnmount(() => {
 .sp-count-pill {
   background: #4a2c17;
   color: #ffe891;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 900;
   padding: 1px 6px;
   border-radius: 999px;
 }
 
-/* Crisp Selected Stop Floating Card */
-.ow-stop-card {
-  width: min(460px, 100%);
-  padding: 10px 14px;
+/* ===== Tactile Watercolor Travel Hand Card Fan ===== */
+.travel-hand-fan {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 6px;
+}
+
+.travel-card {
+  width: 124px;
+  padding: 7px 8px 8px;
+  border-radius: 14px;
+  border: 2.5px solid #4a2c17;
+  background: linear-gradient(180deg, #fffdf5 0%, #f6e7c4 100%);
+  box-shadow: 0 4px 0 #4a2c17, 0 10px 18px rgba(24, 12, 4, 0.34);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  text-align: center;
+  overflow: hidden;
+  transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.travel-card.tiltedLeft {
+  transform: rotate(-2.5deg) translateY(3px);
+}
+
+.travel-card.tiltedRight {
+  transform: rotate(2.5deg) translateY(3px);
+}
+
+.travel-card:hover:not(:disabled) {
+  transform: translateY(-7px) scale(1.03);
+}
+
+.travel-card.active {
+  transform: translateY(-11px) scale(1.05);
+  border-color: #d18200;
+  background: linear-gradient(180deg, #fffef8 0%, #ffe99e 100%);
+  box-shadow: 0 6px 0 #8a5200, 0 0 18px rgba(255, 214, 74, 0.65);
+  z-index: 3;
+}
+
+.travel-card.mint {
+  border-top: 5px solid #59a644;
+}
+
+.travel-card.gold {
+  border-top: 5px solid #d99b26;
+}
+
+.travel-card.crimson {
+  border-top: 5px solid #d94c38;
+}
+
+.travel-card.plum {
+  border-top: 5px solid #7d4ca8;
+}
+
+.tc-top {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tc-key {
+  background: #4a2c17;
+  color: #ffe891;
+  font-size: 0.6rem;
+  font-weight: 900;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tc-pips {
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #7c450d;
+}
+
+.tc-icon {
+  font-size: 1.38rem;
+  line-height: 1.1;
+}
+
+.tc-name {
+  font-size: 0.75rem;
+  font-weight: 900;
+  color: var(--ink);
+  line-height: 1.15;
+}
+
+.tc-bonus {
+  font-size: 0.64rem;
+  font-weight: 800;
+  background: rgba(74, 44, 23, 0.11);
+  color: #4a2c17;
+  padding: 2px 7px;
+  border-radius: 999px;
+  max-width: 100%;
+  line-height: 1.2;
+}
+
+/* ===== Selected Space Card ===== */
+.ow-stop-card {
+  width: min(370px, 100%);
+  padding: 9px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
 
 .next-tabs {
   display: flex;
-  gap: 5px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
@@ -690,9 +1076,9 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   background: #f5e6c8;
   color: var(--ink);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 800;
-  padding: 3px 9px;
+  padding: 2px 8px;
   cursor: pointer;
 }
 
@@ -705,7 +1091,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .stop-copy {
@@ -718,23 +1104,23 @@ onBeforeUnmount(() => {
 .stop-title-row {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
 .stop-title-row strong {
-  font-size: 0.96rem;
+  font-size: 0.9rem;
   color: var(--ink);
 }
 
 .stop-copy small {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   color: var(--ink-soft);
   line-height: 1.25;
 }
 
 .stop-type-pill {
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   font-weight: 900;
   padding: 2px 7px;
   border-radius: 999px;
@@ -747,6 +1133,11 @@ onBeforeUnmount(() => {
 .stop-type-pill.sky {
   background: #d4f1ff;
   color: #0e4f6e;
+}
+
+.stop-type-pill.teal {
+  background: #ccf7f3;
+  color: #0c5957;
 }
 
 .stop-type-pill.gold {
@@ -771,14 +1162,14 @@ onBeforeUnmount(() => {
 }
 
 .stop-go-btn {
-  padding: 10px 18px;
-  font-size: 0.94rem;
+  padding: 9px 15px;
+  font-size: 0.88rem;
   font-weight: 900;
   flex-shrink: 0;
 }
 
 .stop-state {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 800;
   flex-shrink: 0;
 }
@@ -788,15 +1179,116 @@ onBeforeUnmount(() => {
   color: #215e16;
 }
 
-.ow-heat-pill {
-  background: linear-gradient(180deg, #ff7a33 0%, #c8331a 100%);
-  color: #fff8e6;
-  border-color: #4f160a;
+/* ===== Watering Shrine Overlay Modal ===== */
+.shrine-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(20, 32, 34, 0.56);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.shrine-sheet {
+  width: min(760px, 100%);
+  padding: 22px 22px 20px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.shrine-head {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.shrine-badge {
+  background: #ccf7f3;
+  color: #0d5c63;
+  border: 2px solid #0d5c63;
+  font-size: 0.72rem;
   font-weight: 900;
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.05em;
+}
+
+.shrine-head h2 {
+  margin: 0;
+  font-size: 1.38rem;
+  color: var(--ink);
+}
+
+.shrine-head p {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--ink-soft);
+}
+
+.shrine-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.shrine-opt {
+  border: 2.5px solid var(--ink);
+  border-radius: 15px;
+  padding: 14px 12px;
+  background: linear-gradient(180deg, #fffdf6 0%, #f5ead1 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 7px;
+  cursor: pointer;
+  transition: transform 0.14s ease, box-shadow 0.14s ease;
+  box-shadow: 0 4px 0 var(--ink);
+}
+
+.shrine-opt:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 7px 0 var(--ink);
+}
+
+.shrine-opt.heal {
+  background: linear-gradient(180deg, #f3fffd 0%, #d4f7f0 100%);
+}
+
+.shrine-opt.blessing {
+  background: linear-gradient(180deg, #fffdf0 0%, #ffefc2 100%);
+}
+
+.so-icon {
+  font-size: 2rem;
+}
+
+.shrine-opt strong {
+  font-size: 0.94rem;
+  color: var(--ink);
+}
+
+.shrine-opt small {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+  line-height: 1.32;
+  flex: 1;
+}
+
+.so-cta {
+  width: 100%;
+  padding: 7px 10px;
   font-size: 0.78rem;
 }
 
-@media (max-width: 820px) {
+@media (max-width: 980px) {
   .act-copy small {
     display: none;
   }
@@ -804,15 +1296,24 @@ onBeforeUnmount(() => {
   .ow-bottom-dock {
     flex-direction: column;
     align-items: stretch;
-    gap: 7px;
+    gap: 8px;
   }
 
   .ow-squad-dock {
     justify-content: space-between;
   }
 
+  .travel-card {
+    width: 102px;
+    padding: 6px 7px;
+  }
+
   .ow-stop-card {
     width: 100%;
+  }
+
+  .shrine-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

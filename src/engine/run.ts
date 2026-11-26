@@ -11,7 +11,17 @@ import {
   STARTER_UNLOCKED_WEAPONS,
 } from '../data/weapons';
 import { getHeatSeedMultiplier, MAX_HARVEST_HEAT } from './difficulty';
-import { ACTS, actIndexForSeason, actRng, generateActNodes, randomSeed } from './mapgen';
+import {
+  ACTS,
+  actIndexForSeason,
+  actRng,
+  drawTravelHand,
+  generateActNodes,
+  getReachableBoardTargets,
+  HARVEST_BELL_LIMIT,
+  randomSeed,
+  startNodeId,
+} from './mapgen';
 import type {
   BattleState,
   HeroLevelUpSummary,
@@ -190,6 +200,9 @@ export function createNewRun(
     0,
     Math.min(MAX_HARVEST_HEAT, Math.floor(harvestHeat ?? meta.selectedHeat ?? 0))
   );
+  const rng = actRng(seed >>> 0, act);
+  const nodes = generateActNodes(act, rng, mapDisplayName);
+  const startId = nodes.find((n) => n.type === 'start')?.id ?? startNodeId(act);
 
   const run: RunState = {
     id: `run_${Date.now()}`,
@@ -202,9 +215,14 @@ export function createNewRun(
     recruitBonusHp: hpBonus,
     seenEventIds: [],
     pendingEvent: null,
-    nodes: [],
-    currentNodeId: null,
-    completedNodeIds: [],
+    pendingShrine: null,
+    nodes,
+    currentNodeId: startId,
+    completedNodeIds: [startId],
+    travelHand: drawTravelHand(rng),
+    boardTurn: 0,
+    harvestBellLimit: HARVEST_BELL_LIMIT,
+    nextBattleBuff: null,
     roster,
     activeSquadUids: roster.slice(0, 4).map((h) => h.uid),
     relicIds,
@@ -215,7 +233,6 @@ export function createNewRun(
     pendingReward: null,
     status: 'map',
   };
-  run.nodes = generateActNodes(act, actRng(run.seed, act), mapDisplayName);
   return run;
 }
 
@@ -231,15 +248,21 @@ export function isFinalAct(run: RunState): boolean {
   return run.act >= ACTS.length - 1;
 }
 
-/** Move the run on to the next act's freshly generated map (after beating an act boss). */
+/** Move the run on to the next act's freshly generated watercolor board (after beating an act boss). */
 export function advanceToNextAct(run: RunState): void {
   const next = Math.min(run.act + 1, ACTS.length - 1);
   run.act = next;
   run.seasonId = ACTS[next].id;
   run.seasonName = actTitle(next);
-  run.nodes = generateActNodes(next, actRng(run.seed, next), mapDisplayName);
-  run.completedNodeIds = [];
-  run.currentNodeId = null;
+  const rng = actRng(run.seed, next);
+  run.nodes = generateActNodes(next, rng, mapDisplayName);
+  const startId = run.nodes.find((n) => n.type === 'start')?.id ?? startNodeId(next);
+  run.completedNodeIds = [startId];
+  run.currentNodeId = startId;
+  run.travelHand = drawTravelHand(rng);
+  run.boardTurn = 0;
+  run.harvestBellLimit = HARVEST_BELL_LIMIT;
+  run.pendingShrine = null;
   // Breather between acts: patch up the surviving squad.
   for (const hero of run.roster) {
     if (!hero.harvested) {
@@ -262,27 +285,107 @@ export function migrateSavedRun(run: RunState): RunState {
   if (!Array.isArray(run.unlockedWeaponIds)) {
     run.unlockedWeaponIds = [...STARTER_UNLOCKED_WEAPONS];
   }
+  if (!Array.isArray(run.travelHand) || run.travelHand.length === 0) {
+    run.travelHand = drawTravelHand(actRng(run.seed, run.act));
+  }
+  if (typeof run.boardTurn !== 'number') {
+    run.boardTurn = Math.max(0, (run.completedNodeIds?.length ?? 1) - 1);
+  }
+  if (typeof run.harvestBellLimit !== 'number') {
+    run.harvestBellLimit = HARVEST_BELL_LIMIT;
+  }
+  // If migrating a legacy save without boardgame coordinates, ensure currentNodeId points cleanly
+  if (run.nodes.length > 0 && typeof run.nodes[0].boardX !== 'number') {
+    const fresh = generateActNodes(run.act, actRng(run.seed, run.act), mapDisplayName);
+    const startId = fresh.find((n) => n.type === 'start')?.id ?? startNodeId(run.act);
+    run.nodes = fresh;
+    run.currentNodeId = startId;
+    run.completedNodeIds = [startId];
+  }
   if (Array.isArray(run.roster)) {
     for (const hero of run.roster) {
       if (typeof hero.level !== 'number') hero.level = 1;
       if (typeof hero.xp !== 'number') hero.xp = 0;
       if (typeof hero.skillPoints !== 'number') hero.skillPoints = 1;
       if (!Array.isArray(hero.perkIds)) hero.perkIds = [];
+      // Refund any legacy shared perk IDs that aren't in the new character-specific SKILL_PERKS!
+      const validPerks = hero.perkIds.filter((pid) => Boolean(SKILL_PERKS[pid]));
+      const refunded = hero.perkIds.length - validPerks.length;
+      if (refunded > 0) {
+        hero.perkIds = validPerks;
+        hero.skillPoints += refunded;
+      }
       if (!hero.equippedWeaponId) hero.equippedWeaponId = hero.weapon.id;
     }
   }
   return run;
 }
 
-export function getAvailableNextNodeIds(run: RunState): string[] {
-  if (run.completedNodeIds.length === 0) {
-    // Any first-floor node is a valid start.
-    return run.nodes.filter((n) => n.stage === 0).map((n) => n.id);
+export function getBoardPathsForCard(run: RunState, cardId?: string | null): Map<string, string[]> {
+  const hand = run.travelHand && run.travelHand.length > 0 ? run.travelHand : drawTravelHand();
+  const card = (cardId ? hand.find((c) => c.id === cardId) : undefined) ?? hand[0];
+  if (!card) return new Map();
+  const curId =
+    run.currentNodeId ??
+    run.completedNodeIds[run.completedNodeIds.length - 1] ??
+    run.nodes.find((n) => n.type === 'start')?.id ??
+    null;
+  return getReachableBoardTargets(run.nodes, curId, card);
+}
+
+export function getAvailableNextNodeIds(run: RunState, cardId?: string | null): string[] {
+  if (cardId) {
+    return Array.from(getBoardPathsForCard(run, cardId).keys());
   }
-  const lastId = run.completedNodeIds[run.completedNodeIds.length - 1];
-  const lastNode = run.nodes.find((n) => n.id === lastId);
-  if (!lastNode) return [];
-  return lastNode.nextIds.filter((id) => !run.completedNodeIds.includes(id));
+  const hand = run.travelHand && run.travelHand.length > 0 ? run.travelHand : [];
+  if (hand.length > 0) {
+    const union = new Set<string>();
+    for (const card of hand) {
+      for (const destId of getBoardPathsForCard(run, card.id).keys()) {
+        union.add(destId);
+      }
+    }
+    return Array.from(union);
+  }
+  const curId = run.currentNodeId ?? run.completedNodeIds[run.completedNodeIds.length - 1];
+  const curNode = run.nodes.find((n) => n.id === curId);
+  if (!curNode) return run.nodes.filter((n) => n.stage <= 1 && n.type !== 'start').map((n) => n.id);
+  return [...curNode.nextIds, ...(curNode.shortcutIds ?? [])].filter(
+    (id) => !run.completedNodeIds.includes(id)
+  );
+}
+
+/**
+ * Plays a Travel Hand Card to march along the seasonal watercolor boardgame track,
+ * applying the card's travel perk (+2 HP, +3 Seeds, or Next-Battle Boost),
+ * advancing the Harvest Bell turn counter, and drawing a fresh 3-card hand!
+ */
+export function applyTravelCardMove(
+  run: RunState,
+  cardId: string,
+  destNodeId: string,
+  rng: () => number = Math.random
+): string[] | null {
+  const hand = run.travelHand ?? [];
+  const card = hand.find((c) => c.id === cardId);
+  if (!card) return null;
+  const paths = getBoardPathsForCard(run, card.id);
+  const path = paths.get(destNodeId);
+  if (!path) return null;
+
+  if (card.bonus === 'heal2') {
+    for (const h of run.roster) {
+      if (!h.harvested) h.hp = Math.min(h.maxHp, h.hp + 2);
+    }
+  } else if (card.bonus === 'seeds3') {
+    run.seeds += 3;
+  } else if (card.bonus === 'boost') {
+    run.nextBattleBuff = { ...(run.nextBattleBuff ?? {}), boost: true };
+  }
+
+  run.boardTurn = (run.boardTurn ?? 0) + 1;
+  run.travelHand = drawTravelHand(rng);
+  return path;
 }
 
 function pickRandomDistinct<T>(pool: readonly T[], count: number, rng = Math.random): T[] {
@@ -395,10 +498,10 @@ export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Mat
   const recruitPool = RECRUITABLE_BLUEPRINT_IDS.filter((id) => !ownedBlueprints.has(id));
   const lockedWeapons = getLockedWeaponPool(run);
 
-  if (node.type === 'vault' || node.type === 'shop') {
-    const picks = pickRandomDistinct(recruitPool, 3, rng);
+  if (node.type === 'vault' || node.type === 'shop' || node.type === 'armory') {
+    const picks = node.type === 'armory' ? [] : pickRandomDistinct(recruitPool, 3, rng);
     return {
-      seedsEarned: node.type === 'shop' ? 8 : 6,
+      seedsEarned: node.type === 'shop' ? 8 : node.type === 'armory' ? 10 : 6,
       graftChoices: [],
       relicChoices: [],
       recruitChoices: picks,
@@ -423,9 +526,15 @@ export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Mat
     node.type === 'elite'
       ? 'fertilizer_bomb'
       : ALL_ITEM_IDS[Math.floor(rng() * ALL_ITEM_IDS.length)];
+  const swiftBossBonus =
+    node.type === 'boss' && (run.boardTurn ?? 0) <= (run.harvestBellLimit ?? HARVEST_BELL_LIMIT)
+      ? 15
+      : 0;
 
   return {
-    seedsEarned: node.type === 'elite' ? 24 : node.type === 'escape' ? 16 : node.type === 'boss' ? 40 : 12,
+    seedsEarned:
+      (node.type === 'elite' ? 24 : node.type === 'escape' ? 16 : node.type === 'boss' ? 40 : 12) +
+      swiftBossBonus,
     graftChoices: pickRandomDistinct(ALL_GRAFT_IDS, node.type === 'elite' ? 4 : 3, rng),
     relicChoices: grantsRelic ? pickRandomDistinct(availableRelics, 3, rng) : [],
     recruitChoices: recruitPicks,
@@ -441,16 +550,26 @@ export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Mat
 
 export function openVaultNode(run: RunState, nodeId: string): boolean {
   const node = run.nodes.find((n) => n.id === nodeId);
-  if (!node || (node.type !== 'vault' && node.type !== 'shop')) return false;
+  if (!node || (node.type !== 'vault' && node.type !== 'shop' && node.type !== 'armory')) return false;
   run.currentNodeId = nodeId;
   const freeHeal = node.type === 'vault' ? 6 : 3;
-  // Heal squad at Vault / Market immediately!
+  // Heal squad at Vault / Market / Armory immediately!
   for (const hero of run.roster) {
     if (!hero.harvested) {
       hero.hp = Math.min(hero.maxHp, hero.hp + freeHeal);
     }
   }
-  run.pendingReward = generateRewardForNode(run, node);
+  const bundle = generateRewardForNode(run, node);
+  if (node.type === 'armory') {
+    // Armory Wagon stocks up to 2 extra unlocked Alternate Weapons + gives a free weapon choice if locked weapons remain!
+    const locked = getLockedWeaponPool(run);
+    const armoryChoices = pickRandomDistinct(locked, 2);
+    bundle.weaponChoices = armoryChoices;
+    bundle.claimedWeapon = armoryChoices.length === 0;
+    bundle.graftChoices = [];
+    bundle.claimedGraft = true;
+  }
+  run.pendingReward = bundle;
   if (run.pendingReward.itemGrant) {
     const { itemId, count } = run.pendingReward.itemGrant;
     run.items[itemId] = (run.items[itemId] ?? 0) + count;
@@ -460,7 +579,49 @@ export function openVaultNode(run: RunState, nodeId: string): boolean {
   if (!run.completedNodeIds.includes(nodeId)) {
     run.completedNodeIds.push(nodeId);
   }
-  run.status = node.type === 'shop' ? 'shop' : 'vault';
+  run.status = node.type === 'shop' || node.type === 'armory' ? 'shop' : 'vault';
+  return true;
+}
+
+export function openShrineNode(run: RunState, nodeId: string): boolean {
+  const node = run.nodes.find((n) => n.id === nodeId);
+  if (!node || node.type !== 'shrine') return false;
+  run.currentNodeId = nodeId;
+  run.pendingShrine = { nodeId, claimed: false };
+  run.status = 'shrine';
+  return true;
+}
+
+export function claimShrineBlessing(
+  run: RunState,
+  choice: 'heal' | 'blessing' | 'seeds'
+): boolean {
+  if (!run.pendingShrine || run.pendingShrine.claimed) return false;
+  const nodeId = run.pendingShrine.nodeId;
+  if (choice === 'heal') {
+    for (const hero of run.roster) {
+      if (!hero.harvested) {
+        hero.hp = hero.maxHp;
+      }
+    }
+  } else if (choice === 'blessing') {
+    run.nextBattleBuff = {
+      boost: true,
+      shield: true,
+      moveBonus: (run.nextBattleBuff?.moveBonus ?? 0) + 1,
+    };
+  } else if (choice === 'seeds') {
+    run.seeds += 14;
+  }
+
+  run.pendingShrine.claimed = true;
+  const node = run.nodes.find((n) => n.id === nodeId);
+  if (node) node.completed = true;
+  if (!run.completedNodeIds.includes(nodeId)) {
+    run.completedNodeIds.push(nodeId);
+  }
+  run.pendingShrine = null;
+  run.status = 'map';
   return true;
 }
 
@@ -825,25 +986,68 @@ export function unlockHeroPerk(run: RunState, heroUid: string, perkId: string): 
   const hero = run.roster.find((h) => h.uid === heroUid && !h.harvested);
   const perk = SKILL_PERKS[perkId];
   if (!hero || !perk) return false;
-  if (!canUnlockPerk(hero.perkIds, hero.skillPoints, perkId)) return false;
+  if (!canUnlockPerk(hero.perkIds, hero.skillPoints, perkId, hero.species)) return false;
 
   hero.skillPoints -= perk.cost;
   hero.perkIds.push(perkId);
 
-  if (perkId === 'swift_roots') {
-    hero.moveRange += 1;
-    hero.jumpRange += 1;
-  } else if (perkId === 'eagle_eye') {
+  const e = perk.effects;
+  if (e.bonusHp) {
+    hero.maxHp += e.bonusHp;
+    hero.hp = Math.min(hero.maxHp, hero.hp + e.bonusHp);
+  }
+  if (e.bonusMove) hero.moveRange += e.bonusMove;
+  if (e.bonusJump) hero.jumpRange += e.bonusJump;
+  if (e.bonusAttack || e.bonusRange) {
     hero.weapon = {
       ...hero.weapon,
-      maxRange: hero.weapon.maxRange + 1,
-      damage: hero.weapon.damage + 1,
+      damage: hero.weapon.damage + (e.bonusAttack ?? 0),
+      maxRange: hero.weapon.maxRange + (e.bonusRange ?? 0),
     };
-  } else if (perkId === 'hardy_husk') {
-    hero.maxHp += 4;
-    hero.hp = Math.min(hero.maxHp, hero.hp + 4);
   }
 
+  return true;
+}
+
+/**
+ * Free 1-click Skill Tree Respec! Refunds every spent SP on this hero and cleanly
+ * reverses all permanent stat deltas from previously unlocked perks.
+ */
+export function respecHeroPerks(run: RunState, heroUid: string): boolean {
+  const hero = run.roster.find((h) => h.uid === heroUid && !h.harvested);
+  if (!hero || hero.perkIds.length === 0) return false;
+
+  let refundedSp = 0;
+  let hpDelta = 0;
+  let moveDelta = 0;
+  let jumpDelta = 0;
+  let atkDelta = 0;
+  let rangeDelta = 0;
+
+  for (const pid of hero.perkIds) {
+    const def = SKILL_PERKS[pid];
+    if (!def) continue;
+    refundedSp += def.cost;
+    hpDelta += def.effects.bonusHp ?? 0;
+    moveDelta += def.effects.bonusMove ?? 0;
+    jumpDelta += def.effects.bonusJump ?? 0;
+    atkDelta += def.effects.bonusAttack ?? 0;
+    rangeDelta += def.effects.bonusRange ?? 0;
+  }
+
+  hero.perkIds = [];
+  hero.skillPoints += refundedSp;
+  hero.maxHp = Math.max(6, hero.maxHp - hpDelta);
+  hero.hp = Math.min(hero.maxHp, Math.max(1, hero.hp));
+  hero.moveRange = Math.max(2, hero.moveRange - moveDelta);
+  hero.jumpRange = Math.max(2, hero.jumpRange - jumpDelta);
+  if (atkDelta > 0 || rangeDelta > 0) {
+    hero.weapon = {
+      ...hero.weapon,
+      damage: Math.max(1, hero.weapon.damage - atkDelta),
+      maxRange: Math.max(hero.weapon.minRange, hero.weapon.maxRange - rangeDelta),
+    };
+  }
   return true;
 }
 

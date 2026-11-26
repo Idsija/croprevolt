@@ -4,7 +4,7 @@ import { RECRUITABLE_BLUEPRINT_IDS } from '../data/produce';
 import { runEnemyUnitTurn } from '../engine/ai';
 import { battleRng, difficultyFor, MAX_HARVEST_HEAT } from '../engine/difficulty';
 import { leaveEvent, openEventNode, resolveEventChoice } from '../engine/events';
-import { ACTS } from '../engine/mapgen';
+import { ACTS, HARVEST_BELL_LIMIT } from '../engine/mapgen';
 import {
   createBattleFromMap,
   executeAbility,
@@ -37,9 +37,11 @@ import {
 import {
   applyBattleOutcomeToRun,
   applyGraftToHero,
+  applyTravelCardMove,
   buyMarketOffer,
   claimRecruitReward,
   claimRelicReward,
+  claimShrineBlessing,
   claimWeaponReward,
   clearSavedRun,
   createNewRun,
@@ -47,8 +49,10 @@ import {
   finishRewardsAndReturnToMap,
   loadMetaProgress,
   loadSavedRun,
+  openShrineNode,
   openVaultNode,
   purchaseMetaUnlock,
+  respecHeroPerks,
   saveMetaProgress,
   saveRun,
   toggleHeroActiveSquad,
@@ -455,7 +459,7 @@ export function returnToTitle(): void {
   syncAdaptiveMusic();
 }
 
-export function enterSeasonNode(nodeId: string): void {
+export function enterSeasonNode(nodeId: string, travelCardId?: string): void {
   const run = gameStore.run;
   if (!run) return;
   const node = run.nodes.find((n) => n.id === nodeId);
@@ -465,7 +469,20 @@ export function enterSeasonNode(nodeId: string): void {
   lastUndoUnitId = null;
   clearAutoEndTimer();
 
-  if (node.type === 'vault' || node.type === 'shop') {
+  // Apply boardgame Travel Card movement (advances boardTurn, awards card bonus, draws replacement card)
+  if (travelCardId) {
+    const moved = applyTravelCardMove(run, travelCardId, nodeId);
+    if (!moved) return;
+  }
+
+  if (node.type === 'shrine') {
+    openShrineNode(run, nodeId);
+    saveRun(run);
+    syncAdaptiveMusic();
+    return;
+  }
+
+  if (node.type === 'vault' || node.type === 'shop' || node.type === 'armory') {
     openVaultNode(run, nodeId);
     saveRun(run);
     syncAdaptiveMusic();
@@ -491,6 +508,9 @@ export function enterSeasonNode(nodeId: string): void {
   const ownedBps = new Set(run.roster.map((h) => h.blueprintId));
   const fallbackBp = RECRUITABLE_BLUEPRINT_IDS.find((bp) => !ownedBps.has(bp)) ?? 'carrot';
   const heat = run.harvestHeat ?? 0;
+  const pendingBuff = run.nextBattleBuff ?? null;
+  const bossEmpowered =
+    node.type === 'boss' && (run.boardTurn ?? 0) > (run.harvestBellLimit ?? HARVEST_BELL_LIMIT);
 
   const battle = createBattleFromMap(
     node.mapId,
@@ -505,8 +525,12 @@ export function enterSeasonNode(nodeId: string): void {
       theme: ACTS[run.act]?.theme,
       enablePrepPhase: true,
       harvestHeat: heat,
+      nextBattleBuff: pendingBuff,
+      bossEmpowered,
     }
   );
+  // Consume one-battle Travel Card / Shrine boost once battle starts
+  run.nextBattleBuff = null;
 
   gameStore.battle = battle;
   gameStore.mode = 'move';
@@ -837,19 +861,46 @@ export function getActionOptionsForTile(pos: GridPos | null): PreviewActionOptio
     return options;
   }
 
-  // Clicking destructible cover directly while in default mode also offers quick Smash/Bowl if in attack range!
+  // Clicking destructible cover (including Rolling Pumpkins!) or a Collapsible Wooden Bridge directly
+  // while in default mode also offers quick Smash/Bowl/Collapse if in attack range!
   const coverFc = forecastAttack(b, selected, pos);
-  if (coverFc.canAttack && b.tiles[pos.y]?.[pos.x]?.cover?.destructible) {
+  if (
+    coverFc.canAttack &&
+    (b.tiles[pos.y]?.[pos.x]?.cover?.destructible || coverFc.isBridgeTarget)
+  ) {
     options.push({
       kind: 'attack',
       label: coverFc.isPumpkinTarget
-        ? `Bowl Pumpkin!`
-        : `Smash Cover (-${coverFc.coverDamage})`,
+        ? `Bowl Pumpkin! (4 DMG)`
+        : coverFc.isBridgeTarget
+          ? `Collapse Bridge (-${coverFc.coverDamage})`
+          : `Smash Cover (-${coverFc.coverDamage})`,
       tone: 'danger',
     });
   }
 
   return options;
+}
+
+export function handleRightClickCancel(): void {
+  if (gameStore.enemyTurnRunning) return;
+  clearAutoEndTimer();
+  if (gameStore.battle?.prepPhase) return;
+  if (
+    gameStore.previewTile ||
+    gameStore.mode !== 'move' ||
+    gameStore.inspectedEnemyId ||
+    gameStore.previewOverwatch
+  ) {
+    sfx.click();
+    gameStore.previewTile = null;
+    gameStore.inspectedEnemyId = null;
+    gameStore.previewOverwatch = false;
+    gameStore.selectedItemId = null;
+    gameStore.mode = 'move';
+    return;
+  }
+  deselectAll(true);
 }
 
 export function getPreviewActionOptions(): PreviewActionOption[] {
@@ -1365,28 +1416,55 @@ export function toggleSquadMember(heroUid: string): boolean {
   return ok;
 }
 
+function syncPrepBattleUnitFromHero(heroUid: string): void {
+  const b = gameStore.battle;
+  const run = gameStore.run;
+  if (!b?.prepPhase || !run) return;
+  const hero = run.roster.find((h) => h.uid === heroUid);
+  const unit = b.units.find((u) => u.rosterUid === heroUid);
+  if (hero && unit) {
+    unit.perkIds = [...hero.perkIds];
+    unit.maxHp = hero.maxHp;
+    unit.hp = Math.min(hero.maxHp, hero.hp);
+    unit.moveRange = hero.moveRange;
+    unit.dashDamage = hero.dashDamage;
+    unit.weapon = {
+      ...hero.weapon,
+      appliesStatus: hero.weapon.appliesStatus ? { ...hero.weapon.appliesStatus } : undefined,
+    };
+  }
+}
+
 export function unlockPerk(heroUid: string, perkId: string): boolean {
   if (!gameStore.run) return false;
   const ok = unlockHeroPerk(gameStore.run, heroUid, perkId);
   if (ok) {
-    const b = gameStore.battle;
-    if (b?.prepPhase) {
-      const hero = gameStore.run.roster.find((h) => h.uid === heroUid);
-      const unit = b.units.find((u) => u.rosterUid === heroUid);
-      if (hero && unit) {
-        unit.perkIds = [...hero.perkIds];
-        unit.maxHp = hero.maxHp;
-        unit.hp = Math.min(hero.maxHp, hero.hp);
-        unit.moveRange = hero.moveRange;
-        unit.dashDamage = hero.dashDamage;
-        unit.weapon = {
-          ...hero.weapon,
-          appliesStatus: hero.weapon.appliesStatus ? { ...hero.weapon.appliesStatus } : undefined,
-        };
-      }
-    }
+    syncPrepBattleUnitFromHero(heroUid);
     sfx.rescue();
     saveRun(gameStore.run);
+  }
+  return ok;
+}
+
+export function respecPerks(heroUid: string): boolean {
+  if (!gameStore.run) return false;
+  const ok = respecHeroPerks(gameStore.run, heroUid);
+  if (ok) {
+    syncPrepBattleUnitFromHero(heroUid);
+    sfx.click();
+    saveRun(gameStore.run);
+  }
+  return ok;
+}
+
+export function pickShrineBlessing(choice: 'heal' | 'blessing' | 'seeds'): boolean {
+  if (!gameStore.run) return false;
+  const ok = claimShrineBlessing(gameStore.run, choice);
+  if (ok) {
+    if (choice === 'heal') sfx.heal();
+    else sfx.rescue();
+    saveRun(gameStore.run);
+    syncAdaptiveMusic();
   }
   return ok;
 }

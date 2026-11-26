@@ -44,6 +44,7 @@ import {
   getPreviewActionOptions,
   handleBattleTileTap,
   handleOffBoardTap,
+  handleRightClickCancel,
   type PreviewActionOption,
   returnToTitle,
   selectBattleUnit,
@@ -77,11 +78,11 @@ const COACH_TIPS = [
   },
   {
     title: '2/3 · Move, Dash & Team-Jump',
-    body: 'Dash orange foes mid-move (twice with Multi-Dash!), Team-Jump gold tiles over allies, or hold ground with Hero Sight Overwatch (O)!',
+    body: 'Hover any Move tile for a 3D Ghost & projected sightlines! Dash orange foes mid-move, Team-Jump gold tiles, or guard with Watch (O).',
   },
   {
-    title: '3/3 · Aim Cam & Target Cycling',
-    body: 'Tap Weapon (or press F) for Over-the-Shoulder Aim Cam — cycle targets with ◀ / ▶ (or A/D) and hit FIRE! Right-drag or Q/E orbits 3D.',
+    title: '3/3 · Snappy Controls & Aim Cam',
+    body: 'Right-click cancels · Right-drag or Q/E orbits 3D · Press F for Aim Cam, A/D to cycle targets, and fire right from the floating pill!',
   },
 ] as const;
 
@@ -104,6 +105,7 @@ const showItemsMenu = ref(false);
 const showUtilityMenu = ref(false);
 const showAlmanac = ref(false);
 const showPrepArmory = ref(false);
+const logExpanded = ref(false);
 const inspectedNote = ref<{ title: string; desc: string } | null>(null);
 const zoomPercent = ref(100);
 const cameraMode = ref<CameraMode3D>('tactical');
@@ -335,8 +337,7 @@ const activeForecast = computed(() => {
   const targetIsCollapsibleBridge = Boolean(
     !focusedUnit.value &&
       focusedTile.value?.terrain === 'bridge' &&
-      (focusedTile.value.bridgeHp ?? 0) > 0 &&
-      gameStore.mode === 'attack'
+      (focusedTile.value.bridgeHp ?? 0) > 0
   );
   if (
     !targetIsEnemy &&
@@ -369,6 +370,10 @@ const showWorldForecastPill = computed(() => {
   }
   return Boolean(activeForecast.value || previewDashDamage.value !== null);
 });
+
+const worldForecastInteractive = computed(() =>
+  Boolean(showWorldForecastPill.value && gameStore.previewTile && isCombatPreview.value && previewOptions.value.length > 0)
+);
 
 const worldForecastStyle = computed(() => {
   if (!focusAnchor.value) return {};
@@ -738,8 +743,11 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
     const alive = playerUnits.value.filter((u) => u.alive);
     if (alive.length === 0) return;
-    const curIdx = alive.findIndex((u) => u.id === gameStore.selectedUnitId);
-    const next = alive[(curIdx + 1) % alive.length];
+    // Smart Tab: prefer heroes who still have remaining actions!
+    const ready = alive.filter((u) => !isHeroDone(u.id));
+    const pool = ready.length > 0 ? ready : alive;
+    const curIdx = pool.findIndex((u) => u.id === gameStore.selectedUnitId);
+    const next = pool[(curIdx + 1) % pool.length];
     if (next) selectSquadCard(next.id);
     return;
   }
@@ -789,6 +797,13 @@ function onKeyDown(e: KeyboardEvent): void {
     selectedUnit.value.abilityCooldown === 0
   ) {
     toggleMode('ability');
+  } else if (
+    lower === 'b' &&
+    selectedUnit.value &&
+    !selectedUnit.value.actions.hasUsedSkill &&
+    totalItemsLeft.value > 0
+  ) {
+    showItemsMenu.value = !showItemsMenu.value;
   } else if (lower === 'm' && selectedUnit.value) {
     setInteractionMode('move');
   } else if (lower === 'z' && battle.value.undoSnapshot) {
@@ -831,6 +846,14 @@ function handleCanvasOffBoardTap(): void {
   handleOffBoardTap();
 }
 
+function handleCanvasRightClickCancel(): void {
+  showItemsMenu.value = false;
+  showUtilityMenu.value = false;
+  inspectedNote.value = null;
+  clearEndConfirm();
+  handleRightClickCancel();
+}
+
 function destroyActiveRenderer(): void {
   activeRenderer?.destroy();
   activeRenderer = null;
@@ -852,6 +875,7 @@ function mountActiveRenderer(): void {
           onHoverChange: (pos) => setHoveredTile(pos),
           onTileTap: handleCanvasTileTap,
           onOffBoardTap: handleCanvasOffBoardTap,
+          onRightClickCancel: handleCanvasRightClickCancel,
           onZoomChange: (pct) => {
             zoomPercent.value = pct;
           },
@@ -953,6 +977,7 @@ onBeforeUnmount(() => {
     <div
       v-if="showWorldForecastPill"
       class="world-forecast-pill"
+      :class="{ interactive: worldForecastInteractive }"
       :style="worldForecastStyle"
     >
       <div class="wf-card">
@@ -1061,6 +1086,44 @@ onBeforeUnmount(() => {
               </span>
             </div>
           </div>
+        </div>
+
+        <!-- World-Anchored Quick Action Pills right over the locked target! -->
+        <div v-if="worldForecastInteractive" class="wf-quick-bar">
+          <button
+            v-if="gameStore.mode === 'attack' && aimTargets.length > 1"
+            class="wf-qbtn cycle"
+            title="Previous Target (A)"
+            @click.stop="cycleAimTarget(-1)"
+          >
+            ◀
+          </button>
+          <button
+            v-for="opt in previewOptions"
+            :key="opt.kind"
+            class="wf-qbtn"
+            :class="opt.kind"
+            @click.stop="executePreviewOption(opt.kind)"
+          >
+            <template v-if="opt.kind === 'dash'">⚡ {{ opt.label }}</template>
+            <template v-else-if="opt.kind === 'attack'">🎯 {{ focusedUnit ? 'FIRE!' : opt.label }}</template>
+            <template v-else>{{ opt.label }}</template>
+          </button>
+          <button
+            v-if="gameStore.mode === 'attack' && aimTargets.length > 1"
+            class="wf-qbtn cycle"
+            title="Next Target (D)"
+            @click.stop="cycleAimTarget(1)"
+          >
+            ▶
+          </button>
+          <button
+            class="wf-qbtn dismiss"
+            title="Cancel (Right-Click / Esc)"
+            @click.stop="cancelPreviewAction"
+          >
+            ✕
+          </button>
         </div>
       </div>
       <div class="wf-pointer"></div>
@@ -1288,9 +1351,27 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="paper-card desktop-log">
-        <div v-for="(line, i) in battle.combatLog.slice(-2)" :key="i" class="log-line">{{ line }}</div>
-      </div>
+      <button
+        v-if="battle.combatLog.length > 0"
+        class="paper-card desktop-log-pill"
+        :class="{ expanded: logExpanded }"
+        :title="logExpanded ? 'Collapse battle log' : 'Expand recent battle log'"
+        @click="logExpanded = !logExpanded"
+      >
+        <div class="log-pill-head">
+          <span class="log-latest">{{ latestLogLine }}</span>
+          <span class="log-caret">{{ logExpanded ? '▴' : '▾' }}</span>
+        </div>
+        <div v-if="logExpanded && battle.combatLog.length > 1" class="log-history">
+          <div
+            v-for="(line, i) in battle.combatLog.slice(-5, -1).reverse()"
+            :key="i"
+            class="log-line"
+          >
+            {{ line }}
+          </div>
+        </div>
+      </button>
     </aside>
 
     <!-- Field Notebook Menu Drawer -->
@@ -1475,16 +1556,18 @@ onBeforeUnmount(() => {
             <div class="mr-hero-meta">
               <div class="mr-hero-name-row">
                 <strong>{{ u.name.split(' ')[0] }}</strong>
-                <span class="mr-hp-txt">{{ u.hp }}/{{ u.maxHp }}</span>
               </div>
-              <div class="mr-hp-bar">
-                <div
-                  class="mr-hp-fill"
-                  :style="{
-                    width: `${Math.max(0, Math.min(100, (u.hp / Math.max(1, u.maxHp)) * 100))}%`,
-                    backgroundColor: hpColor(u.hp, u.maxHp),
-                  }"
-                ></div>
+              <div class="mr-hp-inline">
+                <div class="mr-hp-bar">
+                  <div
+                    class="mr-hp-fill"
+                    :style="{
+                      width: `${Math.max(0, Math.min(100, (u.hp / Math.max(1, u.maxHp)) * 100))}%`,
+                      backgroundColor: hpColor(u.hp, u.maxHp),
+                    }"
+                  ></div>
+                </div>
+                <span class="mr-hp-txt">{{ u.hp }}/{{ u.maxHp }}</span>
               </div>
               <!-- Mario + Rabbids 3 Action Pips: Move / Weapon / Technique -->
               <div class="mr-action-pips" title="Move · Weapon · Technique">
@@ -1947,6 +2030,7 @@ onBeforeUnmount(() => {
                   title="Move, Dash enemies, or Team-Jump allies (M)"
                   @click="setInteractionMode('move')"
                 >
+                  <span class="act-keycap desktop-only">M</span>
                   <CraftIcon name="move" :size="15" />
                   <div class="act-copy">
                     <span class="act-title">{{ selectedUnit.actions.hasMoved ? 'Moved' : 'Move' }}</span>
@@ -1967,6 +2051,7 @@ onBeforeUnmount(() => {
                   :title="`${selectedUnit.weapon.name} (${selectedUnit.weapon.damage} dmg) — Aim Cam (F)`"
                   @click="toggleMode('attack')"
                 >
+                  <span class="act-keycap desktop-only">F</span>
                   <span v-if="enemiesInAttackRange > 0" class="tab-badge">{{ enemiesInAttackRange }}</span>
                   <CraftIcon name="attack" :size="15" />
                   <div class="act-copy">
@@ -1988,6 +2073,7 @@ onBeforeUnmount(() => {
                   @blur="setPreviewOverwatch(false)"
                   @click="handleTriggerOverwatch"
                 >
+                  <span class="act-keycap desktop-only">O</span>
                   <span class="watch-glyph">👁</span>
                   <div class="act-copy">
                     <span class="act-title">Watch</span>
@@ -2008,6 +2094,7 @@ onBeforeUnmount(() => {
                   :title="selectedUnit.ability ? `${selectedUnit.ability.name} (S): ${selectedUnit.ability.description}` : 'No skill'"
                   @click="toggleMode('ability')"
                 >
+                  <span class="act-keycap desktop-only">S</span>
                   <CraftIcon name="skill" :size="15" />
                   <div class="act-copy">
                     <span class="act-title">
@@ -2028,9 +2115,10 @@ onBeforeUnmount(() => {
                     battle.phase !== 'player' ||
                     gameStore.enemyTurnRunning
                   "
-                  title="Garden Satchel (shares Skill slot)"
+                  title="Garden Satchel (B) — shares Skill slot"
                   @click="showItemsMenu = !showItemsMenu"
                 >
+                  <span class="act-keycap desktop-only">B</span>
                   <CraftIcon name="bag" :size="15" />
                   <div class="act-copy">
                     <span class="act-title">Bag</span>
@@ -2223,12 +2311,17 @@ onBeforeUnmount(() => {
   will-change: transform;
 }
 
+.world-forecast-pill.interactive {
+  pointer-events: auto;
+  z-index: 26;
+}
+
 .wf-card {
-  min-width: 224px;
-  max-width: 276px;
+  min-width: 230px;
+  max-width: 296px;
   padding: 8px 11px;
   background:
-    linear-gradient(180deg, rgba(255, 253, 246, 0.96) 0%, rgba(245, 234, 210, 0.96) 100%);
+    linear-gradient(180deg, rgba(255, 253, 246, 0.97) 0%, rgba(245, 234, 210, 0.97) 100%);
   border: 2.5px solid var(--ink);
   border-radius: 13px;
   transform: skewX(-4deg);
@@ -2236,6 +2329,60 @@ onBeforeUnmount(() => {
     inset 0 1px 0 rgba(255, 255, 255, 0.92),
     0 4px 0 var(--ink),
     0 12px 24px rgba(28, 12, 4, 0.36);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wf-quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 5px;
+  border-top: 1.5px dashed rgba(74, 44, 23, 0.28);
+  transform: skewX(4deg);
+}
+
+.wf-qbtn {
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 800;
+  cursor: pointer;
+  background: #fff7e0;
+  color: var(--ink);
+  box-shadow: 0 2px 0 var(--ink);
+  transition: transform 0.1s ease;
+  white-space: nowrap;
+}
+
+.wf-qbtn:hover {
+  transform: translateY(-1px);
+}
+
+.wf-qbtn.attack {
+  flex: 1;
+  background: linear-gradient(180deg, #ef5c47 0%, #c83322 100%);
+  color: #fffef5;
+}
+
+.wf-qbtn.dash {
+  flex: 1;
+  background: linear-gradient(180deg, #ffbe4d 0%, #e58319 100%);
+  color: #3d1d05;
+}
+
+.wf-qbtn.cycle {
+  padding: 4px 7px;
+  background: #f5e6c5;
+}
+
+.wf-qbtn.dismiss {
+  padding: 4px 7px;
+  background: #ede1c9;
+  color: var(--ink-soft);
 }
 
 .wf-top {
@@ -2677,18 +2824,55 @@ onBeforeUnmount(() => {
   line-height: 1.25;
 }
 
-.desktop-log {
+.desktop-log-pill {
   width: 100%;
-  padding: 7px 10px;
-  font-size: 0.73rem;
+  padding: 6px 10px;
+  font-size: 0.72rem;
   color: var(--ink-soft);
-  line-height: 1.3;
+  line-height: 1.28;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.log-pill-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.log-latest {
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desktop-log-pill.expanded .log-latest {
+  white-space: normal;
+}
+
+.log-caret {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.log-history {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(74, 44, 23, 0.25);
 }
 
 .log-line + .log-line {
-  margin-top: 3px;
   padding-top: 3px;
-  border-top: 1px dashed rgba(74, 44, 23, 0.2);
+  border-top: 1px dashed rgba(74, 44, 23, 0.16);
 }
 
 /* ===== Coach Note & Inspect Toast ===== */
@@ -2804,8 +2988,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 7px;
-  width: 144px;
-  padding: 6px 9px 6px 7px;
+  min-width: 140px;
+  max-width: 174px;
+  padding: 5px 9px 5px 7px;
   background:
     linear-gradient(180deg, rgba(255, 253, 246, 0.94) 0%, rgba(242, 229, 202, 0.94) 100%);
   border: 2.2px solid var(--ink);
@@ -2871,8 +3056,8 @@ onBeforeUnmount(() => {
 
 .mr-portrait-box {
   position: relative;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: 9px;
   background: #ebe0c6;
   border: 1.6px solid var(--ink);
@@ -2884,8 +3069,8 @@ onBeforeUnmount(() => {
 }
 
 .mr-portrait-img {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   object-fit: contain;
 }
 
@@ -2909,7 +3094,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2.5px;
 }
 
 .mr-hero-name-row {
@@ -2921,20 +3106,27 @@ onBeforeUnmount(() => {
 
 .mr-hero-name-row strong {
   font-family: 'Fredoka', sans-serif;
-  font-size: 0.76rem;
+  font-size: 0.8rem;
+  line-height: 1.1;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.mr-hp-inline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .mr-hp-txt {
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   font-weight: 800;
   color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 .mr-hp-bar {
-  width: 100%;
+  flex: 1;
+  min-width: 46px;
   height: 6px;
   border-radius: 99px;
   background: #cbb692;
@@ -2984,17 +3176,17 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: 5px;
   flex: 1;
   max-width: 560px;
 }
 
 .mr-deck {
   width: 100%;
-  padding: 8px 10px 9px;
+  padding: 7px 10px 8px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
 }
 
 .mr-deck.deck-aim {
@@ -3101,7 +3293,7 @@ onBeforeUnmount(() => {
 .status-chip.shield { background: #d4ecff; color: #134a78; }
 .status-chip.boosted { background: #fff0b3; color: #7a4a00; }
 
-/* 5-Button Mario + Rabbids Action Row */
+/* 6-Button Mario + Rabbids Action Row */
 .mr-action-bar {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3109,15 +3301,37 @@ onBeforeUnmount(() => {
 }
 
 .mr-act-btn {
-  padding: 6px 7px;
-  min-height: 44px;
+  position: relative;
+  padding: 5px 6px;
+  min-height: 40px;
   transform: skewX(-4deg);
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
 }
 
 .mr-act-btn > * {
   transform: skewX(4deg);
+}
+
+.act-keycap {
+  position: absolute;
+  top: -6px;
+  left: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: rgba(58, 33, 14, 0.92);
+  color: #fff6d4;
+  border: 1px solid rgba(255, 245, 210, 0.45);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.58rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
 }
 
 .mr-act-btn:hover:not(:disabled) {

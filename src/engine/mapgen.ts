@@ -1,13 +1,13 @@
-import type { BoardTheme, NodeType, SeasonId, SeasonNode } from './types';
+import type { BoardTheme, BoardTravelCard, NodeType, SeasonId, SeasonNode } from './types';
 
 /**
- * Procedural run map generation (Slay the Spire style).
+ * Seasonal Watercolor Boardgame Overworld Generator & Travel Card Pathfinder.
  *
- * A run is a sequence of acts. Each act is a grid of FLOORS rows × MAX_LANES columns.
- * A handful of paths are walked from the first floor to the last, each step moving at most
- * one column sideways and never crossing an earlier path. Every visited cell becomes a node,
- * so every node is reachable and has a way forward. The last floor always connects to the
- * act's fixed boss.
+ * Each Act lays out 16 interconnected board spaces pinned directly to the roads,
+ * bridges, loops, and landmarks of its seasonal hand-painted watercolor game board
+ * (Spring Meadow Patch, Summer Sunlit Greenhouse, Autumn Harvest Orchard).
+ * Space encounters are procedurally seeded per run while preserving rich branching
+ * routes, cross-road shortcuts, Markets, Shrines, Armory Wagons, Elites, and Bosses.
  */
 
 export type Rng = () => number;
@@ -34,7 +34,9 @@ export interface ActDef {
   id: SeasonId;
   /** Overrides the battlefield palette (lets an act reuse earlier layouts in its own colours). */
   theme?: BoardTheme;
-  /** Shown in the map header, e.g. "Act 1 · Spring Patch" */
+  /** Illustrated watercolor tabletop board image path in public/ui/. */
+  boardArt: string;
+  /** Shown in the map header, e.g. "Spring Patch" */
   name: string;
   trailTitle: string;
   trailHint: string;
@@ -43,14 +45,17 @@ export interface ActDef {
   boss: { mapId: string; name: string; subtitle: string };
   shop: { name: string; subtitle: string };
   vault: { name: string; subtitle: string };
+  shrine: { name: string; subtitle: string };
+  armory: { name: string; subtitle: string };
 }
 
 export const ACTS: ActDef[] = [
   {
     id: 'spring',
-    name: 'Spring Patch',
-    trailTitle: 'Garden Trail Map',
-    trailHint: 'Pick a path. Captain Scarecrow waits at the end of the trail.',
+    boardArt: '/ui/board_spring.jpg',
+    name: 'Spring Meadow Board',
+    trailTitle: 'Spring Meadow Tabletop',
+    trailHint: 'Play a Travel Card to march along the brook, clover hills & orchard toward Captain Scarecrow.',
     mapPools: {
       skirmish: ['creek_crossing', 'canyon_terrace', 'barnyard_siege', 'vegetable_patch'],
       escape: ['patch_breakout', 'harvest_railroad'],
@@ -65,23 +70,32 @@ export const ACTS: ActDef[] = [
     },
     boss: {
       mapId: 'scarecrow_stand',
-      name: "Captain Scarecrow's Stand",
+      name: "Captain Scarecrow's Barn",
       subtitle: 'Spring Boss — Topple the towering straw warden!',
     },
     shop: {
       name: "Farmer's Compost Market",
-      subtitle: 'Safe Market — Spend run Seeds on Alt Weapons, Grafts, Items & Healing!',
+      subtitle: 'Market Space — Spend Run Seeds on Alt Weapons, Grafts, Items & Healing!',
     },
     vault: {
-      name: 'Seed Vault & Compost',
-      subtitle: 'Safe Stop — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
+      name: 'Seed Vault Camp',
+      subtitle: 'Rest Camp — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
+    },
+    shrine: {
+      name: 'Dewdrop Watering Shrine',
+      subtitle: 'Shrine Boon — Choose full squad healing, next-battle Blessing, or +14 Seeds!',
+    },
+    armory: {
+      name: 'Tinker Armory Wagon',
+      subtitle: 'Armory Space — Unlock Alternate Weapons & stock tactical supplies!',
     },
   },
   {
     id: 'summer',
-    name: 'Summer Greenhouse',
-    trailTitle: 'Summer Greenhouse Trail',
-    trailHint: 'Pick a path. Baron Combine waits in the Conservatory.',
+    boardArt: '/ui/board_summer.jpg',
+    name: 'Summer Conservatory Board',
+    trailTitle: 'Sunlit Conservatory Tabletop',
+    trailHint: 'Chart a route across arched canal bridges & sunflower loops to Baron Combine’s Glasshouse.',
     mapPools: {
       skirmish: ['greenhouse_entry', 'molten_furnace', 'canyon_terrace', 'barnyard_siege'],
       escape: ['irrigation_run', 'harvest_railroad'],
@@ -96,24 +110,33 @@ export const ACTS: ActDef[] = [
     },
     boss: {
       mapId: 'combine_throne',
-      name: "Baron Combine's Conservatory",
+      name: "Baron Combine's Glasshouse",
       subtitle: 'Summer Boss — Topple the vintage red harvester tractor!',
     },
     shop: {
-      name: "Farmer's Compost Market",
-      subtitle: 'Safe Market — Spend run Seeds on Alt Weapons, Grafts, Items & Healing!',
+      name: "Greenhouse Compost Market",
+      subtitle: 'Market Space — Spend Run Seeds on Alt Weapons, Grafts, Items & Healing!',
     },
     vault: {
-      name: 'Seed Vault & Compost',
-      subtitle: 'Safe Stop — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
+      name: 'Conservatory Seed Vault',
+      subtitle: 'Rest Camp — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
+    },
+    shrine: {
+      name: 'Sunbeam Fountain Shrine',
+      subtitle: 'Shrine Boon — Choose full squad healing, next-battle Blessing, or +14 Seeds!',
+    },
+    armory: {
+      name: 'Sunlit Armory Wagon',
+      subtitle: 'Armory Space — Unlock Alternate Weapons & stock tactical supplies!',
     },
   },
   {
     id: 'autumn',
     theme: 'autumn',
-    name: 'Autumn Orchard',
-    trailTitle: 'Autumn Orchard Trail',
-    trailHint: 'Pick a path. Lord Bramblecoat waits in the moonlit orchard.',
+    boardArt: '/ui/board_autumn.jpg',
+    name: 'Autumn Orchard Board',
+    trailTitle: 'Autumn Harvest Tabletop',
+    trailHint: 'Traverse Pumpkin Hollow, mossy walls & timber bridges to reach Lord Bramblecoat’s Keep.',
     mapPools: {
       skirmish: ['canyon_terrace', 'creek_crossing', 'barnyard_siege', 'greenhouse_entry', 'vegetable_patch'],
       escape: ['patch_breakout', 'harvest_railroad', 'irrigation_run'],
@@ -128,24 +151,32 @@ export const ACTS: ActDef[] = [
     },
     boss: {
       mapId: 'orchard_clearing',
-      name: "Lord Bramblecoat's Orchard",
+      name: "Lord Bramblecoat's Keep",
       subtitle: 'Autumn Boss — Cut down the crimson harvest warden!',
     },
     shop: {
-      name: "Farmer's Compost Market",
-      subtitle: 'Safe Market — Spend run Seeds on Grafts, Items, Healing & Recruits!',
+      name: "Cider Mill Compost Market",
+      subtitle: 'Market Space — Spend Run Seeds on Alt Weapons, Grafts, Items & Healing!',
     },
     vault: {
-      name: 'Seed Vault & Compost',
-      subtitle: 'Safe Stop — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
+      name: 'Orchard Seed Vault',
+      subtitle: 'Rest Camp — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
+    },
+    shrine: {
+      name: 'Harvest Lantern Shrine',
+      subtitle: 'Shrine Boon — Choose full squad healing, next-battle Blessing, or +14 Seeds!',
+    },
+    armory: {
+      name: 'Cider-Barn Armory Wagon',
+      subtitle: 'Armory Space — Unlock Alternate Weapons & stock tactical supplies!',
     },
   },
 ];
 
-/** Generated floors per act, not counting the boss. */
-export const FLOORS_PER_ACT = 7;
+export const FLOORS_PER_ACT = 6;
 export const MAX_LANES = 4;
-const PATH_COUNT = 5;
+/** Board turns available before the Harvest Bell rings and empowers the Act Boss. */
+export const HARVEST_BELL_LIMIT = 7;
 
 export function actIndexForSeason(seasonId: SeasonId | undefined): number {
   const idx = ACTS.findIndex((a) => a.id === seasonId);
@@ -157,106 +188,130 @@ export function actRng(runSeed: number, actIndex: number): Rng {
   return createRng((runSeed ^ Math.imul(actIndex + 1, 0x9e3779b1)) >>> 0);
 }
 
-function nodeId(actIndex: number, floor: number, lane: number): string {
-  return `a${actIndex}f${floor}l${lane}`;
+export function startNodeId(actIndex: number): string {
+  return `a${actIndex}start`;
 }
 
 export function bossNodeId(actIndex: number): string {
   return `a${actIndex}boss`;
 }
 
-interface Edge {
-  floor: number;
-  from: number;
-  to: number;
+interface BoardSpaceBlueprint {
+  key: string;
+  stage: number;
+  lane: number;
+  x: number;
+  y: number;
+  region: string;
+  fixedType?: NodeType;
+  nextKeys: string[];
+  shortcutKeys?: string[];
 }
 
-function crosses(edges: Edge[], floor: number, from: number, to: number): boolean {
-  return edges.some(
-    (e) => e.floor === floor && ((e.from < from && e.to > to) || (e.from > from && e.to < to))
-  );
-}
-
-/** Walk PATH_COUNT non-crossing paths up the grid; returns the set of cells and edges. */
-function walkPaths(rng: Rng): { cells: Set<string>; edges: Edge[] } {
-  const cells = new Set<string>();
-  const edges: Edge[] = [];
-  const starts: number[] = [];
-
-  for (let p = 0; p < PATH_COUNT; p++) {
-    let lane = Math.floor(rng() * MAX_LANES);
-    // Guarantee at least two different starting points.
-    if (p === 1 && lane === starts[0]) lane = (lane + 1 + Math.floor(rng() * (MAX_LANES - 1))) % MAX_LANES;
-    starts.push(lane);
-    cells.add(`0:${lane}`);
-
-    for (let floor = 0; floor < FLOORS_PER_ACT - 1; floor++) {
-      const options = [lane - 1, lane, lane + 1].filter(
-        (l) => l >= 0 && l < MAX_LANES && !crosses(edges, floor, lane, l)
-      );
-      // Staying in the same lane never crosses anything, so options is never empty.
-      const next = options[Math.floor(rng() * options.length)];
-      if (!edges.some((e) => e.floor === floor && e.from === lane && e.to === next)) {
-        edges.push({ floor, from: lane, to: next });
-      }
-      lane = next;
-      cells.add(`${floor + 1}:${lane}`);
-    }
-  }
-  return { cells, edges };
-}
+/**
+ * Hand-crafted seasonal boardgame layouts pinned to the actual painted roads,
+ * bridges, loops, and landmarks of board_spring.jpg, board_summer.jpg, and board_autumn.jpg!
+ */
+const SEASON_BOARD_LAYOUTS: Record<SeasonId, BoardSpaceBlueprint[]> = {
+  spring: [
+    { key: 'start', stage: 0, lane: 1, x: 0.16, y: 0.81, region: 'South Garden Gate', fixedType: 'start', nextKeys: ['s1', 's2'] },
+    { key: 's1', stage: 1, lane: 0, x: 0.24, y: 0.70, region: 'West Brook Trail', fixedType: 'skirmish', nextKeys: ['s3'], shortcutKeys: ['s2'] },
+    { key: 's2', stage: 1, lane: 2, x: 0.43, y: 0.69, region: 'Duck Pond Bend', fixedType: 'skirmish', nextKeys: ['s4', 's5'] },
+    { key: 's3', stage: 2, lane: 0, x: 0.24, y: 0.56, region: 'West Footbridge', nextKeys: ['s6', 's7'] },
+    { key: 's4', stage: 2, lane: 1, x: 0.48, y: 0.56, region: 'Arched Brook Bridge', nextKeys: ['s7', 's8'] },
+    { key: 's5', stage: 2, lane: 3, x: 0.72, y: 0.74, region: 'South-East Creek', nextKeys: ['s9'] },
+    { key: 's6', stage: 3, lane: 0, x: 0.22, y: 0.26, region: 'North-West Meadow', nextKeys: ['s10'] },
+    { key: 's7', stage: 3, lane: 1, x: 0.34, y: 0.40, region: 'Clover Hill', nextKeys: ['s10', 's11'] },
+    { key: 's8', stage: 3, lane: 2, x: 0.65, y: 0.47, region: 'Poppy Bend', nextKeys: ['s11', 's12'] },
+    { key: 's9', stage: 3, lane: 3, x: 0.77, y: 0.62, region: 'East Timber Bridge', nextKeys: ['s8', 's12'] },
+    { key: 's10', stage: 4, lane: 0, x: 0.41, y: 0.30, region: 'Cobble Lane', nextKeys: ['s13'] },
+    { key: 's11', stage: 4, lane: 1, x: 0.56, y: 0.41, region: 'Farmstead Square', nextKeys: ['s13', 's14'] },
+    { key: 's12', stage: 4, lane: 3, x: 0.80, y: 0.34, region: 'Blooming Orchard', nextKeys: ['s14'] },
+    { key: 's13', stage: 5, lane: 1, x: 0.50, y: 0.25, region: 'Barn Courtyard', fixedType: 'vault', nextKeys: ['boss'] },
+    { key: 's14', stage: 5, lane: 3, x: 0.73, y: 0.21, region: 'Windmill Overlook', fixedType: 'vault', nextKeys: ['boss'] },
+    { key: 'boss', stage: 6, lane: 2, x: 0.62, y: 0.16, region: 'Scarecrow Hilltop', fixedType: 'boss', nextKeys: [] },
+  ],
+  summer: [
+    { key: 'start', stage: 0, lane: 1, x: 0.25, y: 0.84, region: 'South Sunflower Gate', fixedType: 'start', nextKeys: ['s1', 's2'] },
+    { key: 's1', stage: 1, lane: 0, x: 0.17, y: 0.71, region: 'West Sunflower Loop', fixedType: 'skirmish', nextKeys: ['s3'] },
+    { key: 's2', stage: 1, lane: 2, x: 0.35, y: 0.80, region: 'South Stone Bridge', fixedType: 'skirmish', nextKeys: ['s4', 's5'] },
+    { key: 's3', stage: 2, lane: 0, x: 0.17, y: 0.53, region: 'Petal Promenade', nextKeys: ['s6'] },
+    { key: 's4', stage: 2, lane: 1, x: 0.36, y: 0.63, region: 'Lavender Terrace', nextKeys: ['s6', 's7'] },
+    { key: 's5', stage: 2, lane: 3, x: 0.64, y: 0.69, region: 'South-East Arch', nextKeys: ['s7', 's8'] },
+    { key: 's6', stage: 3, lane: 0, x: 0.24, y: 0.43, region: 'West Garden Stairs', nextKeys: ['s10'] },
+    { key: 's7', stage: 3, lane: 1, x: 0.49, y: 0.51, region: 'Terracotta Steps', nextKeys: ['s10', 's9'] },
+    { key: 's8', stage: 3, lane: 3, x: 0.81, y: 0.65, region: 'East Herb Loop', nextKeys: ['s11'] },
+    { key: 's9', stage: 4, lane: 2, x: 0.57, y: 0.41, region: 'Sunflower Plaza', nextKeys: ['s10', 's12'] },
+    { key: 's10', stage: 4, lane: 0, x: 0.40, y: 0.41, region: 'West Canal Arch', nextKeys: ['s13'] },
+    { key: 's11', stage: 4, lane: 3, x: 0.82, y: 0.43, region: 'East Stepping Stones', nextKeys: ['s12'] },
+    { key: 's12', stage: 4, lane: 2, x: 0.68, y: 0.36, region: 'North-East Arch', nextKeys: ['s14'] },
+    { key: 's13', stage: 5, lane: 1, x: 0.38, y: 0.28, region: 'Conservatory Patio', fixedType: 'vault', nextKeys: ['boss'] },
+    { key: 's14', stage: 5, lane: 2, x: 0.54, y: 0.27, region: 'Reflection Pond', fixedType: 'vault', nextKeys: ['boss'] },
+    { key: 'boss', stage: 6, lane: 0, x: 0.26, y: 0.19, region: 'Grand Glasshouse', fixedType: 'boss', nextKeys: [] },
+  ],
+  autumn: [
+    { key: 'start', stage: 0, lane: 1, x: 0.38, y: 0.86, region: 'South Cobble Lane', fixedType: 'start', nextKeys: ['s1', 's2'] },
+    { key: 's1', stage: 1, lane: 0, x: 0.41, y: 0.72, region: 'Cider House Road', fixedType: 'skirmish', nextKeys: ['s3', 's4'] },
+    { key: 's2', stage: 1, lane: 3, x: 0.68, y: 0.76, region: 'Mossy Stone Lane', fixedType: 'skirmish', nextKeys: ['s5'] },
+    { key: 's3', stage: 2, lane: 0, x: 0.25, y: 0.60, region: 'Pumpkin Hollow', nextKeys: ['s6'] },
+    { key: 's4', stage: 2, lane: 1, x: 0.45, y: 0.56, region: 'Golden Hay Ring', nextKeys: ['s6', 's7'] },
+    { key: 's5', stage: 2, lane: 3, x: 0.74, y: 0.62, region: 'Pasture Crossroad', nextKeys: ['s7', 's8'] },
+    { key: 's6', stage: 3, lane: 0, x: 0.26, y: 0.36, region: 'West Timber Bridge', nextKeys: ['s10'] },
+    { key: 's7', stage: 3, lane: 2, x: 0.55, y: 0.47, region: 'Hayfield Fork', nextKeys: ['s9', 's8'] },
+    { key: 's8', stage: 3, lane: 3, x: 0.78, y: 0.46, region: 'East Stone Meadow', nextKeys: ['s11'] },
+    { key: 's9', stage: 4, lane: 2, x: 0.62, y: 0.27, region: 'Center Timber Bridge', nextKeys: ['s13'] },
+    { key: 's10', stage: 4, lane: 0, x: 0.23, y: 0.24, region: 'Maple Woods', nextKeys: ['s12'] },
+    { key: 's11', stage: 4, lane: 3, x: 0.78, y: 0.35, region: 'East Timber Bridge', nextKeys: ['s14'] },
+    { key: 's12', stage: 5, lane: 0, x: 0.38, y: 0.20, region: 'Maple Camp', fixedType: 'vault', nextKeys: ['boss'] },
+    { key: 's13', stage: 5, lane: 2, x: 0.58, y: 0.20, region: 'Briar Threshold', fixedType: 'vault', nextKeys: ['boss'] },
+    { key: 's14', stage: 4, lane: 3, x: 0.76, y: 0.23, region: 'Crimson Ridge', nextKeys: ['s13', 'boss'] },
+    { key: 'boss', stage: 6, lane: 1, x: 0.51, y: 0.13, region: 'Thorny Keep', fixedType: 'boss', nextKeys: [] },
+  ],
+};
 
 function pick<T>(rng: Rng, items: readonly T[]): T {
   return items[Math.floor(rng() * items.length)];
 }
 
-function weightedPick<T extends string>(rng: Rng, weights: Partial<Record<T, number>>): T {
-  const entries = Object.entries(weights).filter(([, w]) => (w as number) > 0) as [T, number][];
-  const total = entries.reduce((s, [, w]) => s + w, 0);
-  let roll = rng() * total;
-  for (const [key, w] of entries) {
-    roll -= w;
-    if (roll < 0) return key;
+function shuffleWithRng<T>(items: T[], rng: Rng): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
   }
-  return entries[entries.length - 1][0];
+  return out;
 }
 
-/** Node types that may be swapped for a guaranteed market / elite. */
-const CONVERTIBLE: ReadonlySet<NodeType> = new Set<NodeType>(['skirmish', 'event', 'escape', 'barn_rescue']);
-
-/** Node types that shouldn't appear twice in a row along a path. */
-const NO_REPEAT: ReadonlySet<NodeType> = new Set<NodeType>(['elite', 'shop', 'vault', 'escape', 'barn_rescue', 'event']);
-
-function typeWeights(floor: number): Partial<Record<NodeType, number>> {
-  if (floor === 0) return { skirmish: 1 };
-  if (floor === 1) return { skirmish: 45, escape: 20, barn_rescue: 15, event: 20 };
-  return {
-    skirmish: 30,
-    event: 14,
-    escape: 14,
-    barn_rescue: 12,
-    elite: floor >= 2 ? 16 : 0,
-    shop: 12,
-    vault: floor === FLOORS_PER_ACT - 2 ? 0 : 10, // the floor right before the rest stop
-  };
+function spaceNodeId(actIndex: number, key: string): string {
+  if (key === 'start') return startNodeId(actIndex);
+  if (key === 'boss') return bossNodeId(actIndex);
+  return `a${actIndex}_${key}`;
 }
 
-function describeNode(act: ActDef, type: NodeType, rng: Rng): Pick<SeasonNode, 'name' | 'subtitle' | 'mapId'> {
+function describeNode(act: ActDef, type: NodeType, rng: Rng, region: string): Pick<SeasonNode, 'name' | 'subtitle' | 'mapId'> {
+  if (type === 'start') {
+    return {
+      name: region,
+      subtitle: 'Starting Gate — Play a Travel Card to march onto the board!',
+    };
+  }
   if (type === 'shop') return { name: act.shop.name, subtitle: act.shop.subtitle };
   if (type === 'vault') return { name: act.vault.name, subtitle: act.vault.subtitle };
-  if (type === 'event') return { name: 'Something Along the Trail', subtitle: 'Mystery — A strange find, a choice to make' };
+  if (type === 'shrine') return { name: act.shrine.name, subtitle: act.shrine.subtitle };
+  if (type === 'armory') return { name: act.armory.name, subtitle: act.armory.subtitle };
+  if (type === 'event') return { name: 'Clover Crossroads', subtitle: 'Mystery Event — A strange find, a storybook choice!' };
   if (type === 'boss') return { name: act.boss.name, subtitle: act.boss.subtitle, mapId: act.boss.mapId };
   const battleType = type as BattleNodeType;
   return {
-    name: '', // filled in by the caller from the map template name
+    name: '',
     subtitle: act.subtitles[battleType],
     mapId: pick(rng, act.mapPools[battleType]),
   };
 }
 
 /**
- * Generate the node graph for one act.
- * `mapName` resolves a map id to its display name (kept injectable so this stays data-agnostic).
+ * Generates the 16-space seasonal tabletop boardgame graph for one Act.
+ * Guarantees a Market, Watering Shrine, Armory Wagon, Elite, Rest Vaults, and Act Boss!
  */
 export function generateActNodes(
   actIndex: number,
@@ -264,93 +319,177 @@ export function generateActNodes(
   mapName: (mapId: string) => string = (id) => id
 ): SeasonNode[] {
   const act = ACTS[actIndex] ?? ACTS[0];
-  const { cells, edges } = walkPaths(rng);
-  const lastFloor = FLOORS_PER_ACT - 1;
+  const layout = SEASON_BOARD_LAYOUTS[act.id] ?? SEASON_BOARD_LAYOUTS.spring;
 
-  // Parents per cell, so we can avoid repeating special node types along a path.
-  const parents = new Map<string, number[]>();
-  for (const e of edges) {
-    const key = `${e.floor + 1}:${e.to}`;
-    parents.set(key, [...(parents.get(key) ?? []), e.from]);
-  }
-
-  const types = new Map<string, NodeType>();
-  for (let floor = 0; floor < FLOORS_PER_ACT; floor++) {
-    for (let lane = 0; lane < MAX_LANES; lane++) {
-      const key = `${floor}:${lane}`;
-      if (!cells.has(key)) continue;
-      if (floor === lastFloor) {
-        types.set(key, 'vault'); // rest stop before every boss
-        continue;
-      }
-      const parentTypes = (parents.get(key) ?? []).map((l) => types.get(`${floor - 1}:${l}`));
-      const weights = typeWeights(floor);
-      for (const t of parentTypes) {
-        if (t && NO_REPEAT.has(t)) weights[t] = 0;
-      }
-      types.set(key, weightedPick(rng, weights));
-    }
-  }
-
-  // Every act should offer at least one market and one elite somewhere in the middle floors.
-  for (const required of ['shop', 'elite'] as const) {
-    if ([...types.values()].includes(required)) continue;
-    const candidates = [...types.entries()].filter(([key, t]) => {
-      const [floor, lane] = key.split(':').map(Number);
-      if (!CONVERTIBLE.has(t) || floor < 2 || floor >= lastFloor - 1) return false;
-      const neighbours = [
-        ...(parents.get(key) ?? []).map((l) => types.get(`${floor - 1}:${l}`)),
-        ...edges.filter((e) => e.floor === floor && e.from === lane).map((e) => types.get(`${floor + 1}:${e.to}`)),
-      ];
-      return !neighbours.includes(required);
-    });
-    // Prefer turning a plain skirmish into the missing stop; fall back to other filler nodes.
-    const skirmishes = candidates.filter(([, t]) => t === 'skirmish');
-    const pool = skirmishes.length > 0 ? skirmishes : candidates;
-    if (pool.length > 0) types.set(pick(rng, pool)[0], required);
-  }
-
-  const nodes: SeasonNode[] = [];
-  for (let floor = 0; floor < FLOORS_PER_ACT; floor++) {
-    for (let lane = 0; lane < MAX_LANES; lane++) {
-      const key = `${floor}:${lane}`;
-      const type = types.get(key);
-      if (!type) continue;
-      const info = describeNode(act, type, rng);
-      const nextIds =
-        floor === lastFloor
-          ? [bossNodeId(actIndex)]
-          : edges
-              .filter((e) => e.floor === floor && e.from === lane)
-              .map((e) => e.to)
-              .sort((a, b) => a - b)
-              .map((to) => nodeId(actIndex, floor + 1, to));
-      nodes.push({
-        id: nodeId(actIndex, floor, lane),
-        stage: floor,
-        lane,
-        type,
-        name: info.mapId && !info.name ? mapName(info.mapId) : info.name,
-        subtitle: info.subtitle,
-        mapId: info.mapId,
-        nextIds,
-        completed: false,
-      });
-    }
-  }
-
-  const boss = describeNode(act, 'boss', rng);
-  nodes.push({
-    id: bossNodeId(actIndex),
-    stage: FLOORS_PER_ACT,
-    lane: 0,
-    type: 'boss',
-    name: boss.name,
-    subtitle: boss.subtitle,
-    mapId: boss.mapId,
-    nextIds: [],
-    completed: false,
+  // Assign dynamic encounter types to the 10 middle spaces (stages 2..4) deterministically from seed!
+  const dynamicSpaces = layout.filter((s) => !s.fixedType);
+  const guaranteedBag: NodeType[] = [
+    'shop',
+    'shrine',
+    'armory',
+    'elite',
+    'elite',
+    'escape',
+    'barn_rescue',
+    'event',
+    'event',
+    'skirmish',
+  ];
+  const shuffledBag = shuffleWithRng(guaranteedBag, rng);
+  // Ensure an Elite doesn't sit on stage 2 if possible by swapping with stage 3/4
+  const assigned = new Map<string, NodeType>();
+  dynamicSpaces.forEach((sp, idx) => {
+    assigned.set(sp.key, shuffledBag[idx % shuffledBag.length]);
   });
 
-  return nodes;
+  // Push any stage-2 elite forward to stage 3/4 so early board spaces feel fair!
+  for (const sp of dynamicSpaces) {
+    if (sp.stage === 2 && assigned.get(sp.key) === 'elite') {
+      const swapTarget = dynamicSpaces.find(
+        (other) => other.stage >= 3 && assigned.get(other.key) !== 'elite'
+      );
+      if (swapTarget) {
+        const prev = assigned.get(swapTarget.key)!;
+        assigned.set(swapTarget.key, 'elite');
+        assigned.set(sp.key, prev);
+      }
+    }
+  }
+
+  return layout.map((sp) => {
+    const type: NodeType = sp.fixedType ?? assigned.get(sp.key) ?? 'skirmish';
+    const info = describeNode(act, type, rng, sp.region);
+    return {
+      id: spaceNodeId(actIndex, sp.key),
+      stage: sp.stage,
+      lane: sp.lane,
+      boardX: sp.x,
+      boardY: sp.y,
+      region: sp.region,
+      type,
+      name: info.mapId && !info.name ? mapName(info.mapId) : info.name,
+      subtitle: info.subtitle,
+      mapId: info.mapId,
+      nextIds: sp.nextKeys.map((k) => spaceNodeId(actIndex, k)),
+      shortcutIds: sp.shortcutKeys?.map((k) => spaceNodeId(actIndex, k)),
+      completed: type === 'start',
+    };
+  });
+}
+
+// ===== Watercolor Tabletop Travel Hand Cards =====
+
+const TRAVEL_CARD_TEMPLATES: Omit<BoardTravelCard, 'id'>[] = [
+  {
+    name: 'Meadow Stroll',
+    steps: 1,
+    bonus: 'heal2',
+    icon: '🥾',
+    desc: 'Advance 1 space · Squad heals +2 HP',
+    tint: 'mint',
+  },
+  {
+    name: 'Garden Trot',
+    steps: 2,
+    bonus: 'seeds3',
+    icon: '🐾',
+    desc: 'Advance 2 spaces · Gather +3 Run Seeds',
+    tint: 'gold',
+  },
+  {
+    name: 'Harvest Sprint',
+    steps: 3,
+    bonus: 'boost',
+    icon: '💨',
+    desc: 'Advance 3 spaces · Start next fight Boosted!',
+    tint: 'crimson',
+  },
+  {
+    name: 'Burrow Shortcut',
+    steps: 2,
+    flexible: true,
+    bonus: 'flex',
+    icon: '🕳️',
+    desc: 'Hop 1 or 2 spaces along any branch!',
+    tint: 'plum',
+  },
+];
+
+let travelCardUid = 1;
+
+/**
+ * Draws a crisp 3-card Travel Hand for the boardgame overworld.
+ * Always includes a 1-step Stroll so players can ALWAYS stop at adjacent Markets, Shrines, or the Boss!
+ */
+export function drawTravelHand(rng: Rng = Math.random): BoardTravelCard[] {
+  const stroll = TRAVEL_CARD_TEMPLATES[0];
+  const trot = TRAVEL_CARD_TEMPLATES[1];
+  const sprint = TRAVEL_CARD_TEMPLATES[2];
+  const burrow = TRAVEL_CARD_TEMPLATES[3];
+
+  const card2 = rng() < 0.45 ? burrow : trot;
+  const card3 = rng() < 0.7 ? sprint : trot;
+
+  return [stroll, card2, card3].map((tpl) => ({
+    ...tpl,
+    id: `tcard_${travelCardUid++}_${Math.floor(rng() * 1e5)}`,
+  }));
+}
+
+/**
+ * Computes every reachable board space from `fromNodeId` using a given Travel Card,
+ * returning a Map of `destinationNodeId -> step-by-step path [fromId, ..., destId]`.
+ *
+ * Rules:
+ * - Follows directed road edges (`nextIds` + `shortcutIds`).
+ * - Stops early if a path reaches the Act Boss (you can never overshoot the Boss!).
+ * - Flexible cards (`Burrow Shortcut`) allow stopping at any step from `1..card.steps`.
+ * - If no forward path has length `card.steps` (e.g. near the Boss), includes the Boss cleanly.
+ */
+export function getReachableBoardTargets(
+  nodes: SeasonNode[],
+  fromNodeId: string | null,
+  card: BoardTravelCard
+): Map<string, string[]> {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const startNode =
+    (fromNodeId ? byId.get(fromNodeId) : undefined) ??
+    nodes.find((n) => n.type === 'start') ??
+    nodes[0];
+
+  const results = new Map<string, string[]>();
+  if (!startNode) return results;
+
+  const bossNode = nodes.find((n) => n.type === 'boss');
+  const maxSteps = Math.max(1, card.steps);
+
+  const dfs = (cur: SeasonNode, path: string[], stepsTaken: number) => {
+    if (stepsTaken > 0) {
+      const isBoss = cur.type === 'boss';
+      if (isBoss || stepsTaken === maxSteps || (card.flexible && stepsTaken <= maxSteps)) {
+        const existing = results.get(cur.id);
+        if (!existing || path.length < existing.length) {
+          results.set(cur.id, [...path]);
+        }
+        if (isBoss || stepsTaken === maxSteps) return;
+      }
+    }
+    if (stepsTaken >= maxSteps) return;
+
+    const outgoing = [...cur.nextIds, ...(cur.shortcutIds ?? [])];
+    for (const nextId of outgoing) {
+      if (path.includes(nextId)) continue;
+      const nextNode = byId.get(nextId);
+      if (!nextNode) continue;
+      dfs(nextNode, [...path, nextId], stepsTaken + 1);
+    }
+  };
+
+  dfs(startNode, [startNode.id], 0);
+
+  // Safety guarantee: if standing adjacent to Boss or dead-end, never leave player stranded!
+  if (results.size === 0 && bossNode && startNode.id !== bossNode.id) {
+    results.set(bossNode.id, [startNode.id, bossNode.id]);
+  }
+  return results;
 }

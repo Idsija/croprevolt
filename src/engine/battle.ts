@@ -27,8 +27,8 @@ import {
   getCooldownForUnit,
   getMaxDashesForUnit,
   getMaxOverwatchCharges,
+  getUnitPerkEffects,
   hasGraft,
-  hasPerk,
   hasRelic,
   hasStatus,
 } from './hooks';
@@ -61,6 +61,10 @@ export interface BattleSetup {
   enablePrepPhase?: boolean;
   /** Harvest Heat ascension level (0-5). */
   harvestHeat?: number;
+  /** One-battle buff granted by a Boardgame Travel Card or Watering Shrine! */
+  nextBattleBuff?: { boost?: boolean; shield?: boolean; moveBonus?: number } | null;
+  /** True when the player lingered past the Harvest Bell — empowers the Act Boss! */
+  bossEmpowered?: boolean;
 }
 
 function mirrorTemplate(map: MapTemplate): MapTemplate {
@@ -199,8 +203,12 @@ export function createBattleUnitFromHero(hero: RosterHero, pos: GridPos): Battle
   if (hero.livingHalfCover) {
     applyStatusToUnit(unit, 'shield', 1);
   }
-  if (hasPerk(unit, 'hardy_husk')) {
-    applyStatusToUnit(unit, 'shield', 2);
+  const fx = getUnitPerkEffects(unit);
+  if (fx.startShieldTurns > 0) {
+    applyStatusToUnit(unit, 'shield', fx.startShieldTurns);
+  }
+  if (fx.startBoostTurns > 0) {
+    applyStatusToUnit(unit, 'boosted', fx.startBoostTurns);
   }
   return unit;
 }
@@ -377,6 +385,15 @@ export function createBattleFromMap(
     if (hasGraft(unit, 'pumpkin_rind')) {
       applyStatusToUnit(unit, 'shield', 1);
     }
+    if (setup?.nextBattleBuff?.boost) {
+      applyStatusToUnit(unit, 'boosted', 2);
+    }
+    if (setup?.nextBattleBuff?.shield) {
+      applyStatusToUnit(unit, 'shield', 2);
+    }
+    if (setup?.nextBattleBuff?.moveBonus) {
+      unit.moveRange += setup.nextBattleBuff.moveBonus;
+    }
     units.push(unit);
   });
 
@@ -392,6 +409,11 @@ export function createBattleFromMap(
     enemy.id = `enemy_${spawn.blueprintId}_${i}`;
     enemy.facing = spawn.x < map.width / 2 ? 'right' : 'left';
     if (setup?.difficulty) applyDifficultyToEnemy(enemy, setup.difficulty);
+    if (enemy.isBoss && setup?.bossEmpowered) {
+      enemy.maxHp = Math.ceil(enemy.maxHp * 1.15);
+      enemy.hp = enemy.maxHp;
+      applyStatusToUnit(enemy, 'shield', 2);
+    }
     units.push(enemy);
   });
 
@@ -982,7 +1004,8 @@ export function applyKnockback(
   target: BattleUnit,
   dir: GridPos,
   rosterLookup?: RosterHero[],
-  visitedHazards: Set<string> = new Set()
+  visitedHazards: Set<string> = new Set(),
+  bonusBumpDmg = 0
 ): void {
   if (!target.alive) return;
   if (dir.x === 0 && dir.y === 0) return;
@@ -1051,7 +1074,7 @@ export function applyKnockback(
   }
 
   // BUMP CRUNCH!
-  const bumpDmg = 2;
+  const bumpDmg = 2 + bonusBumpDmg;
   target.hp -= bumpDmg;
 
   if (blockerUnit && blockerUnit.alive) {
@@ -1289,8 +1312,8 @@ function triggerOverwatchInterrupts(state: BattleState, mover: BattleUnit): void
     const fc = forecastAttack(state, watcher, mover.pos, true);
     if (!fc.canAttack) continue;
 
-    const watchBonus = hasPerk(watcher, 'hero_sight') ? 2 : 0;
-    const dmg = fc.finalDamage + watchBonus;
+    const watcherFx = getUnitPerkEffects(watcher);
+    const dmg = fc.finalDamage + watcherFx.bonusOverwatchDmg;
     watcher.actions.overwatchCharges = charges - 1;
     if (watcher.actions.overwatchCharges <= 0) {
       watcher.statuses = watcher.statuses.filter((s) => s.kind !== 'overwatch');
@@ -1300,6 +1323,9 @@ function triggerOverwatchInterrupts(state: BattleState, mover: BattleUnit): void
     }
 
     mover.hp -= dmg;
+    if (watcherFx.overwatchRoots && mover.hp > 0) {
+      applyStatusToUnit(mover, 'rooted', 1);
+    }
     state.pendingEvents.push({
       type: 'overwatch_shot',
       attackerId: watcher.id,
@@ -1309,7 +1335,10 @@ function triggerOverwatchInterrupts(state: BattleState, mover: BattleUnit): void
       to: { ...mover.pos },
       damage: dmg,
     });
-    pushLog(state, `HERO SIGHT! ${watcher.name} intercepted ${mover.name} for ${dmg} dmg!`);
+    pushLog(
+      state,
+      `HERO SIGHT! ${watcher.name} intercepted ${mover.name} for ${dmg} dmg${watcherFx.overwatchRoots ? ' (+Rooted!)' : ''}!`
+    );
     handleUnitKO(state, mover);
   }
 }
@@ -1450,9 +1479,23 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
     `${unit.name} DASHED ${target.name} for ${dmg} dmg${opt.appliesStatus ? ` (+${opt.appliesStatus})` : ''}!`
   );
 
+  const dashFx = getUnitPerkEffects(unit);
+  const wasTargetAlive = target.alive;
   handleUnitKO(state, target);
+  if (wasTargetAlive && !target.alive && dashFx.killRefreshesDash) {
+    unit.actions.dashesUsed = Math.max(0, (unit.actions.dashesUsed ?? 1) - 1);
+    unit.actions.hasDashed = false;
+    pushLog(state, `${unit.name} chained a KO — Dash refreshed!`);
+  }
   if (target.alive && opt.knockback && opt.knockback > 0) {
-    applyKnockback(state, target, computePushDirection(opt.stopPos, target.pos));
+    applyKnockback(
+      state,
+      target,
+      computePushDirection(opt.stopPos, target.pos),
+      undefined,
+      new Set(),
+      dashFx.bonusBumpDmg
+    );
   }
   triggerOverwatchInterrupts(state, unit);
   checkBattleEnd(state);
@@ -1489,18 +1532,33 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
 
   // Barnyard Co-op: Team-Jumping off Cluck Norris launches +2 tiles & grants +2 Attack!
   const springboardAlly = getUnitById(state, opt.allyId);
+  const springboardFx = getUnitPerkEffects(springboardAlly);
+  const unitFx = getUnitPerkEffects(unit);
+
   if (springboardAlly?.launchpadCoop) {
     unit.tempAttackBonus = Math.min(3, unit.tempAttackBonus + 2);
     coopBoost = `CLUCK LAUNCH +${unit.tempAttackBonus} ATK!`;
     pushLog(state, `CO-OP LAUNCH! ${springboardAlly.name} boosted ${unit.name} (+${unit.tempAttackBonus} Attack this turn)!`);
   }
 
-  // Squad Rally Perk (vanguard_aura): Jumping off this ally boosts BOTH heroes!
-  if (springboardAlly && hasPerk(springboardAlly, 'vanguard_aura')) {
+  // Ally Jump Heal & Ally Jump Boost character perks!
+  if (springboardAlly && springboardFx.allyJumpHeal > 0 && unit.hp < unit.maxHp) {
+    const healed = Math.min(springboardFx.allyJumpHeal, unit.maxHp - unit.hp);
+    unit.hp += healed;
+    state.pendingEvents.push({
+      type: 'heal',
+      unitId: unit.id,
+      pos: { ...dest },
+      amount: healed,
+      source: springboardAlly.name,
+    });
+    coopBoost = coopBoost ?? `+${healed} HP VAULT!`;
+  }
+  if (springboardAlly && springboardFx.allyJumpBoost) {
     applyStatusToUnit(unit, 'boosted', 1);
     applyStatusToUnit(springboardAlly, 'boosted', 1);
-    coopBoost = 'SQUAD RALLY +2 ATK!';
-    pushLog(state, `SQUAD RALLY! ${springboardAlly.name} & ${unit.name} fired up (+2 ATK)!`);
+    coopBoost = 'SPRINGBOARD +2 ATK!';
+    pushLog(state, `SPRINGBOARD BOOST! ${springboardAlly.name} & ${unit.name} fired up (+2 ATK)!`);
   }
 
   state.pendingEvents.push({
@@ -1513,14 +1571,17 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
   });
   pushLog(state, `${unit.name} Team-Jumped across the garden!`);
 
-  // Jump Stomp Perk (stomp_landing): AoE 2 dmg to adjacent enemies on landing +2 ATK!
-  if (hasPerk(unit, 'stomp_landing')) {
-    unit.tempAttackBonus = Math.min(4, unit.tempAttackBonus + 2);
+  // Jump Stomp character perks (Spudnik Tater Quake, Chili Ember Leap, Carroteer Pop-Up, Rooster Divebomb, Sheep Avalanche!)
+  if (unitFx.jumpStompDmg > 0) {
+    if (unitFx.jumpStompBoost) {
+      unit.tempAttackBonus = Math.min(4, unit.tempAttackBonus + 2);
+    }
+    const stompDmg = unitFx.jumpStompDmg;
     const hitIds: string[] = [];
     for (const adj of getNeighbors(state, dest)) {
       const foe = unitAt(state, adj);
       if (foe && foe.team !== unit.team && foe.alive) {
-        foe.hp -= 2;
+        foe.hp -= stompDmg;
         hitIds.push(foe.id);
         handleUnitKO(state, foe);
       }
@@ -1529,11 +1590,11 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
       type: 'stomp',
       unitId: unit.id,
       pos: { ...dest },
-      damage: 2,
+      damage: stompDmg,
       hitIds,
     });
     if (hitIds.length > 0) {
-      pushLog(state, `JUMP STOMP! ${unit.name} slammed ${hitIds.length} nearby foe(s) for 2 dmg!`);
+      pushLog(state, `JUMP STOMP! ${unit.name} slammed ${hitIds.length} nearby foe(s) for ${stompDmg} dmg!`);
     }
   }
 
@@ -1565,6 +1626,8 @@ export function executeAttack(
   const targetTile = tileAt(state, targetPos);
   const defender = fc.targetUnitId ? getUnitById(state, fc.targetUnitId) : undefined;
 
+  const attackerFx = getUnitPerkEffects(attacker);
+
   // Case A: Attacking destructible cover / Barn Cage / Pumpkin / Collapsible Bridge directly (or lobbing at empty tile)
   if (!defender) {
     let coverDestroyed = false;
@@ -1581,6 +1644,24 @@ export function executeAttack(
         new Set(),
         attackDir
       );
+    }
+
+    if (coverDestroyed && attackerFx.coverBreakSplash > 0) {
+      for (const adj of getNeighbors(state, targetPos)) {
+        const foe = unitAt(state, adj);
+        if (foe && foe.team !== attacker.team && foe.alive) {
+          foe.hp -= attackerFx.coverBreakSplash;
+          state.pendingEvents.push({
+            type: 'status_tick',
+            unitId: foe.id,
+            pos: { ...foe.pos },
+            status: 'burn',
+            damage: attackerFx.coverBreakSplash,
+          });
+          handleUnitKO(state, foe);
+        }
+      }
+      pushLog(state, `SPLINTER BLAST! Shattered debris hit adjacent foes for ${attackerFx.coverBreakSplash} dmg!`);
     }
 
     state.pendingEvents.push({
@@ -1644,10 +1725,15 @@ export function executeAttack(
   }
 
   // HIT!
+  const wasDefenderAcid = hasStatus(defender, 'acid');
   defender.hp -= fc.finalDamage;
   let appliedStatusKind = fc.appliesStatus;
   if (attacker.weapon.appliesStatus) {
     applyStatusToUnit(defender, attacker.weapon.appliesStatus.kind, attacker.weapon.appliesStatus.turns);
+  }
+  if (attackerFx.attackStatus) {
+    applyStatusToUnit(defender, attackerFx.attackStatus, 2);
+    if (!appliedStatusKind) appliedStatusKind = attackerFx.attackStatus;
   }
   if (fc.hitChance === 100 && hasGraft(attacker, 'spicy_shot')) {
     applyStatusToUnit(defender, 'burn', 2);
@@ -1675,23 +1761,26 @@ export function executeAttack(
     `${attacker.name} hit ${defender.name} with ${attacker.weapon.name} for ${fc.finalDamage} dmg${matchupTag}!`
   );
 
-  // Bramble Thorns Graft recoil!
-  if (hasGraft(defender, 'thorn_recoil') && attacker.alive) {
-    attacker.hp -= 2;
+  // Bramble Thorns Graft + Character Thorns perks recoil!
+  const defenderFx = getUnitPerkEffects(defender);
+  const totalThorns = (hasGraft(defender, 'thorn_recoil') ? 2 : 0) + defenderFx.thornsDmg;
+  if (totalThorns > 0 && attacker.alive) {
+    attacker.hp -= totalThorns;
     state.pendingEvents.push({
       type: 'status_tick',
       unitId: attacker.id,
       pos: { ...attacker.pos },
       status: 'rooted',
-      damage: 2,
+      damage: totalThorns,
     });
-    pushLog(state, `${defender.name}'s Bramble Thorns pricked ${attacker.name} for 2 dmg!`);
+    pushLog(state, `${defender.name}'s Thorns pricked ${attacker.name} for ${totalThorns} dmg!`);
     handleUnitKO(state, attacker);
   }
 
+  const defenderWasAlive = defender.alive;
   handleUnitKO(state, defender);
 
-  // Mario + Rabbids Partner Follow-Up Assist (+1 bonus DMG from an adjacent ally!)
+  // Mario + Rabbids Partner Follow-Up Assist (+1/+2 bonus DMG from an ally!)
   if (defender.alive && fc.partnerAssistUnitId && fc.partnerAssistDamage) {
     const assistAlly = getUnitById(state, fc.partnerAssistUnitId);
     if (assistAlly && assistAlly.alive && !hasStatus(assistAlly, 'rooted')) {
@@ -1716,11 +1805,44 @@ export function executeAttack(
     }
   }
 
-  // Weapon Knockback (e.g. Spudnik, Billy Batter, Corn-elius, Baron Combine, or Cover Buster perk!)
-  const totalKnockback = (attacker.weapon.knockback ?? 0) + (hasPerk(attacker, 'cover_buster') ? 1 : 0);
+  // On-Kill Character Perk Synergies (Citric Meltdown 3x3 Acid, Dash Refresh & Skill CD Reset!)
+  if (defenderWasAlive && !defender.alive) {
+    if (attackerFx.acidExplosionOnKill && (wasDefenderAcid || appliedStatusKind === 'acid')) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const p = { x: defender.pos.x + dx, y: defender.pos.y + dy };
+          const foe = inBounds(state, p) ? unitAt(state, p) : undefined;
+          if (foe && foe.team !== attacker.team && foe.alive) {
+            foe.hp -= 3;
+            applyStatusToUnit(foe, 'acid', 2);
+            state.pendingEvents.push({
+              type: 'status_tick',
+              unitId: foe.id,
+              pos: { ...foe.pos },
+              status: 'acid',
+              damage: 3,
+            });
+            handleUnitKO(state, foe);
+          }
+        }
+      }
+      pushLog(state, `CITRIC MELTDOWN! ${defender.name} burst in a 3×3 Acid splash (-3 DMG)!`);
+    }
+    if (attackerFx.killRefreshesDash) {
+      attacker.actions.dashesUsed = Math.max(0, (attacker.actions.dashesUsed ?? 1) - 1);
+      attacker.actions.hasDashed = false;
+    }
+    if (attackerFx.killRefundsCd) {
+      attacker.abilityCooldown = 0;
+    }
+  }
+
+  // Weapon Knockback (+ extraKnockback & bonusBumpDmg perks!)
+  const totalKnockback = (attacker.weapon.knockback ?? 0) + attackerFx.extraKnockback;
   if (defender.alive && totalKnockback > 0) {
     const pushDir = fc.knockbackDir ?? computePushDirection(attacker.pos, defender.pos);
-    applyKnockback(state, defender, pushDir, rosterLookup);
+    applyKnockback(state, defender, pushDir, rosterLookup, new Set(), attackerFx.bonusBumpDmg);
   }
 
   // Lobbed AoE splash (e.g. Zestia's Citrus Mortar, Corn-elius, Pesticide Pete, Captain Scarecrow)
@@ -1864,37 +1986,58 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
   unit.actions.hasUsedSkill = true;
   unit.abilityCooldown = getCooldownForUnit(state, ab.cooldown, unit.team, unit);
 
+  const fx = getUnitPerkEffects(unit);
+  const effHeal = (ab.heal ?? 0) + (ab.heal ? fx.skillHealDelta : 0);
+  const effDmg = (ab.damage ?? 0) + (ab.damage ? fx.skillDmgDelta : 0);
+  const effRadius = (ab.aoeRadius ?? (ab.targetType === 'aoe_self' ? 2 : 0)) + fx.skillRadiusDelta;
+  const cleanseUnit = (target: BattleUnit) => {
+    if (!fx.cleanseOnSkillCast) return;
+    target.statuses = target.statuses.filter(
+      (s) => s.kind !== 'burn' && s.kind !== 'acid' && s.kind !== 'rooted' && s.kind !== 'feared'
+    );
+  };
+
   const affectedIds: string[] = [];
 
   if (ab.targetType === 'self') {
-    if (ab.heal) {
-      unit.hp = Math.min(unit.maxHp, unit.hp + ab.heal);
+    if (effHeal > 0) {
+      unit.hp = Math.min(unit.maxHp, unit.hp + effHeal);
     }
+    cleanseUnit(unit);
     if (ab.appliesStatus) {
       applyStatusToUnit(unit, ab.appliesStatus.kind, ab.appliesStatus.turns);
     }
     affectedIds.push(unit.id);
   } else if (ab.targetType === 'aoe_self') {
-    const r = ab.aoeRadius ?? 2;
     for (const ally of state.units) {
       if (!ally.alive || ally.team !== unit.team) continue;
-      if (manhattan(unit.pos, ally.pos) <= r) {
-        if (ab.heal) ally.hp = Math.min(ally.maxHp, ally.hp + ab.heal);
+      if (manhattan(unit.pos, ally.pos) <= effRadius) {
+        if (effHeal > 0) ally.hp = Math.min(ally.maxHp, ally.hp + effHeal);
+        cleanseUnit(ally);
         if (ab.appliesStatus) applyStatusToUnit(ally, ab.appliesStatus.kind, ab.appliesStatus.turns);
         affectedIds.push(ally.id);
+      }
+    }
+    if (fx.skillPushes) {
+      for (const foe of state.units) {
+        if (!foe.alive || foe.team === unit.team) continue;
+        if (manhattan(unit.pos, foe.pos) <= Math.max(1, effRadius)) {
+          applyKnockback(state, foe, computePushDirection(unit.pos, foe.pos), undefined, new Set(), fx.bonusBumpDmg);
+        }
       }
     }
   } else if (ab.targetType === 'ally') {
     const ally = unitAt(state, targetPos);
     if (!ally || ally.team !== unit.team) return false;
-    if (ab.heal) ally.hp = Math.min(ally.maxHp, ally.hp + ab.heal);
+    if (effHeal > 0) ally.hp = Math.min(ally.maxHp, ally.hp + effHeal);
+    cleanseUnit(ally);
     if (ab.appliesStatus) applyStatusToUnit(ally, ab.appliesStatus.kind, ab.appliesStatus.turns);
     affectedIds.push(ally.id);
   } else if (ab.targetType === 'enemy') {
     const enemy = unitAt(state, targetPos);
     if (!enemy || enemy.team === unit.team) return false;
-    if (ab.damage) {
-      enemy.hp -= ab.damage;
+    if (effDmg > 0) {
+      enemy.hp -= effDmg;
       handleUnitKO(state, enemy);
     }
     if (ab.appliesStatus && enemy.alive) {
@@ -1902,23 +2045,22 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
     }
     affectedIds.push(enemy.id);
   } else if (ab.targetType === 'tile') {
-    const r = ab.aoeRadius ?? 0;
-    for (let y = targetPos.y - r; y <= targetPos.y + r; y++) {
-      for (let x = targetPos.x - r; x <= targetPos.x + r; x++) {
+    for (let y = targetPos.y - effRadius; y <= targetPos.y + effRadius; y++) {
+      for (let x = targetPos.x - effRadius; x <= targetPos.x + effRadius; x++) {
         const p = { x, y };
-        if (!inBounds(state, p) || chebyshev(targetPos, p) > r) continue;
+        if (!inBounds(state, p) || chebyshev(targetPos, p) > effRadius) continue;
         const target = unitAt(state, p);
         if (target && target.team !== unit.team) {
-          if (ab.damage) {
-            target.hp -= ab.damage;
+          if (effDmg > 0) {
+            target.hp -= effDmg;
             handleUnitKO(state, target);
           }
           if (ab.appliesStatus && target.alive) {
             applyStatusToUnit(target, ab.appliesStatus.kind, ab.appliesStatus.turns);
           }
-          if (ab.knockback && ab.knockback > 0 && target.alive) {
+          if (((ab.knockback && ab.knockback > 0) || fx.skillPushes) && target.alive) {
             const origin = samePos(target.pos, targetPos) ? unit.pos : targetPos;
-            applyKnockback(state, target, computePushDirection(origin, target.pos));
+            applyKnockback(state, target, computePushDirection(origin, target.pos), undefined, new Set(), fx.bonusBumpDmg);
           }
           affectedIds.push(target.id);
         }
@@ -1926,17 +2068,21 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
     }
   }
 
-  // Quick Bloom perk: casting any skill restores +2 HP to caster!
-  if (hasPerk(unit, 'quick_bloom') && unit.alive && unit.hp < unit.maxHp) {
-    const bloomHeal = Math.min(2, unit.maxHp - unit.hp);
+  // Self-heal & Free-Move skill cast perks!
+  if (fx.healOnSkillCast > 0 && unit.alive && unit.hp < unit.maxHp) {
+    const bloomHeal = Math.min(fx.healOnSkillCast, unit.maxHp - unit.hp);
     unit.hp += bloomHeal;
     state.pendingEvents.push({
       type: 'heal',
       unitId: unit.id,
       pos: { ...unit.pos },
       amount: bloomHeal,
-      source: 'Quick Bloom',
+      source: ab.name,
     });
+  }
+  if (fx.skillGrantsFreeMove && unit.alive) {
+    unit.actions.hasMoved = false;
+    pushLog(state, `${unit.name} gained a FREE Move from ${ab.name}!`);
   }
 
   state.pendingEvents.push({
@@ -1946,8 +2092,8 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
     from: { ...unit.pos },
     to: { ...targetPos },
     affectedIds,
-    heal: ab.heal,
-    damage: ab.damage,
+    heal: effHeal || undefined,
+    damage: effDmg || undefined,
     status: ab.appliesStatus?.kind,
   });
   pushLog(state, `${unit.name} used ${ab.name}!`);
@@ -2284,9 +2430,10 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
     }
   }
 
-  // Squad Rally perk (vanguard_aura): Start-of-turn Boosted (+2 ATK) to orthogonally adjacent allies!
+  // Squad Rally / Springboard Boost character perks: Start-of-turn Boosted (+2 ATK) to adjacent allies!
   for (const unit of state.units) {
-    if (!unit.alive || unit.team !== nextPhase || !hasPerk(unit, 'vanguard_aura')) continue;
+    if (!unit.alive || unit.team !== nextPhase) continue;
+    if (!getUnitPerkEffects(unit).allyJumpBoost) continue;
     for (const adj of getNeighbors(state, unit.pos)) {
       const ally = unitAt(state, adj);
       if (ally && ally.alive && ally.team === unit.team) {

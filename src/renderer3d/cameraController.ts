@@ -240,14 +240,15 @@ export class TacticalCameraController {
         shotDir.set(0, 0, -1);
       }
 
-      // Camera positioned behind attacker + slight shoulder offset looking past hero toward target!
+      // Camera positioned behind attacker + slight shoulder offset looking past hero toward target,
+      // framed slightly higher so both hero & target stay clear above the bottom action ribbon!
       const backAngle = Math.atan2(-shotDir.x, -shotDir.z) + 0.24;
       this.desiredYaw = backAngle;
-      this.desiredPitch = 0.43; // Low dramatic ~24.5 deg angle over 3D crates!
-      this.desiredDistance = THREE.MathUtils.clamp(dist * 0.82 + 6.4, 7.6, 13.5);
-      // Focus point sits ~42% from attacker toward target so both hero & target stay framed!
-      this.desiredTarget.lerpVectors(this.aimOrigin, this.aimTarget, 0.44);
-      this.desiredTarget.y = 0.55;
+      this.desiredPitch = 0.48; // ~27.5 deg dramatic angle keeping HUD clearance clean
+      this.desiredDistance = THREE.MathUtils.clamp(dist * 0.84 + 6.9, 8.2, 14.0);
+      // Focus point sits ~42% from attacker toward target, shifted slightly down-plane so subjects ride higher
+      this.desiredTarget.lerpVectors(this.aimOrigin, this.aimTarget, 0.42);
+      this.desiredTarget.y = 0.32;
       return;
     }
 

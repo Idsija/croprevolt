@@ -455,18 +455,50 @@ export interface BattleState {
 
 export type SeasonId = 'spring' | 'summer' | 'autumn';
 
-export type NodeType = 'skirmish' | 'escape' | 'vault' | 'shop' | 'barn_rescue' | 'elite' | 'boss' | 'event';
+export type NodeType =
+  | 'start'
+  | 'skirmish'
+  | 'escape'
+  | 'vault'
+  | 'shop'
+  | 'barn_rescue'
+  | 'elite'
+  | 'boss'
+  | 'event'
+  | 'shrine'
+  | 'armory';
 
 export interface SeasonNode {
   id: string;
-  stage: number; // floor within the act (boss is the last floor)
-  lane: number; // column 0..MAX_LANES-1
+  stage: number; // progression depth (0 = start, max = boss)
+  lane: number; // column 0..MAX_LANES-1 (preserved for compact layout/fallback)
+  /** Normalized 0..1 coordinates on the seasonal hand-painted watercolor boardgame map. */
+  boardX?: number;
+  boardY?: number;
+  /** Optional scenic road/district tag shown on hover/stop card (e.g. 'Pumpkin Hollow'). */
+  region?: string;
   type: NodeType;
   name: string;
   subtitle: string;
   mapId?: string;
   nextIds: string[];
+  /** Optional scenic shortcut/cross-road connections for multi-step boardgame movement. */
+  shortcutIds?: string[];
   completed: boolean;
+}
+
+export type TravelCardBonus = 'heal2' | 'seeds3' | 'boost' | 'flex';
+
+export interface BoardTravelCard {
+  id: string;
+  name: string;
+  steps: number; // 1, 2, or 3 spaces along the board paths
+  /** If true, card can stop 1..steps spaces away (flexible shortcut stride). */
+  flexible?: boolean;
+  bonus: TravelCardBonus;
+  icon: string;
+  desc: string;
+  tint: 'mint' | 'gold' | 'crimson' | 'plum';
 }
 
 export interface MarketOffer {
@@ -526,6 +558,16 @@ export interface RunState {
   nodes: SeasonNode[];
   currentNodeId: string | null;
   completedNodeIds: string[];
+  /** Boardgame Travel Hand (3 watercolor movement cards drawn per board turn). */
+  travelHand?: BoardTravelCard[];
+  /** Number of board turns taken in the current Act. */
+  boardTurn?: number;
+  /** Harvest Bell countdown limit before Farmers reinforce the Act Boss. */
+  harvestBellLimit?: number;
+  /** One-battle buff granted by a Travel Card or Watering Shrine (consumed on next battle start). */
+  nextBattleBuff?: { boost?: boolean; shield?: boolean; moveBonus?: number } | null;
+  /** Active Watering Shrine blessing picker when standing on a Shrine space. */
+  pendingShrine?: { nodeId: string; claimed: boolean } | null;
   roster: RosterHero[];
   activeSquadUids: string[];
   relicIds: string[];
@@ -534,7 +576,7 @@ export interface RunState {
   battlesWon: number;
   enemiesDefeated: number;
   pendingReward: RewardBundle | null;
-  status: 'map' | 'battle' | 'vault' | 'shop' | 'reward' | 'event' | 'victory' | 'defeat';
+  status: 'map' | 'battle' | 'vault' | 'shop' | 'reward' | 'event' | 'shrine' | 'victory' | 'defeat';
   /** The "?" event currently open, if any. */
   pendingEvent?: { eventId: string; outcome: string[] | null; choiceIndex: number | null } | null;
   /** Events already met this run, so they don't repeat. */

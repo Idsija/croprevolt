@@ -168,11 +168,19 @@ export function evaluateCover(
         best = { level: 'half', coverPos: cPos };
       }
     }
-    // Living Wool Cover: standing beside Woolly Bulwark provides Half Cover (50%)!
-    if (best.level === 'none' && defenderTeam && state.units) {
+    // Living Cover: standing beside Stitch/Woolly provides Half Cover (or Full Cover with Fortress perk!)
+    if (defenderTeam && state.units) {
       const ally = unitAt({ units: state.units }, cPos);
       if (ally && ally.team === defenderTeam && ally.livingHalfCover) {
-        best = { level: 'half', coverPos: cPos };
+        const isFull = Boolean(
+          ally.perkIds?.includes('cow_barricade') || ally.perkIds?.includes('she_merino')
+        );
+        if (isFull) {
+          return { level: 'full', coverPos: cPos };
+        }
+        if (best.level === 'none') {
+          best = { level: 'half', coverPos: cPos };
+        }
       }
     }
   }
@@ -207,7 +215,10 @@ export function getAdjacentCoverBadges(
     } else if (movingTeam && state.units) {
       const ally = unitAt({ units: state.units }, c.p);
       if (ally && ally.team === movingTeam && ally.livingHalfCover) {
-        badges.push({ dir: c.dir, coverPos: c.p, level: 'half' });
+        const isFull = Boolean(
+          ally.perkIds?.includes('cow_barricade') || ally.perkIds?.includes('she_merino')
+        );
+        badges.push({ dir: c.dir, coverPos: c.p, level: isFull ? 'full' : 'half' });
       }
     }
   }

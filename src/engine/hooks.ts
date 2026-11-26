@@ -1,3 +1,4 @@
+import { aggregatePerkEffects, type AggregatedPerkEffects } from '../data/skills';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import type {
   BattleState,
@@ -65,6 +66,10 @@ export function hasPerk(unit: Pick<BattleUnit, 'perkIds'>, perkId: string): bool
   return Boolean(unit.perkIds?.includes(perkId));
 }
 
+export function getUnitPerkEffects(unit?: Pick<BattleUnit, 'perkIds'> | null): AggregatedPerkEffects {
+  return aggregatePerkEffects(unit?.perkIds);
+}
+
 export function hasStatus(unit: Pick<BattleUnit, 'statuses'>, kind: StatusKind): boolean {
   return unit.statuses.some((s) => s.kind === kind && s.turns > 0);
 }
@@ -84,19 +89,21 @@ export function getEffectiveJumpRange(unit: BattleUnit, springboardAlly?: Battle
 }
 
 export function getMaxDashesForUnit(unit: BattleUnit): number {
-  return hasPerk(unit, 'double_dash') ? 2 : 1;
+  return 1 + getUnitPerkEffects(unit).extraDashes;
 }
 
 export function getMaxOverwatchCharges(unit: BattleUnit): number {
-  return hasPerk(unit, 'hero_sight') ? 2 : 1;
+  return 1 + getUnitPerkEffects(unit).bonusOverwatchShots;
 }
 
 export function getEffectiveDashDamage(unit: BattleUnit): number {
-  return unit.dashDamage + (hasPerk(unit, 'double_dash') ? 1 : 0);
+  return unit.dashDamage + getUnitPerkEffects(unit).bonusDashDmg;
 }
 
 export function getEffectiveCoverDamage(unit: BattleUnit): number {
-  return unit.weapon.coverDamage + (hasPerk(unit, 'cover_buster') ? 4 : 0);
+  const fx = getUnitPerkEffects(unit);
+  if (fx.oneShotCover) return Math.max(20, unit.weapon.coverDamage + fx.bonusCoverDmg);
+  return unit.weapon.coverDamage + fx.bonusCoverDmg;
 }
 
 export function applyStatusToUnit(unit: BattleUnit, kind: StatusKind, turns: number): boolean {
@@ -146,8 +153,8 @@ export function getCooldownForUnit(
   if (team === 'player' && hasRelic(state.relicIds, 'heirloom_fertilizer')) {
     cd -= 1;
   }
-  if (unit && hasPerk(unit, 'quick_bloom')) {
-    cd -= 1;
+  if (unit) {
+    cd += getUnitPerkEffects(unit).skillCdDelta;
   }
   return Math.max(1, cd);
 }

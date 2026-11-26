@@ -23,6 +23,7 @@ export interface BattleRendererHooks {
   onHoverChange: (pos: GridPos | null) => void;
   onTileTap: (pos: GridPos, pointerType: string) => void;
   onOffBoardTap?: () => void;
+  onRightClickCancel?: () => void;
   onZoomChange?: (zoomPercent: number) => void;
   onCameraModeChange?: (mode: CameraMode3D) => void;
   onFocusAnchorChange?: (anchor: ScreenAnchor | null) => void;

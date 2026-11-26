@@ -14,6 +14,7 @@ import {
   getEffectiveJumpRange,
   getEffectiveMoveRange,
   getMaxDashesForUnit,
+  getUnitPerkEffects,
   hasGraft,
   hasStatus,
 } from './hooks';
@@ -169,13 +170,15 @@ export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOp
   const maxDashes = getMaxDashesForUnit(unit);
   if (unit.isEscortCart || dashesUsed >= maxDashes || unit.actions.hasMoved || hasStatus(unit, 'rooted')) return [];
 
+  const fx = getUnitPerkEffects(unit);
   const alreadyDashed = new Set(unit.actions.dashedEnemyIds ?? []);
   const reachable = computeReachableMap(state, unit);
   const options: DashOption[] = [];
   const dashBonus = hasStatus(unit, 'boosted') ? 2 : 0;
   const dashStatus = hasGraft(unit, 'dash_burn')
     ? 'burn'
-    : unit.dashStatus?.kind;
+    : (unit.dashStatus?.kind ?? fx.dashStatus);
+  const dashKb = (unit.dashKnockback ?? 0) + (fx.dashKnockback ? 1 : 0);
 
   for (const target of state.units) {
     if (!target.alive || target.team === unit.team) continue;
@@ -201,7 +204,7 @@ export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOp
         enemyPos: target.pos,
         stopPos: bestNode.pos,
         damage: getEffectiveDashDamage(unit) + dashBonus,
-        knockback: unit.dashKnockback,
+        knockback: dashKb > 0 ? dashKb : undefined,
         appliesStatus: dashStatus,
       });
     }

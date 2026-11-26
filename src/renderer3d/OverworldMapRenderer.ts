@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ACTS } from '../engine/mapgen';
 import type { BoardTheme, NodeType, SeasonNode } from '../engine/types';
 import { roundRect } from '../renderer/particles';
 import {
@@ -13,10 +14,14 @@ export interface OverworldSnapshot {
   nodes: SeasonNode[];
   completedIds: Set<string>;
   availableIds: Set<string>;
+  /** Exact step-by-step node ID sequence from current position to hovered/selected reachable destination. */
+  previewPathIds?: string[];
   currentNodeId: string | null;
   selectedNodeId: string | null;
   leadHeroKind: string;
   bossKind: string;
+  boardTurn?: number;
+  harvestBellLimit?: number;
 }
 
 export interface OverworldHooks {
@@ -36,45 +41,40 @@ interface NodeVisual {
   propSpin?: THREE.Object3D;
 }
 
-const STAGE_Z_STEP = 2.65;
-const LANE_X_STEP = 2.65;
-const MAX_LANES = 4;
+const BOARD_W = 16.4;
+const BOARD_H = 9.15;
+const BOARD_TOP_Y = 0.28;
 
-const NODE_TYPE_COLORS: Record<NodeType, { hex: number; badge: string; label: string }> = {
-  skirmish: { hex: 0xd95638, badge: '#d95638', label: 'Battle' },
-  escape: { hex: 0x3b9ec4, badge: '#3b9ec4', label: 'Breakout' },
-  barn_rescue: { hex: 0xe69524, badge: '#d98416', label: 'Rescue' },
-  elite: { hex: 0xa82738, badge: '#a82738', label: 'Elite' },
-  shop: { hex: 0x459e4c, badge: '#3d8f44', label: 'Market' },
-  vault: { hex: 0xdba827, badge: '#c49116', label: 'Vault' },
-  event: { hex: 0x8e4cb8, badge: '#8542ad', label: 'Mystery' },
-  boss: { hex: 0x7c1c28, badge: '#7c1c28', label: 'Boss' },
+const NODE_TYPE_STYLE: Record<
+  NodeType,
+  { hex: number; badge: string; icon: string; label: string }
+> = {
+  start: { hex: 0x5c8a47, badge: '#4f7c3c', icon: '⚑', label: 'Start' },
+  skirmish: { hex: 0xd95638, badge: '#cf4c2e', icon: '⚔', label: 'Battle' },
+  escape: { hex: 0x2f94ba, badge: '#2983a6', icon: '🏃', label: 'Convoy' },
+  barn_rescue: { hex: 0xe08d22, badge: '#cc7b16', icon: '🔓', label: 'Rescue' },
+  elite: { hex: 0x9e2234, badge: '#8f1b2c', icon: '💀', label: 'Elite' },
+  shop: { hex: 0x3b9645, badge: '#31823b', icon: '🛒', label: 'Market' },
+  shrine: { hex: 0x2ba8b8, badge: '#2091a0', icon: '💧', label: 'Shrine' },
+  armory: { hex: 0xc97b1e, badge: '#b36814', icon: '⚒', label: 'Armory' },
+  vault: { hex: 0xdba827, badge: '#c49116', icon: '⛺', label: 'Camp' },
+  event: { hex: 0x874ab3, badge: '#783ca3', icon: '?', label: 'Clover' },
+  boss: { hex: 0x7c1c28, badge: '#7c1c28', icon: '👑', label: 'Boss' },
 };
 
-function stageElevation(stage: number): number {
-  if (stage >= 7) return 1.65;
-  if (stage >= 6) return 1.15;
-  if (stage >= 4) return 0.76;
-  if (stage >= 2) return 0.38;
-  return 0;
-}
-
-function computeNodeWorldPos(node: SeasonNode, maxStage: number): THREE.Vector3 {
-  const zCenter = (maxStage * STAGE_Z_STEP) / 2;
-  const z = zCenter - node.stage * STAGE_Z_STEP;
-  if (node.type === 'boss') {
-    return new THREE.Vector3(0, stageElevation(node.stage), z);
-  }
-  const laneOffset = (node.lane - (MAX_LANES - 1) / 2) * LANE_X_STEP;
-  // Subtle hand-drawn trail meander so lanes feel organic like Mario World!
-  const jitterX = Math.sin(node.stage * 2.1 + node.lane * 1.7) * 0.34;
-  const jitterZ = Math.cos(node.stage * 1.5 + node.lane * 2.3) * 0.2;
-  return new THREE.Vector3(laneOffset + jitterX, stageElevation(node.stage), z + jitterZ);
+function computeNodeWorldPos(node: SeasonNode): THREE.Vector3 {
+  const bx = typeof node.boardX === 'number' ? node.boardX : 0.2 + (node.lane / 3) * 0.6;
+  const by = typeof node.boardY === 'number' ? node.boardY : 0.85 - (node.stage / 7) * 0.7;
+  const x = (bx - 0.5) * BOARD_W;
+  const z = (by - 0.5) * BOARD_H;
+  return new THREE.Vector3(x, BOARD_TOP_Y, z);
 }
 
 /**
- * Full 3D Paper Mario Act Overworld Renderer!
- * Replaces the sprawling 2D SVG scroll wall with an interactive sculpted 3D diorama island.
+ * 3D Folding Watercolor Tabletop Boardgame Overworld Renderer!
+ * Renders each Season Act as a bespoke hand-painted watercolor game board resting on
+ * a warm sunlit oak table, with wooden space medallions, dotted trail arcs, live
+ * multi-step Travel Card hop previews, and a 3D leader standee pawn.
  */
 export class OverworldMapRenderer {
   private canvas: HTMLCanvasElement;
@@ -86,32 +86,40 @@ export class OverworldMapRenderer {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private textures: CraftTextureLibrary;
+  private boardTexLoader = new THREE.TextureLoader();
+  private boardTextures = new Map<string, THREE.Texture>();
 
   private worldGroup = new THREE.Group();
   private trailGroup = new THREE.Group();
+  private previewPathGroup = new THREE.Group();
   private nodeGroup = new THREE.Group();
   private standeeGroup = new THREE.Group();
+  private weatherGroup = new THREE.Group();
 
   private nodeMap = new Map<string, NodeVisual>();
   private pickMeshes: THREE.Mesh[] = [];
   private leaderRig: PaperStandeeRig | null = null;
   private bossRig: PaperStandeeRig | null = null;
-  private trees: Array<{ obj: THREE.Object3D; phase: number }> = [];
-  private clouds: Array<{ obj: THREE.Object3D; baseX: number; phase: number }> = [];
+  private weatherMotes: Array<{
+    mesh: THREE.Mesh;
+    baseX: number;
+    baseZ: number;
+    speed: number;
+    phase: number;
+  }> = [];
 
   private snapshot: OverworldSnapshot | null = null;
   private builtSignature = '';
+  private previewPathSig = '';
   private hoveredNodeId: string | null = null;
 
-  // Smooth pan/zoom camera state
-  private targetPos = new THREE.Vector3(0, 0.5, 4.5);
-  private curTarget = new THREE.Vector3(0, 0.5, 4.5);
-  private desiredDist = 14.5;
-  private curDist = 14.5;
-  private camYaw = -0.14;
-  private camPitch = 0.72;
-  private minZ = -10;
-  private maxZ = 10;
+  // Smooth pan/zoom tabletop camera state
+  private targetPos = new THREE.Vector3(0, 0.25, 0.55);
+  private curTarget = new THREE.Vector3(0, 0.25, 0.55);
+  private desiredDist = 15.8;
+  private curDist = 15.8;
+  private camYaw = 0;
+  private camPitch = 0.86;
 
   private raycaster = new THREE.Raycaster();
   private pointerNdc = new THREE.Vector2();
@@ -129,6 +137,7 @@ export class OverworldMapRenderer {
   private elapsed = 0;
   private resizeObserver: ResizeObserver;
   private destroyed = false;
+
   private leaderHopAnim: {
     curve: THREE.QuadraticBezierCurve3;
     startMs: number;
@@ -156,20 +165,22 @@ export class OverworldMapRenderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.06;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#6a4424');
-    this.scene.fog = new THREE.FogExp2('#6a4424', 0.015);
+    this.scene.background = new THREE.Color('#633e20');
+    this.scene.fog = new THREE.FogExp2('#633e20', 0.011);
 
-    this.camera = new THREE.PerspectiveCamera(36, 16 / 9, 0.2, 120);
+    this.camera = new THREE.PerspectiveCamera(35, 16 / 9, 0.2, 120);
     this.textures = new CraftTextureLibrary();
 
     this.scene.add(this.worldGroup);
     this.scene.add(this.trailGroup);
+    this.scene.add(this.previewPathGroup);
     this.scene.add(this.nodeGroup);
     this.scene.add(this.standeeGroup);
+    this.scene.add(this.weatherGroup);
 
     this.setupLights();
     this.resize();
@@ -183,35 +194,37 @@ export class OverworldMapRenderer {
   }
 
   private setupLights(): void {
-    const hemi = new THREE.HemisphereLight(0xfff8e6, 0x8a5e36, 0.98);
+    const hemi = new THREE.HemisphereLight(0xfffaf0, 0x8a5d36, 1.08);
     this.scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xfff1cc, 1.5);
-    sun.position.set(11, 18, 12);
+    const sun = new THREE.DirectionalLight(0xfff3d4, 1.38);
+    sun.position.set(8, 20, 10);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 2;
-    sun.shadow.camera.far = 64;
-    const d = 18;
+    sun.shadow.camera.far = 60;
+    const d = 14;
     sun.shadow.camera.left = -d;
     sun.shadow.camera.right = d;
     sun.shadow.camera.top = d;
     sun.shadow.camera.bottom = -d;
-    sun.shadow.bias = -0.0005;
+    sun.shadow.bias = -0.0004;
     this.scene.add(sun);
 
-    const rim = new THREE.DirectionalLight(0xc2e2ff, 0.42);
-    rim.position.set(-12, 9, -10);
+    const rim = new THREE.DirectionalLight(0xcbe6ff, 0.35);
+    rim.position.set(-10, 10, -8);
     this.scene.add(rim);
   }
 
-  private addInkEdges(mesh: THREE.Mesh, opacity = 0.5): void {
-    const edges = new THREE.EdgesGeometry(mesh.geometry, 22);
-    const lines = new THREE.LineSegments(
-      edges,
-      new THREE.LineBasicMaterial({ color: 0x3e220f, transparent: true, opacity })
-    );
-    mesh.add(lines);
+  private getBoardTexture(url: string): THREE.Texture {
+    const cached = this.boardTextures.get(url);
+    if (cached) return cached;
+    const tex = this.boardTexLoader.load(url);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    tex.needsUpdate = true;
+    this.boardTextures.set(url, tex);
+    return tex;
   }
 
   private clearGroup(g: THREE.Group): void {
@@ -234,7 +247,7 @@ export class OverworldMapRenderer {
     const sig = [
       snap.actIndex,
       snap.theme,
-      snap.nodes.map((n) => n.id).join(','),
+      snap.nodes.map((n) => `${n.id}:${n.type}`).join(','),
       Array.from(snap.completedIds).sort().join(','),
       Array.from(snap.availableIds).sort().join(','),
       snap.currentNodeId ?? '-',
@@ -248,27 +261,54 @@ export class OverworldMapRenderer {
       this.builtSignature = sig;
       if (firstBuild) {
         this.recenter(true);
-      } else {
-        this.recenter(false);
       }
+    }
+
+    const pathSig = (snap.previewPathIds ?? []).join('>');
+    if (pathSig !== this.previewPathSig) {
+      this.previewPathSig = pathSig;
+      this.rebuildPreviewPath(snap.previewPathIds ?? []);
     }
   }
 
   public focusNode(nodeId: string): void {
     const nv = this.nodeMap.get(nodeId);
     if (!nv) return;
+    // Gently nudge camera toward the focused node while keeping the full watercolor board framed!
     this.targetPos.set(
-      THREE.MathUtils.clamp(nv.pos.x * 0.65, -4.5, 4.5),
-      nv.pos.y + 0.35,
-      THREE.MathUtils.clamp(nv.pos.z, this.minZ, this.maxZ)
+      THREE.MathUtils.clamp(nv.pos.x * 0.32, -3.5, 3.5),
+      BOARD_TOP_Y,
+      THREE.MathUtils.clamp(nv.pos.z * 0.35 + 0.45, -2.0, 2.4)
     );
   }
 
+  public recenter(instant = false): void {
+    const aspect = this.cssW / Math.max(1, this.cssH);
+    this.desiredDist = aspect < 1.15 ? 21.5 : aspect < 1.45 ? 17.6 : 15.6;
+    this.targetPos.set(0, BOARD_TOP_Y, 0.55);
+    if (instant) {
+      this.curTarget.copy(this.targetPos);
+      this.curDist = this.desiredDist;
+    }
+  }
+
   /**
-   * Animates the Squad Leader Paper Mario standee hopping along the stepping-stone trail
-   * to the target stop before entering battle/market/event!
+   * Animated multi-space tabletop pawn hopping!
+   * Walks the 3D leader standee space-by-space along every hop in `pathNodeIds`.
    */
+  public async hopLeaderAlongPath(pathNodeIds: string[]): Promise<void> {
+    if (this.destroyed || !this.leaderRig || pathNodeIds.length < 2) return;
+    for (let i = 1; i < pathNodeIds.length; i++) {
+      if (this.destroyed) return;
+      await this.hopSingleStep(pathNodeIds[i], i === pathNodeIds.length - 1 ? 340 : 270);
+    }
+  }
+
   public hopLeaderToNode(nodeId: string): Promise<void> {
+    return this.hopSingleStep(nodeId, 380);
+  }
+
+  private hopSingleStep(nodeId: string, durationMs: number): Promise<void> {
     const nv = this.nodeMap.get(nodeId);
     if (this.destroyed || !this.leaderRig || !nv) {
       return Promise.resolve();
@@ -280,13 +320,12 @@ export class OverworldMapRenderer {
     }
 
     const from = this.leaderRig.root.position.clone();
-    const to = nv.pos.clone().add(new THREE.Vector3(-0.32, 0.14, 0.28));
+    const to = nv.pos.clone().add(new THREE.Vector3(-0.34, 0.04, 0.24));
     const mid = new THREE.Vector3().lerpVectors(from, to, 0.5);
-    mid.y = Math.max(from.y, to.y) + 0.35;
+    mid.y = Math.max(from.y, to.y) + 0.72;
     const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
     this.focusNode(nodeId);
 
-    const durationMs = 460;
     return new Promise<void>((resolve) => {
       let settled = false;
       const finish = () => {
@@ -298,11 +337,11 @@ export class OverworldMapRenderer {
         }
         if (this.leaderRig) {
           this.leaderRig.root.position.copy(to);
-          this.leaderRig.flipGroup.rotation.y = 0;
+          this.leaderRig.tiltGroup.rotation.z = 0;
         }
         resolve();
       };
-      const timer = setTimeout(finish, durationMs + 60);
+      const timer = setTimeout(finish, durationMs + 140);
       this.leaderHopAnim = {
         curve,
         startMs: performance.now(),
@@ -313,596 +352,424 @@ export class OverworldMapRenderer {
     });
   }
 
-  public recenter(instant = false): void {
-    if (!this.snapshot) return;
-    const focusIds = this.snapshot.selectedNodeId
-      ? [this.snapshot.selectedNodeId]
-      : Array.from(this.snapshot.availableIds);
-    const pts: THREE.Vector3[] = [];
-    for (const id of focusIds) {
-      const nv = this.nodeMap.get(id);
-      if (nv) pts.push(nv.pos);
-    }
-    if (pts.length === 0 && this.snapshot.currentNodeId) {
-      const cur = this.nodeMap.get(this.snapshot.currentNodeId);
-      if (cur) pts.push(cur.pos);
-    }
-    if (pts.length > 0) {
-      const avg = new THREE.Vector3();
-      for (const p of pts) avg.add(p);
-      avg.divideScalar(pts.length);
-      this.targetPos.set(
-        THREE.MathUtils.clamp(avg.x * 0.5, -3.5, 3.5),
-        avg.y + 0.3,
-        THREE.MathUtils.clamp(avg.z - 0.8, this.minZ, this.maxZ)
-      );
-    } else {
-      this.targetPos.set(0, 0.4, 5.5);
-    }
-    this.desiredDist = this.cssW < 680 ? 17.5 : 13.8;
-    if (instant) {
-      this.curTarget.copy(this.targetPos);
-      this.curDist = this.desiredDist;
-    }
-  }
-
   private rebuildMap(snap: OverworldSnapshot): void {
     this.clearGroup(this.worldGroup);
     this.clearGroup(this.trailGroup);
+    this.clearGroup(this.previewPathGroup);
     this.clearGroup(this.nodeGroup);
-    if (this.leaderRig) {
-      this.standeeGroup.remove(this.leaderRig.root);
-      this.leaderRig.dispose();
-      this.leaderRig = null;
-    }
-    if (this.bossRig) {
-      this.standeeGroup.remove(this.bossRig.root);
-      this.bossRig.dispose();
-      this.bossRig = null;
-    }
+    this.clearGroup(this.standeeGroup);
+    this.clearGroup(this.weatherGroup);
     this.nodeMap.clear();
-    this.pickMeshes.length = 0;
-    this.trees.length = 0;
-    this.clouds.length = 0;
+    this.pickMeshes = [];
+    this.weatherMotes = [];
+    this.leaderRig = null;
+    this.bossRig = null;
+    this.previewPathSig = '';
 
-    const maxStage = Math.max(7, ...snap.nodes.map((n) => n.stage));
-    const boardW = 13.2;
-    const boardH = (maxStage + 1.5) * STAGE_Z_STEP;
-    this.minZ = -boardH * 0.42;
-    this.maxZ = boardH * 0.42;
-
-    const theme = snap.theme;
-    const isAutumn = theme === 'autumn';
-    const isGreenhouse = theme === 'greenhouse';
-    const bgHex = isAutumn ? '#5c3424' : isGreenhouse ? '#4a5a42' : '#6a4424';
+    // Seasonal tabletop ambiance
+    const bgHex = snap.theme === 'autumn' ? '#4a2b1a' : snap.theme === 'greenhouse' ? '#5e4326' : '#664324';
     this.scene.background = new THREE.Color(bgHex);
-    (this.scene.fog as THREE.FogExp2).color.set(bgHex);
+    this.scene.fog = new THREE.FogExp2(bgHex, 0.011);
 
-    // 1. Oak tabletop & corrugated cardboard Act Island base
-    const deskGeo = new THREE.PlaneGeometry(90, 90);
-    deskGeo.rotateX(-Math.PI / 2);
-    const desk = new THREE.Mesh(
-      deskGeo,
+    // 1. Warm Sunlit Oak Tabletop
+    const table = new THREE.Mesh(
+      new THREE.PlaneGeometry(74, 62),
       new THREE.MeshStandardMaterial({
         map: this.textures.woodDeskMap,
-        color: '#c29464',
-        roughness: 0.9,
+        roughness: 0.78,
+        metalness: 0.04,
       })
     );
-    desk.position.y = -0.82;
-    desk.receiveShadow = true;
-    this.worldGroup.add(desk);
+    table.rotation.x = -Math.PI / 2;
+    table.position.y = -0.02;
+    table.receiveShadow = true;
+    this.worldGroup.add(table);
 
-    const corrMat = new THREE.MeshStandardMaterial({
-      map: this.textures.corrugatedMap,
-      bumpMap: this.textures.corrugatedBump,
-      bumpScale: 0.06,
-      roughness: 0.9,
-    });
-    const grassColor = isAutumn ? '#c39744' : isGreenhouse ? '#78b050' : '#85b548';
-    const topMat = new THREE.MeshStandardMaterial({
-      color: grassColor,
-      roughness: 0.9,
-      bumpMap: this.textures.paperBump,
-      bumpScale: 0.02,
-    });
-    const botMat = new THREE.MeshStandardMaterial({ color: '#6b4220', roughness: 0.95 });
-
-    const baseSlab = new THREE.Mesh(
-      new THREE.BoxGeometry(boardW, 0.72, boardH),
-      [corrMat, corrMat, topMat, botMat, corrMat, corrMat]
+    // Soft drop shadow skirt under the folding board
+    const shadowSkirt = new THREE.Mesh(
+      new THREE.PlaneGeometry(BOARD_W + 0.7, BOARD_H + 0.7),
+      new THREE.MeshBasicMaterial({
+        color: 0x1d0d04,
+        transparent: true,
+        opacity: 0.38,
+        depthWrite: false,
+      })
     );
-    baseSlab.position.set(0, -0.36, 0);
-    baseSlab.castShadow = true;
-    baseSlab.receiveShadow = true;
-    this.addInkEdges(baseSlab, 0.55);
-    this.worldGroup.add(baseSlab);
+    shadowSkirt.rotation.x = -Math.PI / 2;
+    shadowSkirt.position.set(0.14, 0.005, 0.18);
+    this.worldGroup.add(shadowSkirt);
 
-    // 2. Sculpted Multi-Elevation Cardboard Terraces rising up toward the Boss Peak!
-    const cliffMat = new THREE.MeshStandardMaterial({
-      map: this.textures.cliffSideMap,
-      bumpMap: this.textures.paperBump,
-      bumpScale: 0.02,
+    // 2. Chunky Folding Watercolor Tabletop Game Board!
+    const actDef = ACTS[snap.actIndex] ?? ACTS[0];
+    const boardArtTex = this.getBoardTexture(actDef.boardArt);
+    const sideMat = new THREE.MeshStandardMaterial({
+      map: this.textures.corrugatedMap,
+      color: '#c9a67a',
       roughness: 0.9,
     });
-    const tiers: Array<{ y: number; zMin: number; zMax: number; w: number; col: string }> = [
-      { y: 0.38, zMin: -boardH * 0.48, zMax: 3.6, w: boardW - 0.8, col: isAutumn ? '#b88635' : isGreenhouse ? '#6fa648' : '#7ba93f' },
-      { y: 0.76, zMin: -boardH * 0.48, zMax: -1.7, w: boardW - 1.6, col: isAutumn ? '#aa772e' : isGreenhouse ? '#669b42' : '#719e38' },
-      { y: 1.15, zMin: -boardH * 0.48, zMax: -6.8, w: boardW - 2.6, col: isAutumn ? '#9e6828' : isGreenhouse ? '#5d8f3c' : '#689333' },
-      { y: 1.65, zMin: -boardH * 0.48, zMax: -9.3, w: 6.8, col: isAutumn ? '#8e4c24' : isGreenhouse ? '#c48354' : '#b27b44' },
-    ];
-    for (const tr of tiers) {
-      const depth = Math.max(2, tr.zMax - tr.zMin);
-      const cz = (tr.zMin + tr.zMax) / 2;
-      const tierTop = new THREE.MeshStandardMaterial({
-        color: tr.col,
-        roughness: 0.88,
-        bumpMap: this.textures.paperBump,
-        bumpScale: 0.02,
-      });
-      const block = new THREE.Mesh(
-        new THREE.BoxGeometry(tr.w, tr.y, depth),
-        [cliffMat, cliffMat, tierTop, botMat, cliffMat, cliffMat]
-      );
-      block.position.set(0, tr.y / 2, cz);
-      block.castShadow = true;
-      block.receiveShadow = true;
-      this.addInkEdges(block, 0.45);
-      this.worldGroup.add(block);
-    }
-
-    // Decorative creek ribbon slicing through the valley floor
-    const creekMat = new THREE.MeshStandardMaterial({
-      map: this.textures.getTerrainTexture(theme, 'water', true),
-      roughness: 0.18,
-      metalness: 0.14,
-      transparent: true,
-      opacity: 0.88,
+    const topMat = new THREE.MeshStandardMaterial({
+      map: boardArtTex,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.009,
+      roughness: 0.84,
+      metalness: 0.01,
     });
-    const creek = new THREE.Mesh(new THREE.BoxGeometry(boardW - 0.6, 0.04, 0.95), creekMat);
-    creek.position.set(0, 0.02, 5.1);
-    creek.receiveShadow = true;
-    this.worldGroup.add(creek);
+    const bottomMat = new THREE.MeshStandardMaterial({ color: '#7a5230', roughness: 0.92 });
 
-    // 3. Perimeter Folded-Paper Trees & Clouds
-    for (let i = 0; i < 16; i++) {
-      const side = i % 2 === 0 ? -1 : 1;
-      const tz = -boardH * 0.44 + (i / 15) * (boardH * 0.86);
-      const tx = side * (boardW * 0.5 - 0.65 - (i % 3) * 0.25);
-      const elev = tz < -6.8 ? 1.15 : tz < -1.7 ? 0.76 : tz < 3.6 ? 0.38 : 0;
-      const tree = new THREE.Group();
-      tree.position.set(tx, elev, tz);
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.09, 0.13, 0.68, 6),
-        new THREE.MeshStandardMaterial({ color: '#754622', roughness: 0.9 })
-      );
-      trunk.position.y = 0.34;
-      trunk.castShadow = true;
-      const folColor = isAutumn
-        ? i % 3 === 0
-          ? '#d65d28'
-          : '#e59a2d'
-        : isGreenhouse
-          ? '#4f995c'
-          : i % 2 === 0
-            ? '#528f32'
-            : '#6aa83f';
-      const fol = new THREE.Mesh(
-        new THREE.ConeGeometry(0.54, 1.25, 6),
-        new THREE.MeshStandardMaterial({ color: folColor, roughness: 0.85, flatShading: true })
-      );
-      fol.position.y = 1.12;
-      fol.castShadow = true;
-      this.addInkEdges(fol, 0.32);
-      tree.add(trunk, fol);
-      tree.scale.setScalar(0.85 + (i % 3) * 0.14);
-      this.worldGroup.add(tree);
-      this.trees.push({ obj: tree, phase: i * 0.9 });
-    }
+    const boardSlab = new THREE.Mesh(new THREE.BoxGeometry(BOARD_W, BOARD_TOP_Y, BOARD_H), [
+      sideMat,
+      sideMat,
+      topMat,
+      bottomMat,
+      sideMat,
+      sideMat,
+    ]);
+    boardSlab.position.y = BOARD_TOP_Y / 2;
+    boardSlab.castShadow = true;
+    boardSlab.receiveShadow = true;
+    this.worldGroup.add(boardSlab);
 
-    // Floating Paper Clouds along the northern horizon
-    const cloudMat = new THREE.MeshStandardMaterial({ color: '#fffbf0', roughness: 0.92 });
-    for (const [cx, cy, cz, sc] of [
-      [-5.2, 4.4, -boardH * 0.52, 1.1],
-      [4.8, 4.8, -boardH * 0.54, 1.25],
-      [0.2, 5.2, -boardH * 0.58, 1.0],
-    ]) {
-      const g = new THREE.Group();
-      for (const [ox, oy, r] of [
-        [0, 0.12, 0.52],
-        [-0.44, 0, 0.38],
-        [0.44, -0.02, 0.36],
-      ]) {
-        const d = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.12, 12), cloudMat);
-        d.rotation.x = Math.PI / 2;
-        d.position.set(ox, oy, 0);
-        g.add(d);
+    // Subtle tabletop center fold seam (gives authentic folding-board tactility!)
+    const foldSeam = new THREE.Mesh(
+      new THREE.BoxGeometry(0.035, 0.008, BOARD_H - 0.14),
+      new THREE.MeshBasicMaterial({ color: 0x5c3e24, transparent: true, opacity: 0.24 })
+    );
+    foldSeam.position.set(0, BOARD_TOP_Y + 0.005, 0);
+    this.worldGroup.add(foldSeam);
+
+    // Four shiny brass corner rivets on the folding game board
+    const brassMat = new THREE.MeshStandardMaterial({
+      color: '#dfb24a',
+      metalness: 0.45,
+      roughness: 0.32,
+    });
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const rivet = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.05, 14), brassMat);
+        rivet.position.set(sx * (BOARD_W / 2 - 0.28), BOARD_TOP_Y + 0.025, sz * (BOARD_H / 2 - 0.28));
+        rivet.castShadow = true;
+        this.worldGroup.add(rivet);
       }
-      g.position.set(cx, cy, cz);
-      g.scale.setScalar(sc);
-      this.worldGroup.add(g);
-      this.clouds.push({ obj: g, baseX: cx, phase: cx });
     }
 
-    // 4. Compute 3D positions & build Node Pedestals
-    const posLookup = new Map<string, THREE.Vector3>();
+    // 3. Compute positions & build painted wooden board space medallions!
+    const posById = new Map<string, THREE.Vector3>();
     for (const n of snap.nodes) {
-      posLookup.set(n.id, computeNodeWorldPos(n, maxStage));
+      posById.set(n.id, computeNodeWorldPos(n));
     }
 
-    // 5. Winding 3D Stepping-Stone Trails connecting every node edge!
+    // Dotted boardgame tracks between connected spaces
     for (const n of snap.nodes) {
-      const from = posLookup.get(n.id)!;
-      const fromDone = snap.completedIds.has(n.id);
-      const isCurrent = snap.currentNodeId === n.id;
-
-      for (const nextId of n.nextIds) {
-        const to = posLookup.get(nextId);
+      const from = posById.get(n.id)!;
+      const allOuts = [
+        ...n.nextIds.map((id) => ({ id, shortcut: false })),
+        ...(n.shortcutIds ?? []).map((id) => ({ id, shortcut: true })),
+      ];
+      for (const edge of allOuts) {
+        const to = posById.get(edge.id);
         if (!to) continue;
-        const toDone = snap.completedIds.has(nextId);
-        const isActiveRoute =
-          (isCurrent && snap.availableIds.has(nextId)) ||
-          (snap.currentNodeId === null && snap.availableIds.has(n.id));
-
-        const mid = new THREE.Vector3().lerpVectors(from, to, 0.5);
-        mid.y = Math.max(from.y, to.y) + 0.08;
-        const curve = new THREE.QuadraticBezierCurve3(
-          new THREE.Vector3(from.x, from.y + 0.04, from.z),
-          mid,
-          new THREE.Vector3(to.x, to.y + 0.04, to.z)
+        const isDone = snap.completedIds.has(n.id) && snap.completedIds.has(edge.id);
+        const dotCount = Math.max(4, Math.floor(from.distanceTo(to) * 2.4));
+        const dotColor = isDone ? 0x6ec94b : edge.shortcut ? 0xd99b2e : 0xfaf0d7;
+        const dotGeo = new THREE.CylinderGeometry(
+          edge.shortcut ? 0.055 : 0.068,
+          edge.shortcut ? 0.062 : 0.075,
+          0.018,
+          10
         );
-
-        const col =
-          fromDone && toDone
-            ? 0x5cb844
-            : isActiveRoute
-              ? 0xf7c948
-              : 0xd9c298;
-        const stoneMat = new THREE.MeshStandardMaterial({
-          color: col,
-          emissive: isActiveRoute ? 0xe0a214 : 0x000000,
-          emissiveIntensity: isActiveRoute ? 0.25 : 0,
-          roughness: 0.85,
+        const dotMat = new THREE.MeshBasicMaterial({
+          color: dotColor,
+          transparent: true,
+          opacity: isDone ? 0.92 : 0.82,
         });
-
-        const steps = 6;
-        for (let s = 1; s < steps; s++) {
-          const pt = curve.getPoint(s / steps);
-          const stone = new THREE.Mesh(
-            new THREE.CylinderGeometry(isActiveRoute ? 0.2 : 0.15, isActiveRoute ? 0.23 : 0.17, 0.08, 8),
-            stoneMat
-          );
-          stone.position.copy(pt);
-          stone.receiveShadow = true;
-          stone.castShadow = true;
-          this.trailGroup.add(stone);
+        for (let i = 1; i < dotCount; i++) {
+          const t = i / dotCount;
+          const p = new THREE.Vector3().lerpVectors(from, to, t);
+          // Slight gentle organic meander so dots feel hand-drawn on the watercolor map
+          const perpX = -(to.z - from.z);
+          const perpZ = to.x - from.x;
+          const len = Math.hypot(perpX, perpZ) || 1;
+          const bend = Math.sin(t * Math.PI) * 0.08 * (edge.shortcut ? -1.4 : 1);
+          const dot = new THREE.Mesh(dotGeo, dotMat);
+          dot.position.set(p.x + (perpX / len) * bend, BOARD_TOP_Y + 0.012, p.z + (perpZ / len) * bend);
+          this.trailGroup.add(dot);
         }
       }
     }
 
-    // 6. Create 3D Miniature Pedestals for Every Stop
+    // Build wooden board tokens for every space
     for (const n of snap.nodes) {
-      const pos = posLookup.get(n.id)!;
-      const nv = this.createNodePedestal(n, pos, snap);
-      this.nodeMap.set(n.id, nv);
-      this.nodeGroup.add(nv.group);
-      this.pickMeshes.push(nv.hitMesh);
-    }
+      const pos = posById.get(n.id)!;
+      const style = NODE_TYPE_STYLE[n.type] ?? NODE_TYPE_STYLE.skirmish;
+      const isDone = snap.completedIds.has(n.id);
+      const isAvail = snap.availableIds.has(n.id);
+      const isBoss = n.type === 'boss';
+      const radius = isBoss ? 0.52 : n.type === 'start' ? 0.42 : 0.37;
 
-    // 7. Place Squad Leader Paper Standee at current stop (or southern trailhead!)
-    const leaderRig = createPaperStandeeRig(snap.leadHeroKind, 'player', false, this.textures);
-    if (snap.currentNodeId && posLookup.has(snap.currentNodeId)) {
-      const cp = posLookup.get(snap.currentNodeId)!;
-      leaderRig.root.position.set(cp.x - 0.55, cp.y + 0.14, cp.z + 0.32);
-    } else {
-      const startZ = (maxStage * STAGE_Z_STEP) / 2 + 1.45;
-      leaderRig.root.position.set(0, 0.02, startZ);
-    }
-    leaderRig.root.scale.setScalar(0.95);
-    this.standeeGroup.add(leaderRig.root);
-    this.leaderRig = leaderRig;
+      const group = new THREE.Group();
+      group.position.copy(pos);
 
-    // 8. Place Act Boss Paper Standee atop the Northern Boss Citadel!
-    const bossNode = snap.nodes.find((n) => n.type === 'boss');
-    if (bossNode) {
-      const bp = posLookup.get(bossNode.id)!;
-      const bossRig = createPaperStandeeRig(snap.bossKind, 'enemy', true, this.textures);
-      bossRig.root.position.set(bp.x, bp.y + 0.22, bp.z - 0.15);
-      bossRig.root.scale.setScalar(1.05);
-      this.standeeGroup.add(bossRig.root);
-      this.bossRig = bossRig;
-    }
-  }
-
-  private createNodePedestal(
-    node: SeasonNode,
-    pos: THREE.Vector3,
-    snap: OverworldSnapshot
-  ): NodeVisual {
-    const group = new THREE.Group();
-    group.position.copy(pos);
-
-    const isDone = snap.completedIds.has(node.id);
-    const isAvail = snap.availableIds.has(node.id);
-    const isBoss = node.type === 'boss';
-    const meta = NODE_TYPE_COLORS[node.type];
-    const rad = isBoss ? 1.15 : 0.68;
-
-    // Tactile Wooden / Stone Stop Disc Pedestal
-    const discColor = isDone ? 0x5cb844 : isAvail ? meta.hex : 0x9b866d;
-    const disc = new THREE.Mesh(
-      new THREE.CylinderGeometry(rad, rad * 1.1, isBoss ? 0.24 : 0.16, 16),
-      new THREE.MeshStandardMaterial({
-        color: discColor,
-        roughness: 0.78,
-        bumpMap: this.textures.paperBump,
-        bumpScale: 0.015,
-      })
-    );
-    disc.position.y = isBoss ? 0.12 : 0.08;
-    disc.castShadow = true;
-    disc.receiveShadow = true;
-    this.addInkEdges(disc, 0.55);
-    group.add(disc);
-
-    // Cream inner stamp ring
-    const topCap = new THREE.Mesh(
-      new THREE.CylinderGeometry(rad * 0.76, rad * 0.76, 0.03, 14),
-      new THREE.MeshStandardMaterial({
-        color: isDone ? '#dff5d8' : '#fbf3df',
-        roughness: 0.85,
-      })
-    );
-    topCap.position.y = isBoss ? 0.25 : 0.17;
-    group.add(topCap);
-
-    // Distinct 3D Miniature Prop per Node Type!
-    let propSpin: THREE.Object3D | undefined;
-    if (isDone) {
-      // Completed Green Victory Flag!
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.03, 0.03, 0.85, 6),
-        new THREE.MeshStandardMaterial({ color: '#6b4220', roughness: 0.9 })
-      );
-      pole.position.y = 0.56;
-      const pennant = new THREE.Mesh(
-        new THREE.ConeGeometry(0.22, 0.44, 3),
-        new THREE.MeshStandardMaterial({ color: '#58b842', roughness: 0.75 })
-      );
-      pennant.rotation.z = -Math.PI / 2;
-      pennant.position.set(0.22, 0.84, 0);
-      group.add(pole, pennant);
-    } else if (node.type === 'skirmish') {
-      const crate = new THREE.Mesh(
-        new THREE.BoxGeometry(0.54, 0.46, 0.54),
-        new THREE.MeshStandardMaterial({ map: this.textures.crateMap, roughness: 0.85 })
-      );
-      crate.position.y = 0.41;
-      crate.rotation.y = 0.35;
-      crate.castShadow = true;
-      this.addInkEdges(crate);
-      group.add(crate);
-    } else if (node.type === 'elite') {
-      const warCrate = new THREE.Mesh(
-        new THREE.BoxGeometry(0.62, 0.58, 0.62),
-        new THREE.MeshStandardMaterial({ color: '#b52e3a', roughness: 0.75 })
-      );
-      warCrate.position.y = 0.47;
-      warCrate.rotation.y = Math.PI / 4;
-      warCrate.castShadow = true;
-      this.addInkEdges(warCrate);
-      const star = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.22, 0),
-        new THREE.MeshStandardMaterial({ color: '#ffd54f', emissive: '#e09a14', emissiveIntensity: 0.4 })
-      );
-      star.position.y = 1.02;
-      group.add(warCrate, star);
-      propSpin = star;
-    } else if (node.type === 'barn_rescue') {
-      const cage = new THREE.Mesh(
-        new THREE.BoxGeometry(0.58, 0.54, 0.58),
-        new THREE.MeshStandardMaterial({ map: this.textures.cageFrontMap, roughness: 0.88 })
-      );
-      cage.position.y = 0.45;
-      cage.castShadow = true;
-      this.addInkEdges(cage);
-      group.add(cage);
-    } else if (node.type === 'escape') {
-      const postMat = new THREE.MeshStandardMaterial({ color: '#8f5829', roughness: 0.88 });
-      for (const sx of [-0.36, 0.36]) {
-        const p = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.72, 0.1), postMat);
-        p.position.set(sx, 0.52, 0);
-        p.castShadow = true;
-        group.add(p);
-      }
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.14, 0.12), postMat);
-      beam.position.set(0, 0.86, 0);
-      this.addInkEdges(beam);
-      group.add(beam);
-    } else if (node.type === 'shop') {
-      // Cute Striped Awning Compost Market Stall!
-      const counter = new THREE.Mesh(
-        new THREE.BoxGeometry(0.76, 0.34, 0.46),
-        new THREE.MeshStandardMaterial({ color: '#b5773c', roughness: 0.88 })
-      );
-      counter.position.y = 0.34;
-      const awning = new THREE.Mesh(
-        new THREE.BoxGeometry(0.92, 0.12, 0.62),
-        new THREE.MeshStandardMaterial({ color: '#d9483b', roughness: 0.78 })
-      );
-      awning.position.set(0, 0.84, 0);
-      awning.rotation.x = 0.18;
-      this.addInkEdges(awning);
-      group.add(counter, awning);
-    } else if (node.type === 'vault') {
-      const chest = new THREE.Mesh(
-        new THREE.BoxGeometry(0.64, 0.44, 0.48),
-        new THREE.MeshStandardMaterial({ color: '#d9a126', roughness: 0.72, metalness: 0.15 })
-      );
-      chest.position.y = 0.4;
-      chest.castShadow = true;
-      this.addInkEdges(chest);
-      group.add(chest);
-    } else if (node.type === 'event') {
-      const gem = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.32, 0),
+      // Thick painted wood boardgame medallion base
+      const disc = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius, radius + 0.05, 0.1, 24),
         new THREE.MeshStandardMaterial({
-          color: '#b56ce6',
-          emissive: '#7c32b0',
-          emissiveIntensity: 0.35,
-          roughness: 0.45,
+          color: isDone && n.type !== 'start' ? 0x62a846 : isAvail ? style.hex : 0xede0c2,
+          roughness: 0.65,
         })
       );
-      gem.position.y = 0.74;
-      gem.castShadow = true;
-      group.add(gem);
-      propSpin = gem;
+      disc.position.y = 0.05;
+      disc.castShadow = true;
+      disc.receiveShadow = true;
+      group.add(disc);
+
+      // Crisp cream parchment inner cap
+      const cap = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius * 0.78, radius * 0.8, 0.025, 22),
+        new THREE.MeshStandardMaterial({
+          color: isDone && n.type !== 'start' ? 0xd9f5c6 : isAvail ? 0xfff8e4 : 0xf5ebd2,
+          roughness: 0.8,
+        })
+      );
+      cap.position.y = 0.105;
+      group.add(cap);
+
+      // Outer pulsing ring (bright gold/emerald when reachable with active Travel Card!)
+      const ringGeo = new THREE.RingGeometry(radius + 0.08, radius + 0.22, 28);
+      ringGeo.rotateX(-Math.PI / 2);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: isAvail ? 0xffe04a : 0x5c3818,
+        transparent: true,
+        opacity: isAvail ? 0.96 : 0.28,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.position.y = 0.02;
+      group.add(ringMesh);
+
+      // Floating tabletop gem beacon above reachable spaces
+      const beaconMat = new THREE.MeshBasicMaterial({
+        color: isBoss ? 0xff4b5c : 0xffdf4d,
+        transparent: true,
+        opacity: isAvail ? 0.94 : 0,
+      });
+      const beaconMesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.15, 0), beaconMat);
+      beaconMesh.position.y = isBoss ? 1.55 : 0.72;
+      beaconMesh.visible = isAvail;
+      group.add(beaconMesh);
+
+      // Cute miniature brass star / landmark accent on special completed or landmark spaces
+      let propSpin: THREE.Object3D | undefined;
+      if (isDone && n.type !== 'start') {
+        const star = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.11, 0),
+          new THREE.MeshStandardMaterial({ color: '#ffd24c', metalness: 0.35, roughness: 0.3 })
+        );
+        star.position.set(radius * 0.65, 0.24, -radius * 0.55);
+        group.add(star);
+        propSpin = star;
+      } else if (n.type === 'shrine') {
+        const drop = new THREE.Mesh(
+          new THREE.SphereGeometry(0.1, 10, 8),
+          new THREE.MeshStandardMaterial({ color: '#5ce8ff', emissive: '#1d7588', emissiveIntensity: 0.35, roughness: 0.2 })
+        );
+        drop.position.set(radius * 0.7, 0.24, -radius * 0.55);
+        group.add(drop);
+        propSpin = drop;
+      }
+
+      // Generous invisible click collider for crisp picking
+      const hitMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius + 0.32, radius + 0.32, 0.65, 14),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      hitMesh.position.y = 0.3;
+      hitMesh.userData.nodeId = n.id;
+      group.add(hitMesh);
+      this.pickMeshes.push(hitMesh);
+
+      this.nodeGroup.add(group);
+      this.nodeMap.set(n.id, {
+        node: n,
+        pos,
+        group,
+        ringMesh,
+        ringMat,
+        beaconMesh,
+        beaconMat,
+        hitMesh,
+        propSpin,
+      });
     }
 
-    // Glowing Selection / Reachable Ring
-    const ringGeo = new THREE.RingGeometry(rad * 1.12, rad * 1.34, 28);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: isAvail ? 0xffe052 : 0xffffff,
-      transparent: true,
-      opacity: isAvail ? 0.88 : 0,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-    ringMesh.position.y = 0.05;
-    group.add(ringMesh);
+    // 4. Active Squad Leader Pawn Standee + Act Boss Standee!
+    const curPos =
+      (snap.currentNodeId ? posById.get(snap.currentNodeId) : undefined) ??
+      posById.get(snap.nodes.find((n) => n.type === 'start')?.id ?? '') ??
+      new THREE.Vector3(0, BOARD_TOP_Y, 3);
 
-    // Soft Vertical Golden Beacon for Reachable Stops!
-    const beaconGeo = new THREE.CylinderGeometry(rad * 0.55, rad * 0.85, 2.2, 14, 1, true);
-    const beaconMat = new THREE.MeshBasicMaterial({
-      color: 0xffe678,
-      transparent: true,
-      opacity: isAvail ? 0.16 : 0,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
-    beaconMesh.position.y = 1.18;
-    group.add(beaconMesh);
+    this.leaderRig = createPaperStandeeRig(snap.leadHeroKind, 'player', false, this.textures);
+    this.leaderRig.root.scale.setScalar(0.92);
+    this.leaderRig.root.position.copy(curPos).add(new THREE.Vector3(-0.34, 0.04, 0.24));
+    this.standeeGroup.add(this.leaderRig.root);
 
-    // Invisible Generous Hit Cylinder for Easy Picking
-    const hitMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(rad * 1.28, rad * 1.28, 1.5, 10),
-      new THREE.MeshBasicMaterial({ visible: false })
-    );
-    hitMesh.position.y = 0.75;
-    hitMesh.userData.nodeId = node.id;
-    group.add(hitMesh);
+    const bossNode = snap.nodes.find((n) => n.type === 'boss');
+    if (bossNode) {
+      const bPos = posById.get(bossNode.id)!;
+      this.bossRig = createPaperStandeeRig(snap.bossKind, 'enemy', true, this.textures);
+      this.bossRig.root.scale.setScalar(0.88);
+      this.bossRig.root.position.copy(bPos).add(new THREE.Vector3(0.42, 0.04, -0.26));
+      this.standeeGroup.add(this.bossRig.root);
+    }
 
-    return {
-      node,
-      pos,
-      group,
-      ringMesh,
-      ringMat,
-      beaconMesh,
-      beaconMat,
-      hitMesh,
-      propSpin,
-    };
+    // 5. Gentle Drifting Seasonal Paper Motes above the watercolor game board!
+    const moteColors =
+      snap.theme === 'autumn'
+        ? [0xd94826, 0xf29f24, 0xb82d1f]
+        : snap.theme === 'greenhouse'
+          ? [0xfff2a6, 0xffd75e, 0xd4ff9c]
+          : [0xffb7cf, 0xfff8e2, 0xc7f29b];
+    const moteGeo = new THREE.PlaneGeometry(0.14, 0.14);
+    for (let i = 0; i < 24; i++) {
+      const m = new THREE.Mesh(
+        moteGeo,
+        new THREE.MeshBasicMaterial({
+          color: moteColors[i % moteColors.length],
+          transparent: true,
+          opacity: 0.72,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        })
+      );
+      const bx = (Math.random() - 0.5) * BOARD_W * 1.05;
+      const bz = (Math.random() - 0.5) * BOARD_H * 1.05;
+      m.position.set(bx, BOARD_TOP_Y + 0.6 + Math.random() * 2.8, bz);
+      this.weatherGroup.add(m);
+      this.weatherMotes.push({
+        mesh: m,
+        baseX: bx,
+        baseZ: bz,
+        speed: 0.45 + Math.random() * 0.55,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
   }
 
-  private pickNode(clientX: number, clientY: number): string | null {
+  private rebuildPreviewPath(pathIds: string[]): void {
+    this.clearGroup(this.previewPathGroup);
+    if (pathIds.length < 2) return;
+
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffdf42,
+      transparent: true,
+      opacity: 0.96,
+    });
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffef99,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+
+    for (let i = 0; i < pathIds.length - 1; i++) {
+      const a = this.nodeMap.get(pathIds[i])?.pos;
+      const b = this.nodeMap.get(pathIds[i + 1])?.pos;
+      if (!a || !b) continue;
+
+      const mid = new THREE.Vector3().lerpVectors(a, b, 0.5);
+      mid.y = BOARD_TOP_Y + 0.56;
+      const curve = new THREE.QuadraticBezierCurve3(
+        a.clone().add(new THREE.Vector3(0, 0.14, 0)),
+        mid,
+        b.clone().add(new THREE.Vector3(0, 0.14, 0))
+      );
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.062, 8, false), mat);
+      this.previewPathGroup.add(tube);
+
+      // Stepping stone halo on intermediate hops
+      if (i > 0) {
+        const rg = new THREE.RingGeometry(0.4, 0.52, 22);
+        rg.rotateX(-Math.PI / 2);
+        const rm = new THREE.Mesh(rg, ringMat);
+        rm.position.set(a.x, BOARD_TOP_Y + 0.04, a.z);
+        this.previewPathGroup.add(rm);
+      }
+    }
+  }
+
+  private pickNodeAt(clientX: number, clientY: number): string | null {
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
     this.pointerNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     this.pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
     const hits = this.raycaster.intersectObjects(this.pickMeshes, false);
-    if (hits.length > 0) {
-      return (hits[0].object.userData.nodeId as string) ?? null;
-    }
-    return null;
-  }
-
-  private bindEvents(): void {
-    this.canvas.addEventListener('pointerdown', this.onPointerDown);
-    this.canvas.addEventListener('pointermove', this.onPointerMove);
-    this.canvas.addEventListener('pointerup', this.onPointerUp);
-    this.canvas.addEventListener('pointercancel', this.onPointerUp);
-    this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
+    if (hits.length === 0) return null;
+    return (hits[0].object.userData.nodeId as string | undefined) ?? null;
   }
 
   private onPointerDown = (e: PointerEvent): void => {
     this.downPt = { x: e.clientX, y: e.clientY };
     this.lastDragPt = { x: e.clientX, y: e.clientY };
     this.isDragging = false;
-    try {
-      this.canvas.setPointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
   };
 
   private onPointerMove = (e: PointerEvent): void => {
     if (this.downPt && this.lastDragPt) {
-      const total = Math.hypot(e.clientX - this.downPt.x, e.clientY - this.downPt.y);
-      if (total > 8) this.isDragging = true;
+      const dx = e.clientX - this.lastDragPt.x;
+      const dy = e.clientY - this.lastDragPt.y;
+      if (Math.hypot(e.clientX - this.downPt.x, e.clientY - this.downPt.y) > 8) {
+        this.isDragging = true;
+      }
       if (this.isDragging) {
-        const dx = e.clientX - this.lastDragPt.x;
-        const dy = e.clientY - this.lastDragPt.y;
-        const scale = this.curDist * 0.0017;
-        this.targetPos.x = THREE.MathUtils.clamp(this.targetPos.x - dx * scale, -6, 6);
-        this.targetPos.z = THREE.MathUtils.clamp(this.targetPos.z - dy * scale * 1.25, this.minZ, this.maxZ);
+        const panScale = this.curDist * 0.0014;
+        this.targetPos.x = THREE.MathUtils.clamp(this.targetPos.x - dx * panScale, -5.2, 5.2);
+        this.targetPos.z = THREE.MathUtils.clamp(this.targetPos.z - dy * panScale, -3.2, 3.6);
         this.lastDragPt = { x: e.clientX, y: e.clientY };
-        this.canvas.style.cursor = 'grabbing';
         return;
       }
     }
-    if (e.pointerType === 'mouse') {
-      const id = this.pickNode(e.clientX, e.clientY);
-      if (id !== this.hoveredNodeId) {
-        this.hoveredNodeId = id;
-        this.hooks.onHoverNode(id);
+    if (e.target !== this.canvas) {
+      if (this.hoveredNodeId !== null) {
+        this.hoveredNodeId = null;
+        this.hooks.onHoverNode(null);
       }
-      this.canvas.style.cursor = id ? 'pointer' : 'grab';
+      return;
+    }
+    const hovered = this.pickNodeAt(e.clientX, e.clientY);
+    if (hovered !== this.hoveredNodeId) {
+      this.hoveredNodeId = hovered;
+      this.canvas.style.cursor = hovered ? 'pointer' : 'grab';
+      this.hooks.onHoverNode(hovered);
     }
   };
 
   private onPointerUp = (e: PointerEvent): void => {
-    try {
-      if (this.canvas.hasPointerCapture(e.pointerId)) {
-        this.canvas.releasePointerCapture(e.pointerId);
-      }
-    } catch {
-      // ignore
-    }
-    const wasTap = this.downPt !== null && !this.isDragging;
+    if (!this.downPt) return;
+    const wasDrag = this.isDragging;
     this.downPt = null;
     this.lastDragPt = null;
     this.isDragging = false;
-    this.canvas.style.cursor = 'grab';
-
-    if (wasTap) {
-      const id = this.pickNode(e.clientX, e.clientY);
-      if (id) {
-        const alreadySelected = this.snapshot?.selectedNodeId === id;
-        this.focusNode(id);
-        this.hooks.onSelectNode(id, alreadySelected);
-      }
+    if (wasDrag) return;
+    const hitId = this.pickNodeAt(e.clientX, e.clientY);
+    if (hitId) {
+      const alreadySelected = this.snapshot?.selectedNodeId === hitId;
+      this.hooks.onSelectNode(hitId, alreadySelected);
     }
   };
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      this.desiredDist = THREE.MathUtils.clamp(this.desiredDist + e.deltaY * 0.015, 8.5, 24);
-    } else {
-      // Smoothly pan north/south along the trail with mouse wheel!
-      this.targetPos.z = THREE.MathUtils.clamp(
-        this.targetPos.z + e.deltaY * 0.012,
-        this.minZ,
-        this.maxZ
-      );
-    }
+    this.desiredDist = THREE.MathUtils.clamp(this.desiredDist + Math.sign(e.deltaY) * 1.15, 10.2, 23.5);
   };
+
+  private bindEvents(): void {
+    this.canvas.addEventListener('pointerdown', this.onPointerDown);
+    window.addEventListener('pointermove', this.onPointerMove);
+    window.addEventListener('pointerup', this.onPointerUp);
+    this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
+  }
 
   private resize(): void {
     const parent = this.canvas.parentElement ?? this.canvas;
@@ -923,7 +790,7 @@ export class OverworldMapRenderer {
     }
   }
 
-  private drawOverlay2D(): void {
+  private drawOverlay(): void {
     const ctx = this.overlayCtx;
     const snap = this.snapshot;
     if (!ctx || !snap) return;
@@ -932,42 +799,68 @@ export class OverworldMapRenderer {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.cssW, this.cssH);
 
-    // Draw clean floating Paper Mario stop pills ONLY on Reachable, Selected, Hovered, or Boss nodes!
-    for (const nv of this.nodeMap.values()) {
-      const isAvail = snap.availableIds.has(nv.node.id);
-      const isSel = snap.selectedNodeId === nv.node.id;
-      const isHover = this.hoveredNodeId === nv.node.id;
-      const isBoss = nv.node.type === 'boss';
-      if (!isAvail && !isSel && !isHover && !isBoss) continue;
+    const previewSet = new Set(snap.previewPathIds ?? []);
 
-      const worldTop = nv.pos.clone().add(new THREE.Vector3(0, isBoss ? 2.15 : 1.28, 0));
-      this.tmpVec3.copy(worldTop).project(this.camera);
+    for (const nv of this.nodeMap.values()) {
+      this.tmpVec3.copy(nv.pos).add(new THREE.Vector3(0, 0.22, 0));
+      this.tmpVec3.project(this.camera);
       if (this.tmpVec3.z < -1 || this.tmpVec3.z > 1) continue;
 
       const sx = (this.tmpVec3.x * 0.5 + 0.5) * this.cssW;
       const sy = (-this.tmpVec3.y * 0.5 + 0.5) * this.cssH;
-      if (sx < -40 || sx > this.cssW + 40 || sy < 52 || sy > this.cssH - 96) continue;
+      if (sx < -40 || sx > this.cssW + 40 || sy < -40 || sy > this.cssH + 40) continue;
 
-      const meta = NODE_TYPE_COLORS[nv.node.type];
-      const text = isSel || isHover || isBoss ? nv.node.name : meta.label.toUpperCase();
-      ctx.font = `800 ${isSel || isBoss ? 12 : 10.5}px 'Fredoka', system-ui, sans-serif`;
-      const tw = ctx.measureText(text).width;
-      const pw = tw + 16;
-      const ph = isSel || isBoss ? 24 : 20;
-      const px = Math.max(8, Math.min(this.cssW - pw - 8, sx - pw / 2));
-      const py = sy - ph / 2;
+      const style = NODE_TYPE_STYLE[nv.node.type] ?? NODE_TYPE_STYLE.skirmish;
+      const isAvail = snap.availableIds.has(nv.node.id);
+      const isDone = snap.completedIds.has(nv.node.id);
+      const isSelected = snap.selectedNodeId === nv.node.id;
+      const isHovered = this.hoveredNodeId === nv.node.id;
+      const isInPreview = previewSet.has(nv.node.id);
 
-      ctx.fillStyle = isSel ? '#ffe26a' : isBoss ? '#7c1c28' : '#fbf3df';
-      roundRect(ctx, px, py, pw, ph, 10);
+      // Crisp miniature wooden medallion icon badge right on each board space!
+      const r = nv.node.type === 'boss' ? 16 : isAvail || isSelected ? 14 : 11.5;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = isDone && nv.node.type !== 'start'
+        ? '#4f9937'
+        : isAvail
+          ? style.badge
+          : 'rgba(247, 236, 206, 0.92)';
       ctx.fill();
-      ctx.strokeStyle = isSel ? '#3e220f' : meta.badge;
-      ctx.lineWidth = isSel ? 2.5 : 1.8;
+      ctx.lineWidth = isSelected || isHovered ? 3 : 2;
+      ctx.strokeStyle = isSelected || isHovered || isInPreview ? '#ffe45e' : '#3e220f';
       ctx.stroke();
 
-      ctx.fillStyle = isBoss && !isSel ? '#fff6e0' : '#3e220f';
+      ctx.font = `700 ${nv.node.type === 'boss' ? 13 : 11}px "Fredoka", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(text, px + pw / 2, sy + 0.5);
+      ctx.fillStyle = isAvail || (isDone && nv.node.type !== 'start') ? '#fffdf5' : '#3e220f';
+      ctx.fillText(isDone && nv.node.type !== 'start' ? '✓' : style.icon, sx, sy + 0.5);
+      ctx.restore();
+
+      // Clean floating region/type callout ONLY for hovered, selected, or Boss space so the watercolor painting breathes!
+      if (isHovered || isSelected || (nv.node.type === 'boss' && isAvail)) {
+        const tag = nv.node.region ? `${style.label} · ${nv.node.region}` : style.label;
+        ctx.font = '800 11.5px "Nunito", sans-serif';
+        const tw = ctx.measureText(tag).width + 16;
+        const th = 22;
+        const tx = Math.max(12, Math.min(this.cssW - tw - 12, sx - tw / 2));
+        const ty = Math.max(66, sy - r - th - 6);
+
+        ctx.save();
+        roundRect(ctx, tx, ty, tw, th, 9);
+        ctx.fillStyle = isAvail ? '#fff8df' : 'rgba(255, 249, 235, 0.94)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = isAvail ? '#c97b12' : '#4a2e16';
+        ctx.stroke();
+        ctx.fillStyle = '#3a200c';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(tag, tx + tw / 2, ty + th / 2 + 0.5);
+        ctx.restore();
+      }
     }
 
     ctx.restore();
@@ -981,110 +874,99 @@ export class OverworldMapRenderer {
     this.lastTime = now;
     this.elapsed += dt;
 
-    // Smoothly glide camera to desired target & zoom
-    const k = 1 - Math.exp(-dt * 8);
-    this.curTarget.lerp(this.targetPos, k);
-    this.curDist = THREE.MathUtils.lerp(this.curDist, this.desiredDist, k);
+    // Smooth tabletop camera follow
+    const damp = 1 - Math.exp(-7 * dt);
+    this.curTarget.lerp(this.targetPos, damp);
+    this.curDist += (this.desiredDist - this.curDist) * damp;
 
     const horiz = Math.cos(this.camPitch) * this.curDist;
-    const camX = this.curTarget.x + Math.sin(this.camYaw) * horiz;
-    const camY = this.curTarget.y + Math.sin(this.camPitch) * this.curDist;
-    const camZ = this.curTarget.z + Math.cos(this.camYaw) * horiz;
-    this.camera.position.set(camX, camY, camZ);
+    this.camera.position.set(
+      this.curTarget.x + Math.sin(this.camYaw) * horiz,
+      this.curTarget.y + Math.sin(this.camPitch) * this.curDist,
+      this.curTarget.z + Math.cos(this.camYaw) * horiz
+    );
     this.camera.lookAt(this.curTarget);
 
-    // Animate node rings, beacons & spinning props
+    // Animate board tokens & beacons
     const snap = this.snapshot;
     for (const nv of this.nodeMap.values()) {
-      const isSel = snap?.selectedNodeId === nv.node.id;
       const isAvail = snap?.availableIds.has(nv.node.id) ?? false;
-      const isHover = this.hoveredNodeId === nv.node.id;
+      const isSelected = snap?.selectedNodeId === nv.node.id;
+      const isHovered = this.hoveredNodeId === nv.node.id;
 
-      if (isSel) {
-        nv.ringMat.color.set('#ffe252');
-        nv.ringMat.opacity = 0.95;
-        const sc = 1.08 + Math.sin(this.elapsed * 6.5) * 0.08;
-        nv.ringMesh.scale.set(sc, 1, sc);
-      } else if (isAvail) {
-        nv.ringMat.color.set(isHover ? '#ffffff' : '#ffcf48');
-        nv.ringMat.opacity = 0.72 + Math.sin(this.elapsed * 5 + nv.pos.x) * 0.22;
-        const sc = 1 + Math.sin(this.elapsed * 4.5 + nv.pos.z) * 0.06;
-        nv.ringMesh.scale.set(sc, 1, sc);
-      } else if (isHover) {
-        nv.ringMat.color.set('#fff3cc');
-        nv.ringMat.opacity = 0.65;
-        nv.ringMesh.scale.set(1, 1, 1);
-      } else {
-        nv.ringMat.opacity = 0;
+      if (nv.beaconMesh.visible) {
+        nv.beaconMesh.rotation.y = this.elapsed * 2.4;
+        nv.beaconMesh.position.y =
+          (nv.node.type === 'boss' ? 1.55 : 0.72) + Math.sin(this.elapsed * 4.2 + nv.pos.x) * 0.1;
       }
-
       if (isAvail) {
-        nv.beaconMat.opacity = (isSel ? 0.24 : 0.14) + Math.sin(this.elapsed * 3.5 + nv.pos.x) * 0.05;
-      } else {
-        nv.beaconMat.opacity = 0;
+        const pulse = 1 + Math.sin(this.elapsed * 4.8 + nv.pos.x) * 0.09;
+        nv.ringMesh.scale.setScalar(isSelected || isHovered ? 1.16 : pulse);
+        nv.ringMat.color.setHex(isSelected || isHovered ? 0xfff078 : 0xffd040);
       }
-
       if (nv.propSpin) {
         nv.propSpin.rotation.y = this.elapsed * 1.8;
-        nv.propSpin.position.y = (nv.node.type === 'elite' ? 1.02 : 0.76) + Math.sin(this.elapsed * 3.2) * 0.07;
       }
     }
 
-    // Animate Squad Leader & Boss standees (including lively 3-hop stepping-stone travel!)
+    // Animate Leader Pawn (multi-step hop OR cheerful idle bob!)
     if (this.leaderRig) {
-      this.leaderRig.root.rotation.y = this.camYaw;
       if (this.leaderHopAnim) {
-        const anim = this.leaderHopAnim;
-        const t = Math.min(1, (performance.now() - anim.startMs) / anim.durationMs);
-        const pt = anim.curve.getPoint(t);
-        this.leaderRig.root.position.copy(pt);
-        // 3 lively Paper Mario trail hops along the stones!
-        const hopArc = Math.abs(Math.sin(t * Math.PI * 3)) * 0.56;
-        this.leaderRig.tiltGroup.position.y = hopArc;
-        this.leaderRig.tiltGroup.rotation.z = Math.sin(t * Math.PI * 6) * 0.16;
-        this.leaderRig.flipGroup.rotation.y = Math.sin(t * Math.PI * 3) * 0.35;
+        const t = Math.min(1, (now - this.leaderHopAnim.startMs) / this.leaderHopAnim.durationMs);
+        const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        this.leaderHopAnim.curve.getPoint(ease, this.leaderRig.root.position);
+        this.leaderRig.tiltGroup.rotation.z = Math.sin(t * Math.PI) * 0.16;
         if (t >= 1) {
-          anim.resolve();
+          this.leaderHopAnim.resolve();
         }
       } else {
-        this.leaderRig.tiltGroup.position.y = Math.abs(Math.sin(this.elapsed * 4.2)) * 0.09;
-        this.leaderRig.tiltGroup.rotation.z = Math.sin(this.elapsed * 2.1) * 0.04;
+        this.leaderRig.tiltGroup.position.y = Math.abs(Math.sin(this.elapsed * 3.8)) * 0.08;
+        this.leaderRig.tiltGroup.rotation.z = Math.sin(this.elapsed * 1.9) * 0.04;
       }
     }
+
     if (this.bossRig) {
-      this.bossRig.root.rotation.y = this.camYaw;
-      this.bossRig.tiltGroup.position.y = Math.abs(Math.sin(this.elapsed * 2.4)) * 0.06;
-      this.bossRig.tiltGroup.rotation.z = Math.sin(this.elapsed * 1.6) * 0.03;
+      this.bossRig.tiltGroup.position.y = Math.abs(Math.sin(this.elapsed * 2.6 + 1.2)) * 0.06;
     }
-    for (const t of this.trees) {
-      t.obj.rotation.z = Math.sin(this.elapsed * 1.4 + t.phase) * 0.03;
-    }
-    for (const c of this.clouds) {
-      c.obj.position.x = c.baseX + Math.sin(this.elapsed * 0.3 + c.phase) * 0.55;
+
+    // Drifting seasonal paper weather motes
+    for (const m of this.weatherMotes) {
+      m.mesh.position.y -= dt * m.speed * 0.45;
+      m.mesh.position.x = m.baseX + Math.sin(this.elapsed * m.speed + m.phase) * 0.65;
+      m.mesh.rotation.z = this.elapsed * 1.4 + m.phase;
+      m.mesh.rotation.x = Math.sin(this.elapsed * 1.1 + m.phase) * 0.6;
+      if (m.mesh.position.y < BOARD_TOP_Y + 0.15) {
+        m.mesh.position.y = BOARD_TOP_Y + 3.2;
+      }
     }
 
     this.renderer.render(this.scene, this.camera);
-    this.drawOverlay2D();
+    this.drawOverlay();
   };
 
   public destroy(): void {
     this.destroyed = true;
+    cancelAnimationFrame(this.rafId);
     if (this.leaderHopAnim) {
+      clearTimeout(this.leaderHopAnim.timer);
       this.leaderHopAnim.resolve();
       this.leaderHopAnim = null;
     }
-    cancelAnimationFrame(this.rafId);
     this.resizeObserver.disconnect();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
-    this.canvas.removeEventListener('pointermove', this.onPointerMove);
-    this.canvas.removeEventListener('pointerup', this.onPointerUp);
-    this.canvas.removeEventListener('pointercancel', this.onPointerUp);
+    window.removeEventListener('pointermove', this.onPointerMove);
+    window.removeEventListener('pointerup', this.onPointerUp);
     this.canvas.removeEventListener('wheel', this.onWheel);
+    for (const tex of this.boardTextures.values()) {
+      tex.dispose();
+    }
+    this.boardTextures.clear();
     this.clearGroup(this.worldGroup);
     this.clearGroup(this.trailGroup);
+    this.clearGroup(this.previewPathGroup);
     this.clearGroup(this.nodeGroup);
-    this.leaderRig?.dispose();
-    this.bossRig?.dispose();
+    this.clearGroup(this.standeeGroup);
+    this.clearGroup(this.weatherGroup);
     this.textures.dispose();
     this.renderer.dispose();
   }

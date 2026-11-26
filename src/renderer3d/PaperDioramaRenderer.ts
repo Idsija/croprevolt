@@ -29,13 +29,14 @@ import { roundRect } from '../renderer/particles';
 import { sfx } from '../renderer/sfx';
 import { TacticalCameraController } from './cameraController';
 import { getTileSurfaceY, PaperDioramaWorld } from './diorama';
-import { TacticalOverlaySystem3D } from './tacticalOverlays';
+import { TacticalOverlaySystem3D, type ProjectedSightlineTarget } from './tacticalOverlays';
 import {
   CraftTextureLibrary,
   createPaperStandeeRig,
   hasVariantSprite,
   resolveVariantSpriteKey,
   SPRITE_DEFAULT_FACING,
+  UNIT_WORLD_HEIGHTS,
   type PaperStandeeRig,
 } from './textures';
 import {
@@ -122,6 +123,7 @@ interface CachedTactics {
   attackKeySet: Set<string>;
   weaponRangeKeys: Set<string>;
   isProjectingFromMove: boolean;
+  projectedTargets: ProjectedSightlineTarget[];
   overwatchRangeKeys: Set<string>;
   abilityKeySet: Set<string>;
   itemKeySet: Set<string>;
@@ -165,6 +167,15 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   private fxGroup = new THREE.Group();
   private unitMap = new Map<string, UnitVisualEntry>();
   private unitPickMeshes: THREE.Mesh[] = [];
+
+  // 3D Translucent Hover Ghost Standee (shows exactly where hero lands on hovered Move/Jump tile!)
+  private ghostRoot = new THREE.Group();
+  private ghostPlane: THREE.Mesh;
+  private ghostMat: THREE.MeshBasicMaterial;
+  private ghostRing: THREE.Mesh;
+  private ghostRingMat: THREE.MeshBasicMaterial;
+  private ghostSpriteKey = '';
+  private ghostAspect = 1;
 
   private projectiles: Projectile3D[] = [];
   private particles: Particle3D[] = [];
@@ -241,9 +252,37 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     this.world = new PaperDioramaWorld(this.textures);
     this.overlays = new TacticalOverlaySystem3D(this.textures);
 
+    // Translucent 3D Hover Ghost Standee
+    this.ghostMat = new THREE.MeshBasicMaterial({
+      color: '#a8f2ff',
+      transparent: true,
+      opacity: 0.52,
+      alphaTest: 0.12,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.ghostPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.ghostMat);
+    this.ghostPlane.renderOrder = 22;
+    this.ghostRoot.add(this.ghostPlane);
+
+    const gRingGeo = new THREE.RingGeometry(0.32, 0.48, 24);
+    gRingGeo.rotateX(-Math.PI / 2);
+    this.ghostRingMat = new THREE.MeshBasicMaterial({
+      color: '#5ae6ff',
+      transparent: true,
+      opacity: 0.86,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.ghostRing = new THREE.Mesh(gRingGeo, this.ghostRingMat);
+    this.ghostRing.position.y = 0.045;
+    this.ghostRoot.add(this.ghostRing);
+    this.ghostRoot.visible = false;
+
     this.scene.add(this.world.root);
     this.scene.add(this.overlays.root);
     this.scene.add(this.unitGroup);
+    this.scene.add(this.ghostRoot);
     this.scene.add(this.fxGroup);
 
     this.setupLights();
@@ -452,11 +491,18 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
 
     if (!wasTracked) return;
 
-    const wasClick =
+    const wasLeftClick =
       this.dragMode === 'none' &&
       !this.didPinch &&
       this.downPoint !== null &&
       (this.downPoint.button === 0 || e.pointerType !== 'mouse');
+
+    const wasRightClick =
+      this.dragMode === 'none' &&
+      !this.didPinch &&
+      this.downPoint !== null &&
+      this.downPoint.button === 2 &&
+      e.pointerType === 'mouse';
 
     if (this.activePointers.size === 0) {
       this.downPoint = null;
@@ -465,7 +511,12 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       this.lastPinchDist = 0;
     }
 
-    if (wasClick) {
+    if (wasRightClick) {
+      this.hooks.onRightClickCancel?.();
+      return;
+    }
+
+    if (wasLeftClick) {
       const tile = this.pickGridTile(e.clientX, e.clientY);
       if (tile) {
         this.hooks.onTileTap(tile, e.pointerType);
@@ -1314,9 +1365,25 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       }
     }
     const weaponRangeKeys = new Set<string>();
+    const projectedTargets: ProjectedSightlineTarget[] = [];
     if (selectedUnit && weaponRangeOrigin) {
       for (const p of getWeaponRangeTiles(b, selectedUnit, weaponRangeOrigin)) {
         weaponRangeKeys.add(posKey(p));
+      }
+      if (isProjectingFromMove) {
+        const ghostUnit: BattleUnit = { ...selectedUnit, pos: weaponRangeOrigin };
+        for (const u of b.units) {
+          if (!u.alive || u.team !== 'enemy') continue;
+          if (!weaponRangeKeys.has(posKey(u.pos))) continue;
+          const fc = forecastAttack(b, ghostUnit, u.pos);
+          if (fc.canAttack && fc.hitChance > 0) {
+            projectedTargets.push({
+              pos: u.pos,
+              hitChance: fc.hitChance,
+              isLethal: fc.isLethal,
+            });
+          }
+        }
       }
     }
 
@@ -1424,6 +1491,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       attackKeySet,
       weaponRangeKeys,
       isProjectingFromMove,
+      projectedTargets,
       overwatchRangeKeys,
       abilityKeySet,
       itemKeySet,
@@ -2217,6 +2285,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       attackKeySet: tac.attackKeySet,
       weaponRangeKeys: tac.weaponRangeKeys,
       isProjectingFromMove: tac.isProjectingFromMove,
+      projectedTargets: tac.projectedTargets,
       previewOverwatch: Boolean(view.previewOverwatch),
       overwatchRangeKeys: tac.overwatchRangeKeys,
       abilityKeySet: tac.abilityKeySet,
@@ -2277,11 +2346,67 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     this.cameraCtrl.update(rawDt);
     this.overlays.update(this.elapsedTotal, this.cameraCtrl.camera.position);
     this.syncUnits(view, tac, simDt);
+    this.syncHoverGhost(view, tac);
     this.updateEffects(simDt);
 
     this.renderer.render(this.scene, this.cameraCtrl.camera);
     this.drawOverlay2D(view, tac);
   };
+
+  private syncHoverGhost(view: RendererViewState, tac: CachedTactics): void {
+    const b = view.battle;
+    const hero = tac.selectedUnit;
+    const focus = view.previewTile ?? view.hoveredTile;
+
+    const showGhost =
+      b.phase === 'player' &&
+      b.status === 'ongoing' &&
+      !b.prepPhase &&
+      view.mode === 'move' &&
+      Boolean(hero) &&
+      Boolean(focus) &&
+      !samePos(focus!, hero!.pos) &&
+      (tac.movableMap.has(posKey(focus!)) || tac.jumpMap.has(posKey(focus!)));
+
+    if (!showGhost || !hero || !focus) {
+      this.ghostRoot.visible = false;
+      return;
+    }
+
+    this.ghostRoot.visible = true;
+    const isJump = tac.jumpMap.has(posKey(focus));
+    const isBounce = tileAt(b, focus)?.terrain === 'bounce_pad';
+
+    if (this.ghostSpriteKey !== hero.visualKind) {
+      this.ghostSpriteKey = hero.visualKind;
+      const pair = this.textures.getSpriteTexturePair(hero.visualKind, (aspect) => {
+        this.ghostAspect = aspect;
+      });
+      this.ghostMat.map = pair.front;
+      this.ghostMat.needsUpdate = true;
+      this.ghostAspect = pair.aspect;
+    }
+
+    const h = UNIT_WORLD_HEIGHTS[hero.visualKind] ?? 1.1;
+    const w = Math.max(0.55, h * this.ghostAspect);
+    const bob = Math.sin(this.elapsedTotal * 5.2) * 0.055;
+    const wp = this.worldPointForTile(b, focus, 0);
+
+    this.ghostRoot.position.set(wp.x, wp.y, wp.z);
+    this.ghostRoot.rotation.y = this.cameraCtrl.getCurrentYaw();
+
+    const defaultFacing = SPRITE_DEFAULT_FACING[hero.visualKind] ?? 'right';
+    const flipX = hero.facing !== defaultFacing ? -1 : 1;
+    this.ghostPlane.scale.set(w * flipX, h, 1);
+    this.ghostPlane.position.set(0, 0.08 + h * 0.5 + bob, 0);
+
+    const tint = isJump ? '#ffe878' : isBounce ? '#ff85c8' : '#a8f2ff';
+    this.ghostMat.color.set(tint);
+    this.ghostMat.opacity = 0.48 + Math.sin(this.elapsedTotal * 5.2) * 0.08;
+    this.ghostRingMat.color.set(isJump ? '#ffd54f' : isBounce ? '#ff4fa3' : '#4ee4ff');
+    const ringSc = 1 + Math.sin(this.elapsedTotal * 5.2) * 0.07;
+    this.ghostRing.scale.set(ringSc, 1, ringSc);
+  }
 
   public destroy(): void {
     cancelAnimationFrame(this.rafId);
@@ -2304,6 +2429,10 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       (pt.mesh.material as THREE.Material).dispose();
     }
     this.particles = [];
+    this.ghostPlane.geometry.dispose();
+    this.ghostMat.dispose();
+    this.ghostRing.geometry.dispose();
+    this.ghostRingMat.dispose();
     this.confettiGeo.dispose();
     this.plankGeo.dispose();
     this.dropletGeo.dispose();

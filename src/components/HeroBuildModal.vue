@@ -1,18 +1,23 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import {
   canUnlockPerk,
-  getPerksForBranch,
+  getHeroSkillTree,
   getXpToNextLevel,
   MAX_HERO_LEVEL,
-  SKILL_BRANCH_META,
   SKILL_PERKS,
-  type SkillBranch,
+  type SkillPathDef,
 } from '../data/skills';
 import { buildScaledWeaponForHero, getSpeciesWeapons } from '../data/weapons';
 import { getFamilyLabel } from '../engine/hooks';
-import { equipWeapon, gameStore, toggleSquadMember, unlockPerk } from '../stores/gameStore';
+import {
+  equipWeapon,
+  gameStore,
+  respecPerks,
+  toggleSquadMember,
+  unlockPerk,
+} from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
 
 const props = defineProps<{
@@ -23,8 +28,14 @@ const emit = defineEmits<{
   close: [];
 }>();
 
+function onModalKeyDown(e: KeyboardEvent): void {
+  if (e.key === 'Escape') emit('close');
+}
+
+onMounted(() => window.addEventListener('keydown', onModalKeyDown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onModalKeyDown));
+
 const run = computed(() => gameStore.run!);
-const branches: SkillBranch[] = ['mobility', 'firepower', 'survival'];
 
 const selectedUid = ref<string>(
   props.initialHeroUid ??
@@ -42,6 +53,14 @@ watch(
 
 const selectedHero = computed(
   () => run.value.roster.find((h) => h.uid === selectedUid.value) ?? run.value.roster[0] ?? null
+);
+
+const heroTree = computed(() =>
+  selectedHero.value ? getHeroSkillTree(selectedHero.value.species) : null
+);
+
+const heroPaths = computed<SkillPathDef[]>(() =>
+  heroTree.value ? [heroTree.value.pathA, heroTree.value.pathB] : []
 );
 
 const isSelectedActive = computed(() =>
@@ -89,12 +108,25 @@ function handleUnlock(perkId: string): void {
   unlockPerk(selectedHero.value.uid, perkId);
 }
 
+function handleRespec(): void {
+  if (!selectedHero.value || selectedHero.value.harvested || selectedHero.value.perkIds.length === 0) {
+    return;
+  }
+  respecPerks(selectedHero.value.uid);
+}
+
 function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
   const h = selectedHero.value;
   if (!h) return 'locked';
   if (h.perkIds.includes(perkId)) return 'unlocked';
-  if (!h.harvested && canUnlockPerk(h.perkIds, h.skillPoints, perkId)) return 'ready';
+  if (!h.harvested && canUnlockPerk(h.perkIds, h.skillPoints, perkId, h.species)) return 'ready';
   return 'locked';
+}
+
+function unlockedCountInPath(path: SkillPathDef): number {
+  const h = selectedHero.value;
+  if (!h) return 0;
+  return path.perks.filter((p) => h.perkIds.includes(p.id)).length;
 }
 </script>
 
@@ -108,13 +140,13 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
       <!-- Header -->
       <header class="build-head">
         <div>
-          <h2>Squad Builds, Armory &amp; Skill Trees</h2>
+          <h2>Unique Character Skill Trees &amp; Armory</h2>
           <small>
             Active Squad: {{ run.activeSquadUids.length }}/4 ·
             <strong v-if="totalUnspentSp > 0" class="sp-highlight">
               ★ {{ totalUnspentSp }} Skill Point{{ totalUnspentSp > 1 ? 's' : '' }} ready to spend!
             </strong>
-            <span v-else>Win battles to earn XP, Skill Points &amp; Armory Weapons</span>
+            <span v-else>Every hero has 2 bespoke build paths — free respec anytime</span>
           </small>
         </div>
         <button class="paper-btn icon-only" aria-label="Close" @click="emit('close')">
@@ -153,7 +185,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
           </button>
         </aside>
 
-        <!-- Right Hero Build Sheet, Armory & 3-Branch Skill Tree -->
+        <!-- Right Hero Build Sheet, Armory & Illustrated 2-Path Botanical Skill Tree -->
         <div v-if="selectedHero" class="hero-pane scroll-soft">
           <div class="hero-summary paper-card">
             <div class="hs-left">
@@ -188,6 +220,14 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
               <div class="sp-badge" :class="{ hot: selectedHero.skillPoints > 0 }">
                 ★ {{ selectedHero.skillPoints }} SP
               </div>
+              <button
+                v-if="!selectedHero.harvested && selectedHero.perkIds.length > 0"
+                class="paper-btn respec-btn"
+                title="Refund all spent Skill Points for free"
+                @click="handleRespec"
+              >
+                ↺ Reset Perks
+              </button>
               <button
                 v-if="!selectedHero.harvested"
                 class="paper-btn squad-swap-btn"
@@ -256,7 +296,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
                       ? 'EQUIPPED'
                       : selectedHeroArmory.altUnlocked
                         ? 'EQUIP ALT'
-                        : '🔒 MARKET / ELITE'
+                        : '🔒 ARMORY / ELITE'
                   }}
                 </span>
               </div>
@@ -269,53 +309,90 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
             </button>
           </div>
 
-          <!-- 3-Branch Skill Tree Grid -->
-          <div class="tree-grid">
+          <!-- Illustrated 2-Path Botanical Vine Skill Tree -->
+          <div class="tree-paths-grid">
             <div
-              v-for="branch in branches"
-              :key="branch"
-              class="branch-col"
+              v-for="path in heroPaths"
+              :key="path.key"
+              class="path-panel"
               :style="{
-                '--br-col': SKILL_BRANCH_META[branch].color,
-                '--br-bg': SKILL_BRANCH_META[branch].accent,
+                '--path-col': path.color,
+                '--path-bg': path.accent,
               }"
             >
-              <div class="branch-head">
-                <strong>{{ SKILL_BRANCH_META[branch].label }}</strong>
-                <small>{{ SKILL_BRANCH_META[branch].tagline }}</small>
+              <div class="path-banner">
+                <div class="pb-left">
+                  <span class="pb-icon">{{ path.icon }}</span>
+                  <div>
+                    <strong>{{ path.name }}</strong>
+                    <small>{{ path.tagline }}</small>
+                  </div>
+                </div>
+                <span class="pb-prog">{{ unlockedCountInPath(path) }}/3</span>
               </div>
 
-              <div class="perk-stack">
-                <button
-                  v-for="perk in getPerksForBranch(branch)"
-                  :key="perk.id"
-                  class="perk-card"
-                  :class="[
-                    perkState(perk.id),
-                    { capstone: perk.tier === 2 },
-                  ]"
-                  :disabled="perkState(perk.id) !== 'ready'"
-                  @click="handleUnlock(perk.id)"
-                >
-                  <div class="perk-top">
-                    <span class="perk-icon">{{ perk.icon }}</span>
-                    <div class="perk-title-wrap">
-                      <strong>{{ perk.name }}</strong>
-                      <span v-if="perk.tier === 2" class="cap-tag">CAPSTONE</span>
-                    </div>
-                    <span v-if="perkState(perk.id) === 'unlocked'" class="perk-stamp done">
-                      ✓
-                    </span>
-                    <span v-else class="perk-stamp cost">{{ perk.cost }} SP</span>
-                  </div>
-                  <p class="perk-desc">{{ perk.description }}</p>
-                  <small
-                    v-if="perk.requires && !selectedHero.perkIds.includes(perk.requires)"
-                    class="req-note"
+              <div class="vine-tree">
+                <template v-for="(perk, idx) in path.perks" :key="perk.id">
+                  <!-- Illustrated Botanical Vine Connector between Tier 1 -> 2 -> 3 -->
+                  <div
+                    v-if="idx > 0"
+                    class="vine-connector"
+                    :class="{
+                      lit: selectedHero.perkIds.includes(path.perks[idx - 1].id),
+                      golden: selectedHero.perkIds.includes(perk.id),
+                    }"
+                    aria-hidden="true"
                   >
-                    Requires: {{ SKILL_PERKS[perk.requires]?.name }}
-                  </small>
-                </button>
+                    <svg viewBox="0 0 64 26" width="64" height="26">
+                      <path
+                        class="vine-stem"
+                        d="M32 0 C28 9, 36 17, 32 26"
+                        fill="none"
+                        stroke-width="3.5"
+                        stroke-linecap="round"
+                      />
+                      <ellipse class="vine-leaf" cx="24" cy="11" rx="5.5" ry="3" transform="rotate(-24 24 11)" />
+                      <ellipse class="vine-leaf" cx="40" cy="15" rx="5.5" ry="3" transform="rotate(24 40 15)" />
+                    </svg>
+                  </div>
+
+                  <!-- Illustrated Perk Node Card -->
+                  <button
+                    class="perk-node"
+                    :class="[
+                      perkState(perk.id),
+                      { capstone: perk.tier === 3 },
+                    ]"
+                    :disabled="perkState(perk.id) !== 'ready'"
+                    @click="handleUnlock(perk.id)"
+                  >
+                    <div class="pn-medallion">
+                      <span>{{ perk.icon }}</span>
+                    </div>
+
+                    <div class="pn-body">
+                      <div class="pn-top">
+                        <div class="pn-title-wrap">
+                          <strong>{{ perk.name }}</strong>
+                          <span v-if="perk.tier === 3" class="tier-tag cap">★ CAPSTONE</span>
+                          <span v-else class="tier-tag">Tier {{ perk.tier }}</span>
+                        </div>
+                        <span v-if="perkState(perk.id) === 'unlocked'" class="wax-seal done" title="Unlocked">
+                          ✓
+                        </span>
+                        <span v-else class="wax-seal cost">{{ perk.cost }} SP</span>
+                      </div>
+                      <span class="pn-short">{{ perk.shortDesc }}</span>
+                      <p class="pn-desc">{{ perk.description }}</p>
+                      <small
+                        v-if="perk.requires && !selectedHero.perkIds.includes(perk.requires)"
+                        class="req-note"
+                      >
+                        Requires: {{ SKILL_PERKS[perk.requires]?.name }}
+                      </small>
+                    </div>
+                  </button>
+                </template>
               </div>
             </div>
           </div>
@@ -339,12 +416,12 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 }
 
 .build-sheet {
-  width: min(980px, 100%);
-  max-height: min(90dvh, 720px);
+  width: min(1020px, 100%);
+  max-height: min(92dvh, 760px);
   display: flex;
   flex-direction: column;
   padding: 16px 18px 18px;
-  gap: 12px;
+  gap: 11px;
   position: relative;
 }
 
@@ -357,13 +434,13 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 
 .build-head h2 {
   margin: 0;
-  font-size: 1.28rem;
+  font-size: 1.24rem;
   color: var(--ink);
 }
 
 .build-head small {
   color: var(--ink-soft);
-  font-size: 0.82rem;
+  font-size: 0.8rem;
 }
 
 .sp-highlight {
@@ -372,7 +449,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 
 .build-body {
   display: grid;
-  grid-template-columns: 205px minmax(0, 1fr);
+  grid-template-columns: 196px minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
   flex: 1;
@@ -381,7 +458,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 .roster-rail {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -389,8 +466,8 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 .roster-btn {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 7px 9px;
+  gap: 8px;
+  padding: 6px 8px;
   background: #f9eed7;
   border: 2px solid var(--ink);
   border-radius: 12px;
@@ -415,8 +492,8 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 
 .rb-port {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 10px;
   background: #efe0bf;
   border: 1.5px solid var(--ink);
@@ -427,8 +504,8 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 }
 
 .rb-port img {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   object-fit: contain;
 }
 
@@ -438,7 +515,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
   left: -4px;
   background: #4a2c17;
   color: #ffe99e;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 800;
   padding: 0 4px;
   border-radius: 5px;
@@ -451,7 +528,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
   background: #e89b14;
   color: #fffef5;
   border: 1.5px solid var(--ink);
-  font-size: 0.64rem;
+  font-size: 0.62rem;
   font-weight: 900;
   padding: 0 4px;
   border-radius: 999px;
@@ -470,7 +547,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 }
 
 .rb-copy strong {
-  font-size: 0.85rem;
+  font-size: 0.83rem;
   color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
@@ -478,7 +555,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 }
 
 .rb-copy small {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--ink-soft);
 }
 
@@ -499,33 +576,33 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 9px 12px;
   flex-wrap: wrap;
 }
 
 .hs-left {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   flex: 1;
   min-width: 210px;
 }
 
 .hs-sprite {
-  width: 56px;
-  height: 56px;
+  width: 52px;
+  height: 52px;
   object-fit: contain;
   background: #f0e1c2;
   border: 2px solid var(--ink);
   border-radius: 12px;
-  padding: 4px;
+  padding: 3px;
 }
 
 .hs-meta {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   flex: 1;
 }
 
@@ -538,14 +615,14 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 
 .hs-title-row h3 {
   margin: 0;
-  font-size: 1.08rem;
+  font-size: 1.05rem;
   color: var(--ink);
 }
 
 .lvl-pill {
   background: #4a2c17;
   color: #ffe891;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 800;
   padding: 2px 7px;
   border-radius: 999px;
@@ -555,7 +632,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
   background: #e5f3d8;
   color: #2f6b1c;
   border: 1.5px solid #598f3a;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 800;
   padding: 1px 6px;
   border-radius: 999px;
@@ -563,7 +640,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 }
 
 .hs-sub {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   color: var(--ink-soft);
 }
 
@@ -576,8 +653,8 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 
 .xp-track {
   flex: 1;
-  max-width: 190px;
-  height: 8px;
+  max-width: 180px;
+  height: 7px;
   background: #dfd0b0;
   border: 1.5px solid var(--ink);
   border-radius: 999px;
@@ -591,7 +668,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 }
 
 .xp-txt {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 700;
   color: #255a85;
 }
@@ -599,7 +676,8 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 .hs-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  flex-wrap: wrap;
 }
 
 .sp-badge {
@@ -608,7 +686,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
   border-radius: 10px;
   padding: 5px 10px;
   font-weight: 900;
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   color: var(--ink-soft);
 }
 
@@ -618,9 +696,16 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
   box-shadow: 0 2px 0 var(--ink);
 }
 
+.respec-btn {
+  padding: 6px 10px;
+  font-size: 0.76rem;
+  background: #fff3d6;
+  color: #7a3c0c;
+}
+
 .squad-swap-btn {
-  padding: 6px 11px;
-  font-size: 0.78rem;
+  padding: 6px 10px;
+  font-size: 0.76rem;
 }
 
 .stat-ribbon {
@@ -631,10 +716,10 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 
 .stat-chip {
   background: #f8edd5;
-  border: 1.5px solid rgba(74, 44, 23, 0.45);
+  border: 1.5px solid rgba(74, 44, 23, 0.42);
   border-radius: 999px;
   padding: 3px 9px;
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 700;
   color: var(--ink);
 }
@@ -644,6 +729,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
   border-color: #c28717;
 }
 
+/* Armory Switcher */
 .armory-bar {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -653,13 +739,13 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 .weapon-opt {
   border: 2px solid var(--ink);
   border-radius: 12px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   background: #fbf4e4;
   text-align: left;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   transition: transform 0.12s ease, background-color 0.12s ease;
 }
 
@@ -688,12 +774,12 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 }
 
 .wo-head strong {
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   color: var(--ink);
 }
 
 .wo-badge {
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 900;
   padding: 2px 6px;
   border-radius: 999px;
@@ -710,161 +796,270 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 }
 
 .wo-stats {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 800;
   color: #7a3e0a;
 }
 
 .wo-desc {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--ink-soft);
-  line-height: 1.28;
+  line-height: 1.26;
 }
 
-.tree-grid {
+/* ===== Illustrated 2-Path Botanical Vine Skill Tree ===== */
+.tree-paths-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.branch-col {
-  background: #fbf4e4;
-  border: 2px solid var(--ink);
-  border-radius: 14px;
-  padding: 9px;
+.path-panel {
+  background: linear-gradient(180deg, #fdf7ea 0%, #f5e9ce 100%);
+  border: 2.2px solid var(--ink);
+  border-radius: 16px;
+  padding: 10px 11px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.branch-head {
-  background: var(--br-bg);
-  border: 1.5px solid var(--br-col);
-  border-radius: 10px;
-  padding: 6px 8px;
+.path-banner {
+  background: var(--path-bg);
+  border: 2px solid var(--path-col);
+  border-radius: 12px;
+  padding: 7px 10px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.branch-head strong {
-  color: var(--br-col);
-  font-size: 0.86rem;
+.pb-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.branch-head small {
-  font-size: 0.69rem;
+.pb-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.pb-left strong {
+  display: block;
+  color: var(--path-col);
+  font-size: 0.92rem;
+  line-height: 1.15;
+}
+
+.pb-left small {
+  display: block;
+  font-size: 0.7rem;
   color: #4a3520;
-  line-height: 1.25;
+  line-height: 1.2;
 }
 
-.perk-stack {
+.pb-prog {
+  background: var(--path-col);
+  color: #fffdf5;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.vine-tree {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  align-items: stretch;
 }
 
-.perk-card {
-  border: 2px solid var(--ink);
-  border-radius: 11px;
-  padding: 8px 9px;
-  background: #fffaf0;
+.vine-connector {
+  display: flex;
+  justify-content: center;
+  height: 22px;
+  margin: -2px 0;
+}
+
+.vine-stem {
+  stroke: #b9a482;
+  transition: stroke 0.25s ease;
+}
+
+.vine-leaf {
+  fill: #c7b597;
+  transition: fill 0.25s ease;
+}
+
+.vine-connector.lit .vine-stem {
+  stroke: #58a63c;
+}
+
+.vine-connector.lit .vine-leaf {
+  fill: #70bf4e;
+}
+
+.vine-connector.golden .vine-stem {
+  stroke: #d99518;
+}
+
+.vine-connector.golden .vine-leaf {
+  fill: #f2be35;
+}
+
+.perk-node {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 2.2px solid var(--ink);
+  border-radius: 13px;
+  padding: 9px 10px;
+  background: #fffbf0;
   text-align: left;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease;
 }
 
-.perk-card.ready {
-  background: #fffdf5;
-  border-color: var(--br-col);
-  box-shadow: 0 3px 0 var(--br-col);
+.perk-node.capstone {
+  border-width: 2.5px;
 }
 
-.perk-card.ready:hover {
+.perk-node.ready {
+  border-color: var(--path-col);
+  background: #fffef8;
+  box-shadow: 0 3px 0 var(--path-col);
+}
+
+.perk-node.ready:hover {
   transform: translateY(-2px);
-  background: var(--br-bg);
+  background: var(--path-bg);
 }
 
-.perk-card.unlocked {
-  background: linear-gradient(180deg, #e7f8da 0%, #d4f0be 100%);
+.perk-node.unlocked {
+  background: linear-gradient(180deg, #ebf9dd 0%, #d5f0be 100%);
   border-color: #3f7e24;
   cursor: default;
 }
 
-.perk-card.locked {
-  opacity: 0.62;
-  background: #efe5d0;
+.perk-node.unlocked.capstone {
+  background: linear-gradient(180deg, #fff6cc 0%, #ffe285 100%);
+  border-color: #b56f00;
+  box-shadow: 0 3px 0 #8a5200;
+}
+
+.perk-node.locked {
+  opacity: 0.64;
+  background: #efe5d1;
   cursor: not-allowed;
 }
 
-.perk-card.capstone {
-  border-style: double;
-  border-width: 3px;
-}
-
-.perk-top {
+.pn-medallion {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 2px solid var(--ink);
+  background: var(--path-bg);
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  font-size: 1.18rem;
+  flex-shrink: 0;
+  box-shadow: inset 0 -2px 0 rgba(74, 44, 23, 0.18);
 }
 
-.perk-icon {
-  font-size: 1.05rem;
-  line-height: 1;
+.perk-node.unlocked .pn-medallion {
+  background: #fff9db;
+  border-color: #3f7e24;
 }
 
-.perk-title-wrap {
+.perk-node.unlocked.capstone .pn-medallion {
+  background: #ffd74a;
+  border-color: #8a5200;
+}
+
+.pn-body {
   display: flex;
   flex-direction: column;
+  gap: 3px;
   flex: 1;
   min-width: 0;
 }
 
-.perk-title-wrap strong {
-  font-size: 0.82rem;
+.pn-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.pn-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pn-title-wrap strong {
+  font-size: 0.86rem;
   color: var(--ink);
 }
 
-.cap-tag {
-  font-size: 0.56rem;
+.tier-tag {
+  font-size: 0.58rem;
   font-weight: 900;
-  color: var(--br-col);
-  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(74, 44, 23, 0.1);
+  color: var(--ink-soft);
+  text-transform: uppercase;
 }
 
-.perk-stamp {
+.tier-tag.cap {
+  background: #4a2c17;
+  color: #ffe885;
+}
+
+.wax-seal {
   font-size: 0.68rem;
   font-weight: 900;
-  padding: 2px 6px;
+  padding: 2px 8px;
   border-radius: 999px;
-  border: 1.5px solid var(--ink);
+  border: 1.6px solid var(--ink);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.perk-stamp.cost {
-  background: #ffe58a;
-  color: #4f2a00;
+.wax-seal.done {
+  background: #4e9c2e;
+  color: #fffef5;
+  border-color: #244d12;
 }
 
-.perk-stamp.done {
-  background: #58b842;
-  color: #ffffff;
-  border-color: #2b5c1c;
+.wax-seal.cost {
+  background: #ffe694;
+  color: #4a2c17;
 }
 
-.perk-desc {
+.pn-short {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--path-col);
+}
+
+.pn-desc {
   margin: 0;
-  font-size: 0.74rem;
-  line-height: 1.3;
+  font-size: 0.73rem;
   color: var(--ink-soft);
+  line-height: 1.32;
 }
 
 .req-note {
   font-size: 0.67rem;
+  color: #8f3f1d;
   font-weight: 700;
-  color: #9e3d24;
 }
 
 @media (max-width: 820px) {
@@ -876,14 +1071,14 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
     flex-direction: row;
     overflow-x: auto;
     overflow-y: hidden;
-    padding-bottom: 4px;
   }
 
   .roster-btn {
     flex: 0 0 auto;
   }
 
-  .tree-grid {
+  .armory-bar,
+  .tree-paths-grid {
     grid-template-columns: 1fr;
   }
 }

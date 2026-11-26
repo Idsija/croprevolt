@@ -4,6 +4,7 @@ import { ENEMY_BLUEPRINTS } from '../data/enemies';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { PRODUCE_BLUEPRINTS } from '../data/produce';
 import { RELIC_REGISTRY } from '../data/relics';
+import { getHeroSkillTree } from '../data/skills';
 import { ALT_WEAPONS, getSpeciesWeapons } from '../data/weapons';
 import { getFamilyLabel } from '../engine/hooks';
 import { hasVariantSprite, resolveVariantSpriteKey, type SpriteVariantKind } from '../renderer3d/textures';
@@ -63,6 +64,7 @@ const activeSpriteSrc = computed(() => {
 });
 
 const selectedHeroWeapons = computed(() => getSpeciesWeapons(selectedHero.value.species));
+const selectedHeroTree = computed(() => getHeroSkillTree(selectedHero.value.species));
 
 function selectHero(id: string): void {
   selectedHeroId.value = id;
@@ -252,6 +254,17 @@ const cardTransformStyle = computed(() => ({
             <div class="info-box">
               <strong>✨ Signature Skill: {{ selectedHero.ability.name }} (CD {{ selectedHero.ability.cooldown }})</strong>
               <small>{{ selectedHero.ability.description }}</small>
+            </div>
+            <div class="info-box tree-box">
+              <strong>🌿 Unique Skill Trees</strong>
+              <small>
+                <strong>{{ selectedHeroTree.pathA.icon }} {{ selectedHeroTree.pathA.name }}:</strong>
+                {{ selectedHeroTree.pathA.tagline }}
+              </small>
+              <small>
+                <strong>{{ selectedHeroTree.pathB.icon }} {{ selectedHeroTree.pathB.name }}:</strong>
+                {{ selectedHeroTree.pathB.tagline }}
+              </small>
             </div>
           </div>
 

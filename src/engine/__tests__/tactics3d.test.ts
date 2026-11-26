@@ -19,16 +19,19 @@ import {
 } from '../battle';
 import { forecastAttack } from '../combat';
 import { difficultyFor, getHeatSeedMultiplier } from '../difficulty';
-import { createCover, posKey, tileAt } from '../grid';
+import { createCover, getAdjacentCoverBadges, posKey, tileAt } from '../grid';
 import { computeDashOptions, computeMovableTiles, getLinkedBurrowDest } from '../pathfinding';
 import {
   applyBattleOutcomeToRun,
+  claimShrineBlessing,
   claimWeaponReward,
   createHeroFromBlueprint,
   createNewRun,
   defaultMetaProgress,
   equipHeroWeapon,
   generateRewardForNode,
+  openShrineNode,
+  respecHeroPerks,
   unlockHeroPerk,
 } from '../run';
 
@@ -160,10 +163,13 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     expect(enemy.hp).toBe(hpBeforeDrop - dropFc.finalDamage - 2);
   });
 
-  it('executes Mario + Rabbids Hero Sight Overwatch reaction shots (with Hero Sight+ 2x charges)', () => {
+  it('executes Mario + Rabbids Hero Sight Overwatch reaction shots (with Snap-Pea Double Hero Sight + Pinning Volley Root)', () => {
     const run = createNewRun(defaultMetaProgress());
     const peaHero = run.roster.find((h) => h.blueprintId === 'pea')!;
-    expect(unlockHeroPerk(run, peaHero.uid, 'hero_sight')).toBe(true);
+    peaHero.skillPoints = 4;
+    expect(unlockHeroPerk(run, peaHero.uid, 'pea_hawk_pod')).toBe(true);
+    expect(unlockHeroPerk(run, peaHero.uid, 'pea_double_watch')).toBe(true);
+    expect(unlockHeroPerk(run, peaHero.uid, 'pea_suppress')).toBe(true);
 
     const battle = createBattleFromMap('vegetable_patch', run.roster.slice(0, 4), [], run.items);
     for (let y = 0; y < battle.height; y++) {
@@ -187,16 +193,17 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     foeA.pos = { x: 3, y: 1 };
     foeB.pos = { x: 4, y: 1 };
 
-    // Enter Hero Sight Overwatch (spends Attack slot, loads 2 reaction shots via hero_sight perk!)
+    // Enter Hero Sight Overwatch (spends Attack slot, loads 2 reaction shots via pea_double_watch!)
     expect(executeOverwatch(battle, pea.id)).toBe(true);
     expect(pea.actions.hasAttacked).toBe(true);
     expect(pea.actions.overwatchCharges).toBe(2);
     expect(pea.statuses.some((s) => s.kind === 'overwatch')).toBe(true);
 
-    // Enemy Phase: both foes move into Pea's range and get intercepted!
+    // Enemy Phase: both foes move into Pea's range, get intercepted AND Rooted by Pinning Volley!
     startPhase(battle, 'enemy');
     expect(executeMove(battle, foeA.id, { x: 3, y: 3 })).toBe(true);
     expect(foeA.hp).toBeLessThan(20);
+    expect(foeA.statuses.some((s) => s.kind === 'rooted')).toBe(true);
     expect(pea.actions.overwatchCharges).toBe(1);
 
     expect(executeMove(battle, foeB.id, { x: 4, y: 3 })).toBe(true);
@@ -206,31 +213,33 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     expect(battle.pendingEvents.filter((e) => e.type === 'overwatch_shot')).toHaveLength(2);
   });
 
-  it('supports Skill Tree leveling, prerequisites, Multi-Dash chains, Jump Stomp AoE, and Quick Bloom', () => {
+  it('supports unique per-hero Skill Trees, cross-species guards, Multi-Dash, Tater Quake Stomp, Morning Mist, and Free Respec', () => {
     const meta = defaultMetaProgress();
     const run = createNewRun(meta);
     const spudHero = run.roster.find((h) => h.blueprintId === 'potato')!;
-    const peaHero = run.roster.find((h) => h.blueprintId === 'pea')!;
+    const cowHero = run.roster.find((h) => h.blueprintId === 'cow')!;
+    const lettuceHero = run.roster.find((h) => h.blueprintId === 'lettuce')!;
 
-    // Heroes start at Level 1 with 1 SP
+    // Heroes start at Level 1 with 1 SP; cannot unlock another species' perk or skip prerequisite!
     expect(spudHero.level).toBe(1);
     expect(spudHero.skillPoints).toBe(1);
-    // Capstone Jump Stomp cannot be unlocked without Swift Roots prerequisite
-    expect(canUnlockPerk(spudHero.perkIds, 5, 'stomp_landing')).toBe(false);
+    expect(canUnlockPerk(spudHero.perkIds, 5, 'cow_double_gore', 'potato')).toBe(false);
+    expect(canUnlockPerk(spudHero.perkIds, 5, 'pot_stomp', 'potato')).toBe(false);
 
-    // Unlock Swift Roots (+1 Move, +1 Jump) & give extra SP to test Capstone Jump Stomp + Multi-Dash
-    const baseMove = spudHero.moveRange;
-    expect(unlockHeroPerk(run, spudHero.uid, 'swift_roots')).toBe(true);
-    expect(spudHero.moveRange).toBe(baseMove + 1);
+    // Cow unlocks Double Gore (+1 Move, 2× Dashes/turn, +1 Dash DMG)
+    const cowBaseMove = cowHero.moveRange;
+    expect(unlockHeroPerk(run, cowHero.uid, 'cow_double_gore')).toBe(true);
+    expect(cowHero.moveRange).toBe(cowBaseMove + 1);
 
-    spudHero.skillPoints += 3;
-    expect(unlockHeroPerk(run, spudHero.uid, 'double_dash')).toBe(true);
-    expect(unlockHeroPerk(run, spudHero.uid, 'stomp_landing')).toBe(true);
+    // Spudnik unlocks Heavy Masher -> Tater Quake (Jump Stomp 3 AoE!)
+    spudHero.skillPoints += 2;
+    expect(unlockHeroPerk(run, spudHero.uid, 'pot_heavy_mash')).toBe(true);
+    expect(unlockHeroPerk(run, spudHero.uid, 'pot_stomp')).toBe(true);
 
-    // Give Pea Quick Bloom (-1 skill CD + 2 HP self-heal on skill cast)
-    expect(unlockHeroPerk(run, peaHero.uid, 'quick_bloom')).toBe(true);
+    // Crisphead unlocks Morning Mist (-1 Dewy Refresh CD + 2 HP self-heal on cast!)
+    expect(unlockHeroPerk(run, lettuceHero.uid, 'let_morning_mist')).toBe(true);
 
-    const squad = run.roster.filter((h) => ['potato', 'pea', 'lemon', 'cow'].includes(h.blueprintId));
+    const squad = run.roster.filter((h) => ['potato', 'cow', 'lettuce', 'lemon'].includes(h.blueprintId));
     run.activeSquadUids = squad.map((h) => h.uid);
     const battle = createBattleFromMap('vegetable_patch', squad, [], run.items);
     for (let y = 0; y < battle.height; y++) {
@@ -242,44 +251,45 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     }
 
     const spud = battle.units.find((u) => u.visualKind === 'potato')!;
-    const pea = battle.units.find((u) => u.visualKind === 'pea')!;
+    const cow = battle.units.find((u) => u.visualKind === 'cow')!;
+    const lettuce = battle.units.find((u) => u.visualKind === 'lettuce')!;
     const [foeA, foeB] = battle.units.filter((u) => u.team === 'enemy');
     foeA.hp = 15;
     foeB.hp = 15;
 
-    // Multi-Dash 2 different enemies in one turn!
-    spud.pos = { x: 3, y: 6 };
+    // Multi-Dash 2 different enemies with Cow's Double Gore!
+    cow.pos = { x: 3, y: 6 };
     foeA.pos = { x: 3, y: 4 };
     foeB.pos = { x: 5, y: 4 };
-    pea.pos = { x: 3, y: 7 };
+    spud.pos = { x: 1, y: 8 };
+    lettuce.pos = { x: 6, y: 8 };
 
-    expect(executeDash(battle, spud.id, foeA.id)).toBe(true);
-    expect(spud.actions.hasDashed).toBe(false); // 1 dash still left!
-    const secondDashes = computeDashOptions(battle, spud);
-    expect(secondDashes.some((d) => d.enemyId === foeA.id)).toBe(false); // cannot dash same foe twice
+    expect(executeDash(battle, cow.id, foeA.id)).toBe(true);
+    expect(cow.actions.hasDashed).toBe(false);
+    const secondDashes = computeDashOptions(battle, cow);
+    expect(secondDashes.some((d) => d.enemyId === foeA.id)).toBe(false);
     expect(secondDashes.some((d) => d.enemyId === foeB.id)).toBe(true);
-    expect(executeDash(battle, spud.id, foeB.id)).toBe(true);
-    expect(spud.actions.hasDashed).toBe(true);
+    expect(executeDash(battle, cow.id, foeB.id)).toBe(true);
+    expect(cow.actions.hasDashed).toBe(true);
 
-    // Jump Stomp AoE deals 2 dmg to adjacent enemy on landing (beyond normal walk range!)
+    // Spudnik Tater Quake Jump Stomp deals 3 AoE dmg to adjacent enemy on landing!
     battle.units.filter((u) => u.team === 'enemy' && u.id !== foeA.id).forEach((e, i) => {
       e.pos = { x: 0, y: i };
     });
-    spud.pos = { x: 3, y: 8 };
-    pea.pos = { x: 3, y: 4 };
+    spud.pos = { x: 3, y: 7 };
+    lettuce.pos = { x: 3, y: 4 };
     foeA.pos = { x: 3, y: 0 };
     const foeHpBeforeStomp = foeA.hp;
     expect(executeTeamJump(battle, spud.id, { x: 3, y: 1 })).toBe(true);
-    expect(foeA.hp).toBe(foeHpBeforeStomp - 2);
+    expect(foeA.hp).toBe(foeHpBeforeStomp - 3);
     expect(battle.pendingEvents.some((e) => e.type === 'stomp')).toBe(true);
 
-    // Quick Bloom reduces Pea's cooldown by 1 & heals +2 HP on cast!
-    pea.hp = pea.maxHp - 3;
-    pea.pos = { x: 3, y: 3 };
-    const baseCd = pea.ability!.cooldown;
-    expect(executeAbility(battle, pea.id, foeA.pos)).toBe(true);
-    expect(pea.abilityCooldown).toBe(Math.max(1, baseCd - 1));
-    expect(pea.hp).toBe(pea.maxHp - 1);
+    // Crisphead Morning Mist reduces Dewy Refresh cooldown by 1 & heals +5 (base 3 + 2 delta) + 2 self-heal!
+    lettuce.hp = 3;
+    const baseCd = lettuce.ability!.cooldown;
+    expect(executeAbility(battle, lettuce.id, lettuce.pos)).toBe(true);
+    expect(lettuce.abilityCooldown).toBe(Math.max(1, baseCd - 1));
+    expect(lettuce.hp).toBeGreaterThanOrEqual(8);
 
     // Victory awards XP and triggers Level-Up into Lv.2 (+2 Max HP, +1 SP)!
     battle.units.filter((u) => u.team === 'enemy').forEach((e) => {
@@ -287,7 +297,7 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
       e.alive = false;
     });
     battle.status = 'victory';
-    run.currentNodeId = run.nodes.find((n) => n.stage === 0)!.id;
+    run.currentNodeId = run.nodes.find((n) => n.stage === 1)!.id;
     const spudMaxHpBefore = spudHero.maxHp;
     applyBattleOutcomeToRun(run, battle, meta);
     expect(run.pendingReward?.xpEarned).toBeGreaterThanOrEqual(getXpToNextLevel(1));
@@ -742,5 +752,103 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     applyBattleOutcomeToRun(winRun, finalBattle, winMeta);
     expect(winRun.status).toBe('victory');
     expect(winMeta.maxHeatUnlocked).toBe(2);
+  });
+
+  it('supports free perk respec, Living Barricade full cover, Citric Meltdown acid explosion, Salad Tornado free move, Shrine blessings, and Harvest Bell boss empowerment', () => {
+    const meta = defaultMetaProgress();
+    const run = createNewRun(meta, 'spring', 4242);
+    const cowHero = run.roster.find((h) => h.blueprintId === 'cow')!;
+    const lemonHero = run.roster.find((h) => h.blueprintId === 'lemon')!;
+    const lettuceHero = run.roster.find((h) => h.blueprintId === 'lettuce')!;
+
+    // 1. Free Respec refunds 100% SP and reverts permanent stat boosts cleanly!
+    const baseCowHp = cowHero.maxHp;
+    const baseCowMove = cowHero.moveRange;
+    cowHero.skillPoints = 4;
+    expect(unlockHeroPerk(run, cowHero.uid, 'cow_double_gore')).toBe(true);
+    expect(unlockHeroPerk(run, cowHero.uid, 'cow_barricade')).toBe(true);
+    expect(cowHero.moveRange).toBe(baseCowMove + 1);
+    expect(cowHero.maxHp).toBeGreaterThan(baseCowHp);
+    expect(cowHero.skillPoints).toBe(2);
+
+    expect(respecHeroPerks(run, cowHero.uid)).toBe(true);
+    expect(cowHero.perkIds).toHaveLength(0);
+    expect(cowHero.skillPoints).toBe(4);
+    expect(cowHero.moveRange).toBe(baseCowMove);
+    expect(cowHero.maxHp).toBe(baseCowHp);
+
+    // 2. Unlock bespoke perks across Cow, Lemon & Lettuce for live combat checks!
+    expect(unlockHeroPerk(run, cowHero.uid, 'cow_barricade')).toBe(true);
+    lemonHero.skillPoints = 5;
+    expect(unlockHeroPerk(run, lemonHero.uid, 'lem_corrosive')).toBe(true);
+    expect(unlockHeroPerk(run, lemonHero.uid, 'lem_splash_zone')).toBe(true);
+    expect(unlockHeroPerk(run, lemonHero.uid, 'lem_meltdown')).toBe(true);
+    lettuceHero.skillPoints = 5;
+    expect(unlockHeroPerk(run, lettuceHero.uid, 'let_morning_mist')).toBe(true);
+    expect(unlockHeroPerk(run, lettuceHero.uid, 'let_leaf_vault')).toBe(true);
+    expect(unlockHeroPerk(run, lettuceHero.uid, 'let_salad_tornado')).toBe(true);
+
+    // 3. Watering Shrine blessing grants nextBattleBuff (+Boosted, Shield, +1 Move)!
+    const shrineNode = run.nodes.find((n) => n.type === 'shrine')!;
+    expect(shrineNode).toBeDefined();
+    expect(openShrineNode(run, shrineNode.id)).toBe(true);
+    expect(run.status).toBe('shrine');
+    expect(claimShrineBlessing(run, 'blessing')).toBe(true);
+    expect(run.status).toBe('map');
+    expect(run.nextBattleBuff?.boost).toBe(true);
+    expect(run.nextBattleBuff?.shield).toBe(true);
+    expect(run.nextBattleBuff?.moveBonus).toBe(1);
+
+    // 4. Create battle with nextBattleBuff + bossEmpowered active!
+    const squad = [cowHero, lemonHero, lettuceHero];
+    const battle = createBattleFromMap('scarecrow_stand', squad, [], run.items, undefined, {
+      nextBattleBuff: run.nextBattleBuff,
+      bossEmpowered: true,
+    });
+    for (let y = 0; y < battle.height; y++) {
+      for (let x = 0; x < battle.width; x++) {
+        battle.tiles[y][x].cover = null;
+        battle.tiles[y][x].elevation = 0;
+        battle.tiles[y][x].terrain = 'grass';
+      }
+    }
+
+    const cow = battle.units.find((u) => u.visualKind === 'cow')!;
+    const lemon = battle.units.find((u) => u.visualKind === 'lemon')!;
+    const lettuce = battle.units.find((u) => u.visualKind === 'lettuce')!;
+    const boss = battle.units.find((u) => u.isBoss)!;
+
+    // Verify Shrine nextBattleBuff applied to heroes & Harvest Bell empowerment applied to Boss!
+    expect(cow.statuses.some((s) => s.kind === 'boosted')).toBe(true);
+    expect(cow.statuses.some((s) => s.kind === 'shield')).toBe(true);
+    expect(cow.moveRange).toBe(cowHero.moveRange + 1);
+    expect(boss.maxHp).toBeGreaterThan(22);
+
+    // 5. Living Barricade upgrades Stitch's adjacent livingHalfCover to FULL cover!
+    cow.pos = { x: 4, y: 6 };
+    const badges = getAdjacentCoverBadges(battle, { x: 4, y: 7 }, 'player');
+    const cowBadge = badges.find((b) => b.coverPos.x === 4 && b.coverPos.y === 6);
+    expect(cowBadge?.level).toBe('full');
+
+    // 6. Crisphead Salad Tornado capstone resets hasMoved after casting Dewy Refresh!
+    lettuce.pos = { x: 2, y: 7 };
+    lettuce.actions.hasMoved = true;
+    expect(executeAbility(battle, lettuce.id, lettuce.pos)).toBe(true);
+    expect(lettuce.actions.hasMoved).toBe(false);
+
+    // 7. Zestia Citric Meltdown capstone splashes Acid + 3 AoE DMG to nearby enemy on kill!
+    const enemies = battle.units.filter((u) => u.team === 'enemy' && !u.isBoss);
+    const victim = enemies[0];
+    const bystander = enemies[1] ?? boss;
+    lemon.pos = { x: 5, y: 7 };
+    victim.pos = { x: 5, y: 5 };
+    victim.hp = 1;
+    bystander.pos = { x: 6, y: 5 };
+    bystander.hp = 14;
+    bystander.statuses = [];
+    expect(executeAttack(battle, lemon.id, victim.pos, () => 0)).toBe(true);
+    expect(victim.alive).toBe(false);
+    expect(bystander.hp).toBeLessThan(14);
+    expect(bystander.statuses.some((s) => s.kind === 'acid')).toBe(true);
   });
 });

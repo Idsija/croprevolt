@@ -14,6 +14,12 @@ import { getTileSurfaceY } from './diorama';
 import type { CraftTextureLibrary } from './textures';
 import { gridToWorld3D, TILE_SIZE_3D } from './types';
 
+export interface ProjectedSightlineTarget {
+  pos: GridPos;
+  hitChance: number;
+  isLethal: boolean;
+}
+
 export interface TacticalSnapshot3D {
   battle: BattleState;
   selectedUnit: BattleUnit | undefined;
@@ -26,6 +32,7 @@ export interface TacticalSnapshot3D {
   attackKeySet: Set<string>;
   weaponRangeKeys: Set<string>;
   isProjectingFromMove: boolean;
+  projectedTargets?: ProjectedSightlineTarget[];
   previewOverwatch: boolean;
   overwatchRangeKeys: Set<string>;
   abilityKeySet: Set<string>;
@@ -147,6 +154,7 @@ export class TacticalOverlaySystem3D {
       snap.attackKeySet.size,
       snap.weaponRangeKeys.size,
       snap.isProjectingFromMove ? 1 : 0,
+      (snap.projectedTargets ?? []).map((t) => `${t.pos.x},${t.pos.y}:${t.hitChance}`).join(','),
       snap.previewOverwatch ? 1 : 0,
       snap.overwatchRangeKeys.size,
       snap.abilityKeySet.size,
@@ -508,6 +516,25 @@ export class TacticalOverlaySystem3D {
     this.animatedRings.push(ring);
   }
 
+  private addProjectedSightlines(
+    b: BattleState,
+    originTile: GridPos,
+    targets: ProjectedSightlineTarget[] | undefined
+  ): void {
+    if (!targets || targets.length === 0) return;
+    const fromPt = this.tilePosY(b, originTile, 0.72);
+    for (const target of targets) {
+      const toPt = this.tilePosY(b, target.pos, 0.56);
+      const col = target.isLethal
+        ? 0xff4757
+        : target.hitChance >= 100
+          ? 0xff6b4a
+          : 0xffb733;
+      this.addParabolicArc(fromPt, toPt, 0.24, col, 0.032, true);
+      this.addGroundRing(this.tilePosY(b, target.pos, 0.048), 0.42, 0.56, col);
+    }
+  }
+
   private rebuildRibbonsAndArcs(snap: TacticalSnapshot3D): void {
     disposeGroupChildren(this.ribbonLayer);
     this.animatedRings = [];
@@ -519,7 +546,7 @@ export class TacticalOverlaySystem3D {
 
     const focusKey = posKey(focus);
 
-    // Case A: Hovering a Team-Jump destination -> Gold approach + soaring parabolic vault arc!
+    // Case A: Hovering a Team-Jump destination -> Gold approach + soaring parabolic vault arc + projected sightlines!
     if (snap.mode === 'move' && snap.jumpMap.has(focusKey)) {
       const jump = snap.jumpMap.get(focusKey)!;
       const startPt = this.tilePosY(b, hero.pos, 0.14);
@@ -539,10 +566,13 @@ export class TacticalOverlaySystem3D {
       this.addParabolicArc(allyPt, endPt, 1.55, 0xffd54f, 0.068, false);
       this.addGroundRing(this.tilePosY(b, jump.allyPos, 0.04), 0.38, 0.54, 0xffe066);
       this.addGroundRing(this.tilePosY(b, jump.dest, 0.04), 0.34, 0.52, 0xffca28);
+      if (snap.isProjectingFromMove) {
+        this.addProjectedSightlines(b, focus, snap.projectedTargets);
+      }
       return;
     }
 
-    // Case B: Hovering a Move tile -> Smooth glowing cyan ribbon + teal Burrow / magenta Bounce Pad arcs!
+    // Case B: Hovering a Move tile -> Smooth glowing cyan ribbon + Burrow/Bounce arcs + projected sightlines!
     if (snap.mode === 'move' && snap.movableMap.has(focusKey)) {
       const node = snap.movableMap.get(focusKey)!;
       if (node.path.length >= 2) {
@@ -570,6 +600,9 @@ export class TacticalOverlaySystem3D {
           this.addTubeArc(seg, 0.068, 0x45d3ff, 0.92);
         }
         this.addGroundRing(this.tilePosY(b, focus, 0.04), 0.32, 0.48, specialColor);
+      }
+      if (snap.isProjectingFromMove) {
+        this.addProjectedSightlines(b, focus, snap.projectedTargets);
       }
       return;
     }
