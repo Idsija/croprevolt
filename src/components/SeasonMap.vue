@@ -156,6 +156,8 @@ function nodeSprite(type: SeasonNode['type']): string {
       return '/sprites/carrot.png';
     case 'shop':
       return '/sprites/corn.png';
+    case 'event':
+      return '';
     case 'barn_rescue':
       return '/sprites/cage.png';
     case 'elite':
@@ -175,6 +177,8 @@ function nodeTypeTag(type: SeasonNode['type']): string {
       return 'Safe Vault';
     case 'shop':
       return 'Compost Market';
+    case 'event':
+      return 'Mystery';
     case 'barn_rescue':
       return 'Barn Rescue';
     case 'elite':
@@ -237,7 +241,8 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
           <!-- Inspect strip: what the hovered / tapped stop is, with an explicit Enter button -->
           <div class="node-detail" :class="{ empty: !focusNode }" aria-live="polite">
             <template v-if="focusNode">
-              <img class="detail-sprite" :src="nodeSprite(focusNode.type)" alt="" />
+              <span v-if="focusNode.type === 'event'" class="mystery-glyph detail-sprite">?</span>
+              <img v-else class="detail-sprite" :src="nodeSprite(focusNode.type)" alt="" />
               <div class="detail-text">
                 <span class="type-tag">
                   {{ nodeTypeTag(focusNode.type) }}
@@ -305,7 +310,8 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
                     @focus="hoveredId = node.id"
                     @blur="hoveredId = null"
                   >
-                    <img class="node-sprite" :src="nodeSprite(node.type)" alt="" />
+                    <span v-if="node.type === 'event'" class="mystery-glyph node-sprite">?</span>
+                    <img v-else class="node-sprite" :src="nodeSprite(node.type)" alt="" />
                     <span class="type-tag">{{ nodeTypeTag(node.type) }}</span>
                     <span v-if="node.completed" class="done-mark"><CraftIcon name="check" :size="11" /></span>
                   </button>
@@ -595,6 +601,21 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
   gap: 2px;
   min-width: 0;
   flex: 1;
+}
+
+.mystery-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 800;
+  font-size: 1.7rem;
+  line-height: 1;
+  color: #7a3fb0;
+  background: rgba(244, 232, 255, 0.92);
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 2px 0 rgba(48, 28, 12, 0.25);
 }
 
 .threat-tag {

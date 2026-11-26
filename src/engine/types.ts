@@ -375,7 +375,7 @@ export interface BattleState {
 
 export type SeasonId = 'spring' | 'summer';
 
-export type NodeType = 'skirmish' | 'escape' | 'vault' | 'shop' | 'barn_rescue' | 'elite' | 'boss';
+export type NodeType = 'skirmish' | 'escape' | 'vault' | 'shop' | 'barn_rescue' | 'elite' | 'boss' | 'event';
 
 export interface SeasonNode {
   id: string;
@@ -433,7 +433,13 @@ export interface RunState {
   battlesWon: number;
   enemiesDefeated: number;
   pendingReward: RewardBundle | null;
-  status: 'map' | 'battle' | 'vault' | 'shop' | 'reward' | 'victory' | 'defeat';
+  status: 'map' | 'battle' | 'vault' | 'shop' | 'reward' | 'event' | 'victory' | 'defeat';
+  /** The "?" event currently open, if any. */
+  pendingEvent?: { eventId: string; outcome: string[] | null; choiceIndex: number | null } | null;
+  /** Events already met this run, so they don't repeat. */
+  seenEventIds?: string[];
+  /** Max-HP bonus new recruits get (Heirloom Soil unlock). */
+  recruitBonusHp?: number;
 }
 
 export interface MetaProgress {

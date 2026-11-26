@@ -3,6 +3,7 @@ import { ITEM_REGISTRY } from '../data/items';
 import { RECRUITABLE_BLUEPRINT_IDS } from '../data/produce';
 import { runEnemyUnitTurn } from '../engine/ai';
 import { battleRng, difficultyFor } from '../engine/difficulty';
+import { leaveEvent, openEventNode, resolveEventChoice } from '../engine/events';
 import {
   createBattleFromMap,
   executeAbility,
@@ -345,6 +346,12 @@ export function enterSeasonNode(nodeId: string): void {
 
   if (node.type === 'vault' || node.type === 'shop') {
     openVaultNode(run, nodeId);
+    saveRun(run);
+    return;
+  }
+
+  if (node.type === 'event') {
+    openEventNode(run, nodeId);
     saveRun(run);
     return;
   }
@@ -1055,5 +1062,21 @@ export function closeRewardsToMap(): void {
   if (!gameStore.run) return;
   sfx.click();
   finishRewardsAndReturnToMap(gameStore.run);
+  saveRun(gameStore.run);
+}
+
+export function chooseEventOption(choiceIndex: number): void {
+  const run = gameStore.run;
+  if (!run) return;
+  const outcome = resolveEventChoice(run, choiceIndex);
+  if (!outcome) return;
+  sfx.click();
+  saveRun(run);
+}
+
+export function closeEventToMap(): void {
+  if (!gameStore.run) return;
+  sfx.click();
+  leaveEvent(gameStore.run);
   saveRun(gameStore.run);
 }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BattleView from './components/BattleView.vue';
+import EventModal from './components/EventModal.vue';
 import RewardModal from './components/RewardModal.vue';
 import RunSummary from './components/RunSummary.vue';
 import SeasonMap from './components/SeasonMap.vue';
@@ -13,6 +14,7 @@ import { gameStore } from './stores/gameStore';
   <RewardModal
     v-else-if="(gameStore.run.status === 'reward' || gameStore.run.status === 'vault' || gameStore.run.status === 'shop') && gameStore.run.pendingReward"
   />
+  <EventModal v-else-if="gameStore.run.status === 'event' && gameStore.run.pendingEvent" />
   <RunSummary
     v-else-if="gameStore.run.status === 'victory' || gameStore.run.status === 'defeat'"
   />

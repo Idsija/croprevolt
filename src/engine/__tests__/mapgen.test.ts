@@ -51,7 +51,7 @@ describe('procedural run map', () => {
             if (next.type !== 'boss') expect(Math.abs(next.lane - n.lane)).toBeLessThanOrEqual(1);
           }
           // Every battle node points at a real battlefield.
-          if (n.type !== 'vault' && n.type !== 'shop') {
+          if (n.type !== 'vault' && n.type !== 'shop' && n.type !== 'event') {
             expect(MAP_TEMPLATES[n.mapId!]).toBeDefined();
           }
         }
