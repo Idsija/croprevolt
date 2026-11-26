@@ -65,6 +65,47 @@ function getReadySprite(key: string): HTMLImageElement | null {
   return null;
 }
 
+let hitFlashCanvas: HTMLCanvasElement | null = null;
+let hitFlashCtx: CanvasRenderingContext2D | null = null;
+
+function drawHitFlashedSprite(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number,
+  alpha: number
+): void {
+  if (typeof document === 'undefined') {
+    ctx.drawImage(img, dx, dy, dw, dh);
+    return;
+  }
+  const w = Math.max(1, Math.min(img.naturalWidth, Math.ceil(dw * 2)));
+  const h = Math.max(1, Math.min(img.naturalHeight, Math.ceil(dh * 2)));
+  if (!hitFlashCanvas) {
+    hitFlashCanvas = document.createElement('canvas');
+    hitFlashCtx = hitFlashCanvas.getContext('2d');
+  }
+  if (!hitFlashCtx) {
+    ctx.drawImage(img, dx, dy, dw, dh);
+    return;
+  }
+  if (hitFlashCanvas.width !== w || hitFlashCanvas.height !== h) {
+    hitFlashCanvas.width = w;
+    hitFlashCanvas.height = h;
+  } else {
+    hitFlashCtx.clearRect(0, 0, w, h);
+  }
+  hitFlashCtx.globalCompositeOperation = 'source-over';
+  hitFlashCtx.drawImage(img, 0, 0, w, h);
+  hitFlashCtx.globalCompositeOperation = 'source-atop';
+  hitFlashCtx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+  hitFlashCtx.fillRect(0, 0, w, h);
+  hitFlashCtx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(hitFlashCanvas, dx, dy, dw, dh);
+}
+
 const INK = '#452a16';
 const PAPER_RIM = '#fbf3df';
 
@@ -276,12 +317,10 @@ export function drawUnitStandee(
 
     ctx.save();
     if (shouldFlip) ctx.scale(-1, 1);
-    ctx.drawImage(img, -drawW / 2, -drawH + 6 * s, drawW, drawH);
-
     if (opts.hitFlash && opts.hitFlash > 0) {
-      ctx.globalCompositeOperation = 'source-atop';
-      ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.75, opts.hitFlash)})`;
-      ctx.fillRect(-drawW / 2, -drawH + 6 * s, drawW, drawH);
+      drawHitFlashedSprite(ctx, img, -drawW / 2, -drawH + 6 * s, drawW, drawH, Math.min(0.75, opts.hitFlash));
+    } else {
+      ctx.drawImage(img, -drawW / 2, -drawH + 6 * s, drawW, drawH);
     }
     ctx.restore();
   } else {

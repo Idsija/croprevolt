@@ -16,17 +16,22 @@ import {
   samePos,
   tileAt,
   unitAt,
+  type AdjacentCoverBadge,
 } from '../engine/grid';
 import {
   computeDashOptions,
   computeMovableTiles,
   computeTeamJumpOptions,
+  type ReachableNode,
 } from '../engine/pathfinding';
 import type {
   BattleEvent,
   BattleState,
   BattleUnit,
+  CombatForecast,
+  DashOption,
   GridPos,
+  JumpOption,
 } from '../engine/types';
 import {
   computeIsoMetrics,
@@ -95,6 +100,32 @@ interface PhaseBanner {
   duration: number;
 }
 
+interface TacticalCache {
+  key: string;
+  selectedUnit: BattleUnit | undefined;
+  inspectedEnemy: BattleUnit | undefined;
+  movableMap: Map<string, ReachableNode>;
+  movableKeys: Set<string>;
+  jumpMap: Map<string, JumpOption>;
+  jumpKeys: Set<string>;
+  dashList: DashOption[];
+  dashEnemyIds: Set<string>;
+  attackTiles: GridPos[];
+  attackKeySet: Set<string>;
+  isProjectingFromMove: boolean;
+  weaponRangeKeys: Set<string>;
+  enemyThreat: { moveKeys: Set<string>; attackKeys: Set<string> } | null;
+  abilityTiles: GridPos[];
+  abilityKeySet: Set<string>;
+  abilityZoneKeys: Set<string>;
+  itemTiles: GridPos[];
+  itemKeySet: Set<string>;
+  aoePreviewKeys: Set<string>;
+  doneUnitIds: Set<string>;
+  focusForecast: CombatForecast | null;
+  focusCoverBadges: AdjacentCoverBadge[] | null;
+}
+
 const INK = '#452a16';
 const MIN_ZOOM = 0.78;
 const MAX_ZOOM = 2.25;
@@ -144,6 +175,9 @@ export class PaperCraftRenderer {
   private elapsedTotal = 0;
   private metrics: IsoMetrics | null = null;
   private resizeObserver: ResizeObserver;
+  private cssW = 280;
+  private cssH = 220;
+  private dpr = 1;
 
   // Multi-touch Pan & Pinch-Zoom Camera State
   private camera: CameraTransform = { panX: 0, panY: 0, zoom: 1 };
@@ -175,6 +209,16 @@ export class PaperCraftRenderer {
   private paperPattern: CanvasPattern | null = null;
   private dangerHatchPattern: CanvasPattern | null = null;
 
+  // Static corrugated cardboard board cache (rebuilt only on zoom/resize/viewMode/cover-change; pan is free!)
+  private boardBgCanvas: HTMLCanvasElement | null = null;
+  private boardBgKey = '';
+  private boardBgOffsetX = 0;
+  private boardBgOffsetY = 0;
+  private boardBgW = 0;
+  private boardBgH = 0;
+  private boardSunbeamTiles: GridPos[] = [];
+  private tacticalCache: TacticalCache | null = null;
+
   constructor(
     canvas: HTMLCanvasElement,
     getState: () => RendererViewState | null,
@@ -204,6 +248,7 @@ export class PaperCraftRenderer {
     this.handlePointerCancel = this.handlePointerCancel.bind(this);
     this.handlePointerLeave = this.handlePointerLeave.bind(this);
     this.handleWheel = this.handleWheel.bind(this);
+    this.handleGesture = this.handleGesture.bind(this);
     this.handleWindowBlur = this.handleWindowBlur.bind(this);
     this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
     this.loop = this.loop.bind(this);
@@ -214,6 +259,8 @@ export class PaperCraftRenderer {
     canvas.addEventListener('pointercancel', this.handlePointerCancel);
     canvas.addEventListener('pointerleave', this.handlePointerLeave);
     canvas.addEventListener('wheel', this.handleWheel, { passive: false });
+    canvas.addEventListener('gesturestart', this.handleGesture, { passive: false });
+    canvas.addEventListener('gesturechange', this.handleGesture, { passive: false });
     window.addEventListener('blur', this.handleWindowBlur);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
 
@@ -234,6 +281,8 @@ export class PaperCraftRenderer {
     this.canvas.removeEventListener('pointercancel', this.handlePointerCancel);
     this.canvas.removeEventListener('pointerleave', this.handlePointerLeave);
     this.canvas.removeEventListener('wheel', this.handleWheel);
+    this.canvas.removeEventListener('gesturestart', this.handleGesture);
+    this.canvas.removeEventListener('gesturechange', this.handleGesture);
     window.removeEventListener('blur', this.handleWindowBlur);
     document.removeEventListener('visibilitychange', this.handleVisibilityChange);
   }
@@ -300,10 +349,17 @@ export class PaperCraftRenderer {
     this.reportZoom();
   }
 
-  public adjustZoom(delta: number): void {
+  public adjustZoom(delta: number, immediate = false): void {
     const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.targetCamera.zoom + delta));
     this.targetCamera.zoom = next;
+    if (immediate) {
+      this.camera.zoom = next;
+    }
     this.clampCamera(this.targetCamera);
+    if (immediate) {
+      this.camera.panX = this.targetCamera.panX;
+      this.camera.panY = this.targetCamera.panY;
+    }
     this.reportZoom();
   }
 
@@ -335,9 +391,10 @@ export class PaperCraftRenderer {
   }
 
   private clampCamera(cam: CameraTransform): void {
-    const rect = this.canvas.getBoundingClientRect();
-    const maxPanX = Math.max(100, rect.width * 0.46 * cam.zoom);
-    const maxPanY = Math.max(100, rect.height * 0.44 * cam.zoom);
+    const w = this.cssW > 0 ? this.cssW : this.canvas.getBoundingClientRect().width;
+    const h = this.cssH > 0 ? this.cssH : this.canvas.getBoundingClientRect().height;
+    const maxPanX = Math.max(100, w * 0.46 * cam.zoom);
+    const maxPanY = Math.max(100, h * 0.44 * cam.zoom);
     cam.panX = Math.max(-maxPanX, Math.min(maxPanX, cam.panX));
     cam.panY = Math.max(-maxPanY, Math.min(maxPanY, cam.panY));
   }
@@ -374,6 +431,7 @@ export class PaperCraftRenderer {
     bloom.src = '/ui/wc-bloom.png';
     bloom.onload = () => {
       this.wcBoardPattern = this.ctx.createPattern(bloom, 'repeat');
+      this.boardBgKey = ''; // Rebuild cached board with watercolor bloom!
     };
   }
 
@@ -455,6 +513,9 @@ export class PaperCraftRenderer {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.max(280, Math.floor(rect.width));
     const h = Math.max(220, Math.floor(rect.height));
+    this.cssW = w;
+    this.cssH = h;
+    this.dpr = dpr;
 
     if (!this.initializedMobileZoom && w > 0) {
       this.initializedMobileZoom = true;
@@ -466,9 +527,12 @@ export class PaperCraftRenderer {
       this.reportZoom();
     }
 
-    if (this.canvas.width !== Math.floor(w * dpr) || this.canvas.height !== Math.floor(h * dpr)) {
-      this.canvas.width = Math.floor(w * dpr);
-      this.canvas.height = Math.floor(h * dpr);
+    const pxW = Math.floor(w * dpr);
+    const pxH = Math.floor(h * dpr);
+    if (this.canvas.width !== pxW || this.canvas.height !== pxH) {
+      this.canvas.width = pxW;
+      this.canvas.height = pxH;
+      this.boardBgKey = '';
     }
   }
 
@@ -529,6 +593,11 @@ export class PaperCraftRenderer {
   }
 
   private handlePointerDown(e: PointerEvent): void {
+    // Ignore secondary/right-click (and macOS two-finger tap / Ctrl-click) so context menus never leave stuck pointers!
+    if (e.pointerType === 'mouse' && (e.button !== 0 || e.ctrlKey)) {
+      return;
+    }
+
     const pt = this.getCanvasLocalPoint(e);
     this.activePointers.set(e.pointerId, { x: pt.x, y: pt.y, type: e.pointerType });
     try {
@@ -554,6 +623,16 @@ export class PaperCraftRenderer {
   }
 
   private handlePointerMove(e: PointerEvent): void {
+    // Auto-heal any stuck mouse pointer if button was released outside canvas/during macOS gestures
+    if (e.pointerType === 'mouse' && (e.buttons & 1) === 0 && this.activePointers.has(e.pointerId)) {
+      this.activePointers.delete(e.pointerId);
+      if (this.activePointers.size === 0) {
+        this.downPoint = null;
+        this.isDragging = false;
+        this.didPinch = false;
+      }
+    }
+
     const pt = this.getCanvasLocalPoint(e);
     const prev = this.activePointers.get(e.pointerId);
 
@@ -613,9 +692,18 @@ export class PaperCraftRenderer {
   }
 
   private handlePointerUp(e: PointerEvent): void {
+    const hadPointer = this.activePointers.delete(e.pointerId);
+    try {
+      if (this.canvas.hasPointerCapture?.(e.pointerId)) {
+        this.canvas.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore if capture not supported
+    }
+    if (!hadPointer) return;
+
     const pt = this.getCanvasLocalPoint(e);
     const wasDragging = this.isDragging || this.didPinch;
-    this.activePointers.delete(e.pointerId);
 
     if (this.activePointers.size === 0) {
       this.downPoint = null;
@@ -642,6 +730,13 @@ export class PaperCraftRenderer {
 
   private handlePointerCancel(e: PointerEvent): void {
     this.activePointers.delete(e.pointerId);
+    try {
+      if (this.canvas.hasPointerCapture?.(e.pointerId)) {
+        this.canvas.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore if capture not supported
+    }
     if (this.activePointers.size === 0) {
       this.downPoint = null;
       this.isDragging = false;
@@ -664,10 +759,41 @@ export class PaperCraftRenderer {
     }
   }
 
+  private handleGesture(e: Event): void {
+    // Prevent Safari on macOS from hijacking trackpad pinch-to-zoom on the page viewport
+    e.preventDefault();
+  }
+
   private handleWheel(e: WheelEvent): void {
     e.preventDefault();
-    const delta = e.deltaY < 0 ? 0.12 : -0.12;
-    this.adjustZoom(delta);
+    if (e.deltaX === 0 && e.deltaY === 0) return;
+
+    const unitScale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+    const dx = e.deltaX * unitScale;
+    const dy = e.deltaY * unitScale;
+
+    // macOS trackpad pinch-to-zoom sends wheel events with ctrlKey=true
+    if (e.ctrlKey) {
+      const zoomDelta = Math.max(-0.18, Math.min(0.18, -dy * 0.01));
+      this.adjustZoom(zoomDelta, true);
+      return;
+    }
+
+    // Discrete mouse wheel (line mode or vertical-only notched ticks)
+    const isDiscreteMouseWheel =
+      e.deltaMode !== 0 || (dx === 0 && Math.abs(dy) >= 40 && Number.isInteger(dy));
+    if (isDiscreteMouseWheel) {
+      const zoomDelta = Math.max(-0.14, Math.min(0.14, -dy * 0.0014));
+      this.adjustZoom(zoomDelta);
+      return;
+    }
+
+    // Smooth macOS trackpad two-finger scroll: pan the tabletop smoothly (use trackpad pinch to zoom)
+    this.targetCamera.panX -= dx;
+    this.targetCamera.panY -= dy;
+    this.clampCamera(this.targetCamera);
+    this.camera.panX = this.targetCamera.panX;
+    this.camera.panY = this.targetCamera.panY;
   }
 
   public consumeEvents(events: BattleEvent[]): void {
@@ -986,10 +1112,16 @@ export class PaperCraftRenderer {
   }
 
   private loop(now: number): void {
-    const dt = Math.min(0.05, (now - this.lastTime) / 1000);
+    const dt = Math.max(0, Math.min(0.05, (now - this.lastTime) / 1000));
     this.lastTime = now;
-    this.elapsedTotal += dt;
 
+    // Skip CPU/GPU work when the browser tab is hidden
+    if (typeof document !== 'undefined' && document.hidden) {
+      this.rafId = requestAnimationFrame(this.loop);
+      return;
+    }
+
+    this.elapsedTotal += dt;
     this.updateAnims(dt);
     this.render();
     this.rafId = requestAnimationFrame(this.loop);
@@ -997,9 +1129,13 @@ export class PaperCraftRenderer {
 
   private updateAnims(dt: number): void {
     const ease = Math.min(1, dt * 11);
-    this.camera.panX += (this.targetCamera.panX - this.camera.panX) * ease;
-    this.camera.panY += (this.targetCamera.panY - this.camera.panY) * ease;
-    this.camera.zoom += (this.targetCamera.zoom - this.camera.zoom) * ease;
+    const dPanX = this.targetCamera.panX - this.camera.panX;
+    const dPanY = this.targetCamera.panY - this.camera.panY;
+    const dZoom = this.targetCamera.zoom - this.camera.zoom;
+
+    this.camera.panX = Math.abs(dPanX) < 0.05 ? this.targetCamera.panX : this.camera.panX + dPanX * ease;
+    this.camera.panY = Math.abs(dPanY) < 0.05 ? this.targetCamera.panY : this.camera.panY + dPanY * ease;
+    this.camera.zoom = Math.abs(dZoom) < 0.0005 ? this.targetCamera.zoom : this.camera.zoom + dZoom * ease;
 
     this.particles.update(dt);
 
@@ -1049,48 +1185,57 @@ export class PaperCraftRenderer {
     this.shakeTimer = Math.max(this.shakeTimer, duration);
   }
 
-  private render(): void {
-    const ctx = this.ctx;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = this.canvas.width / dpr;
-    const h = this.canvas.height / dpr;
+  private buildTacticalKey(vs: RendererViewState, focusTile: GridPos | null): string {
+    const { battle } = vs;
+    const parts: string[] = [
+      battle.mapName,
+      String(battle.turn),
+      battle.phase,
+      battle.status,
+      String(battle.width),
+      String(battle.height),
+      battle.relicIds.join(','),
+      vs.selectedUnitId ?? '',
+      vs.inspectedEnemyId ?? '',
+      vs.showAllDangerZone ? '1' : '0',
+      vs.mode,
+      vs.selectedItemId ?? '',
+      focusTile ? `${focusTile.x},${focusTile.y}` : '',
+    ];
 
-    ctx.save();
-    ctx.scale(dpr, dpr);
-
-    const wood = this.ensureWoodBackdrop(w, h);
-    ctx.drawImage(wood, 0, 0, w, h);
-
-    if (this.shakeTimer > 0) {
-      const decay = Math.min(1, this.shakeTimer / 0.22);
-      const sx = (Math.random() - 0.5) * 2 * this.shakeMagnitude * decay;
-      const sy = (Math.random() - 0.5) * 2 * this.shakeMagnitude * decay;
-      ctx.translate(sx, sy);
-    } else {
-      this.shakeMagnitude = 0;
+    for (const k in battle.items) {
+      parts.push(`${k}=${battle.items[k]}`);
     }
 
-    const vs = this.getState();
-    if (!vs) {
-      ctx.restore();
-      return;
+    for (let i = 0; i < battle.units.length; i++) {
+      const u = battle.units[i];
+      const a = u.actions;
+      const st = u.statuses.length > 0 ? u.statuses.map((s) => `${s.kind}${s.turns}`).join('.') : '';
+      parts.push(
+        `${u.id}:${u.alive ? 1 : 0}:${u.pos.x},${u.pos.y}:${u.hp}:${a.hasMoved ? 1 : 0}${a.hasDashed ? 1 : 0}${a.hasJumped ? 1 : 0}${a.hasAttacked ? 1 : 0}${a.hasUsedSkill ? 1 : 0}:${u.abilityCooldown}:${u.tempAttackBonus}:${st}:${u.graftIds.length}`
+      );
     }
 
-    const {
-      battle,
-      selectedUnitId,
-      inspectedEnemyId,
-      showAllDangerZone,
-      mode,
-      selectedItemId,
-      hoveredTile,
-      previewTile,
-      viewMode,
-    } = vs;
-    const focusTile = previewTile ?? hoveredTile;
-    const fKey = focusTile ? posKey(focusTile) : null;
-    const m = computeIsoMetrics(w, h, battle.width, battle.height, this.camera, viewMode);
-    this.metrics = m;
+    for (let y = 0; y < battle.height; y++) {
+      const row = battle.tiles[y];
+      for (let x = 0; x < battle.width; x++) {
+        const cov = row[x].cover;
+        if (cov) {
+          parts.push(`c${x},${y}:${cov.kind}:${cov.hp}`);
+        }
+      }
+    }
+
+    return parts.join('|');
+  }
+
+  private getTacticalCache(vs: RendererViewState, focusTile: GridPos | null, fKey: string | null): TacticalCache {
+    const key = this.buildTacticalKey(vs, focusTile);
+    if (this.tacticalCache && this.tacticalCache.key === key) {
+      return this.tacticalCache;
+    }
+
+    const { battle, selectedUnitId, inspectedEnemyId, showAllDangerZone, mode, selectedItemId } = vs;
 
     const selectedUnit = selectedUnitId
       ? battle.units.find((u) => u.id === selectedUnitId && u.alive)
@@ -1102,13 +1247,13 @@ export class PaperCraftRenderer {
     const movableMap =
       selectedUnit && battle.phase === 'player' && mode === 'move'
         ? computeMovableTiles(battle, selectedUnit)
-        : new Map();
+        : new Map<string, ReachableNode>();
     const movableKeys = new Set<string>(movableMap.keys());
 
     const jumpMap =
       selectedUnit && battle.phase === 'player' && mode === 'move'
         ? computeTeamJumpOptions(battle, selectedUnit)
-        : new Map();
+        : new Map<string, JumpOption>();
     const jumpKeys = new Set<string>(jumpMap.keys());
 
     const dashList =
@@ -1227,19 +1372,256 @@ export class PaperCraftRenderer {
       }
     }
 
-    // 2. Layered soft tabletop board shadow
-    this.drawSoftBoardShadow(ctx, battle.width, battle.height, m);
+    const doneUnitIds = new Set<string>();
+    if (battle.phase === 'player') {
+      for (const u of battle.units) {
+        if (u.alive && u.team === 'player' && !unitHasMeaningfulAction(battle, u)) {
+          doneUnitIds.add(u.id);
+        }
+      }
+    }
 
-    // 3. Corrugated Cardboard Tiles
+    let focusForecast: CombatForecast | null = null;
+    let focusCoverBadges: AdjacentCoverBadge[] | null = null;
+    if (selectedUnit && battle.phase === 'player' && focusTile && fKey) {
+      if (mode === 'move' && (jumpMap.has(fKey) || movableMap.has(fKey))) {
+        focusCoverBadges = getAdjacentCoverBadges(battle, focusTile, 'player');
+      } else if ((mode === 'attack' || mode === 'move') && attackKeySet.has(fKey)) {
+        const focusedUnit = unitAt(battle, focusTile);
+        const canDirectlyAttackFocus = Boolean(
+          (focusedUnit && focusedUnit.team === 'enemy') ||
+            mode === 'attack' ||
+            tileAt(battle, focusTile)?.cover?.destructible
+        );
+        if (canDirectlyAttackFocus) {
+          focusForecast = forecastAttack(battle, selectedUnit, focusTile);
+        }
+      }
+    }
+
+    const cache: TacticalCache = {
+      key,
+      selectedUnit,
+      inspectedEnemy,
+      movableMap,
+      movableKeys,
+      jumpMap,
+      jumpKeys,
+      dashList,
+      dashEnemyIds,
+      attackTiles,
+      attackKeySet,
+      isProjectingFromMove,
+      weaponRangeKeys,
+      enemyThreat,
+      abilityTiles,
+      abilityKeySet,
+      abilityZoneKeys,
+      itemTiles,
+      itemKeySet,
+      aoePreviewKeys,
+      doneUnitIds,
+      focusForecast,
+      focusCoverBadges,
+    };
+    this.tacticalCache = cache;
+    return cache;
+  }
+
+  private ensureBoardCache(
+    battle: BattleState,
+    w: number,
+    h: number,
+    dpr: number,
+    viewMode: BoardViewMode
+  ): HTMLCanvasElement {
+    let coverMask = '';
+    for (let y = 0; y < battle.height; y++) {
+      const row = battle.tiles[y];
+      for (let x = 0; x < battle.width; x++) {
+        if (row[x].cover) coverMask += `${x},${y};`;
+      }
+    }
+
+    const key = `${w}x${h}@${dpr}|${battle.mapName}|${battle.theme}|${battle.width}x${battle.height}|${viewMode}|${this.camera.zoom.toFixed(4)}|${this.wcBoardPattern ? 1 : 0}|${coverMask}`;
+    if (this.boardBgCanvas && this.boardBgKey === key) {
+      return this.boardBgCanvas;
+    }
+
+    const baseM = computeIsoMetrics(
+      w,
+      h,
+      battle.width,
+      battle.height,
+      { panX: 0, panY: 0, zoom: this.camera.zoom },
+      viewMode
+    );
+
+    const p0 = getTileDiamond(0, 0, baseM)[0];
+    const p1 = getTileDiamond(battle.width - 1, 0, baseM)[1];
+    const p2 = getTileDiamond(battle.width - 1, battle.height - 1, baseM)[2];
+    const p3 = getTileDiamond(0, battle.height - 1, baseM)[3];
+
+    const minX = Math.min(p0.x, p1.x, p2.x, p3.x);
+    const maxX = Math.max(p0.x, p1.x, p2.x, p3.x);
+    const minY = Math.min(p0.y, p1.y, p2.y, p3.y);
+    const maxY = Math.max(p0.y, p1.y, p2.y, p3.y);
+
+    const padX = Math.ceil(36 * baseM.scale);
+    const padTop = Math.ceil(24 * baseM.scale);
+    const padBot = Math.ceil(baseM.boardDepth + 46 * baseM.scale);
+
+    const offsetX = Math.floor(minX - padX);
+    const offsetY = Math.floor(minY - padTop);
+    const bw = Math.max(1, Math.ceil(maxX + padX) - offsetX);
+    const bh = Math.max(1, Math.ceil(maxY + padBot) - offsetY);
+
+    // Stay safely within Safari / WebKit max GPU texture dimensions (4096px)
+    const maxDim = 4096;
+    const boardDpr = Math.min(dpr, maxDim / Math.max(bw, bh));
+    const pxW = Math.max(1, Math.ceil(bw * boardDpr));
+    const pxH = Math.max(1, Math.ceil(bh * boardDpr));
+
+    if (!this.boardBgCanvas) {
+      this.boardBgCanvas = document.createElement('canvas');
+    }
+    const c = this.boardBgCanvas;
+    if (c.width !== pxW || c.height !== pxH) {
+      c.width = pxW;
+      c.height = pxH;
+    }
+
+    const g = c.getContext('2d')!;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, pxW, pxH);
+    g.setTransform(boardDpr, 0, 0, boardDpr, -offsetX * boardDpr, -offsetY * boardDpr);
+
+    // 2. Layered soft tabletop board shadow
+    this.drawSoftBoardShadow(g, battle.width, battle.height, baseM);
+
+    // 3. Corrugated Cardboard Tiles (collect animated sunbeam tiles for lightweight per-frame shimmer)
+    const sunbeams: GridPos[] = [];
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
-        this.drawPaperCraftTile(ctx, battle, battle.tiles[y][x], m);
+        const tile = battle.tiles[y][x];
+        if (tile.terrain === 'sunbeam') sunbeams.push({ x, y });
+        this.drawPaperCraftTile(g, battle, tile, baseM);
       }
     }
 
     // 4. Matte paper grain across board top surface + subtle outer die-cut cardstock frame
-    this.applyBoardPaperTexture(ctx, battle.width, battle.height, m);
-    this.drawBoardCardstockRim(ctx, battle.width, battle.height, m);
+    this.applyBoardPaperTexture(g, battle.width, battle.height, baseM);
+    this.drawBoardCardstockRim(g, battle.width, battle.height, baseM);
+
+    this.boardSunbeamTiles = sunbeams;
+    this.boardBgOffsetX = offsetX;
+    this.boardBgOffsetY = offsetY;
+    this.boardBgW = pxW / boardDpr;
+    this.boardBgH = pxH / boardDpr;
+    this.boardBgKey = key;
+    return c;
+  }
+
+  private drawSunbeamOverlays(ctx: CanvasRenderingContext2D, m: IsoMetrics): void {
+    if (this.boardSunbeamTiles.length === 0) return;
+    const s = m.scale;
+    ctx.save();
+    ctx.font = `700 ${Math.round(9 * s)}px "Fredoka", sans-serif`;
+    ctx.textAlign = 'center';
+    for (const pos of this.boardSunbeamTiles) {
+      const c = gridToScreen(pos.x, pos.y, m);
+      const shimmer = 0.22 + Math.sin(this.elapsedTotal * 3.2 + pos.x) * 0.08;
+      ctx.fillStyle = `rgba(255, 253, 214, ${shimmer})`;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, 16 * s, 9 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#754600';
+      ctx.fillText('☀ +2 ATK', c.x, c.y + 4 * s);
+    }
+    ctx.restore();
+  }
+
+  private render(): void {
+    const liveDpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (liveDpr !== this.dpr) {
+      this.resize();
+    }
+
+    const ctx = this.ctx;
+    const dpr = this.dpr;
+    const w = this.canvas.width / dpr;
+    const h = this.canvas.height / dpr;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    const wood = this.ensureWoodBackdrop(w, h);
+    ctx.drawImage(wood, 0, 0, w, h);
+
+    if (this.shakeTimer > 0) {
+      const decay = Math.min(1, this.shakeTimer / 0.22);
+      const sx = (Math.random() - 0.5) * 2 * this.shakeMagnitude * decay;
+      const sy = (Math.random() - 0.5) * 2 * this.shakeMagnitude * decay;
+      ctx.translate(sx, sy);
+    } else {
+      this.shakeMagnitude = 0;
+    }
+
+    const vs = this.getState();
+    if (!vs) {
+      ctx.restore();
+      return;
+    }
+
+    const {
+      battle,
+      selectedUnitId,
+      inspectedEnemyId,
+      mode,
+      hoveredTile,
+      previewTile,
+      viewMode,
+    } = vs;
+    const focusTile = previewTile ?? hoveredTile;
+    const fKey = focusTile ? posKey(focusTile) : null;
+    const m = computeIsoMetrics(w, h, battle.width, battle.height, this.camera, viewMode);
+    this.metrics = m;
+
+    const tc = this.getTacticalCache(vs, focusTile, fKey);
+    const {
+      selectedUnit,
+      inspectedEnemy,
+      movableMap,
+      movableKeys,
+      jumpMap,
+      jumpKeys,
+      dashList,
+      dashEnemyIds,
+      attackTiles,
+      attackKeySet,
+      isProjectingFromMove,
+      weaponRangeKeys,
+      enemyThreat,
+      abilityTiles,
+      abilityKeySet,
+      abilityZoneKeys,
+      itemKeySet,
+      aoePreviewKeys,
+      doneUnitIds,
+      focusForecast,
+      focusCoverBadges,
+    } = tc;
+
+    // 2–4. Cached Soft Board Shadow + Corrugated Cardboard Tiles + Paper Texture + Cardstock Rim
+    const boardCanvas = this.ensureBoardCache(battle, w, h, dpr, viewMode);
+    ctx.drawImage(
+      boardCanvas,
+      this.boardBgOffsetX + this.camera.panX,
+      this.boardBgOffsetY + this.camera.panY,
+      this.boardBgW,
+      this.boardBgH
+    );
+    this.drawSunbeamOverlays(ctx, m);
 
     // 5. Clean Unified Tactical Range Areas (subtle washes + crisp outer contours — ZERO messy internal lines!)
     // 5A. Enemy Threat Zone (high-contrast diagonal warning hatch + cream-backed dashed rim for colorblind clarity!)
@@ -1484,10 +1866,7 @@ export class PaperCraftRenderer {
       const pt = gridToScreen(drawGx, drawGy, m);
       const isSelected = unit.id === selectedUnitId;
       const isInspectedEnemy = unit.id === inspectedEnemyId;
-      const isDone =
-        unit.team === 'player' &&
-        battle.phase === 'player' &&
-        !unitHasMeaningfulAction(battle, unit);
+      const isDone = doneUnitIds.has(unit.id);
       const isDashTarget = dashEnemyIds.has(unit.id);
       const uKey = posKey(unit.pos);
       const isAttackTarget =
@@ -1543,11 +1922,11 @@ export class PaperCraftRenderer {
         const jumpOpt = jumpMap.get(fKey)!;
         this.drawPaperRibbonArch(ctx, selectedUnit.pos, jumpOpt.allyPos, m, '#9cd9ec', 24 * m.scale, false);
         this.drawPaperRibbonArch(ctx, jumpOpt.allyPos, jumpOpt.dest, m, '#f4d365', 100 * m.scale, true);
-        this.drawHoveredCoverPreviews(ctx, battle, focusTile, m);
+        this.drawHoveredCoverPreviews(ctx, battle, focusTile, m, focusCoverBadges);
       } else if (mode === 'move' && movableMap.has(fKey)) {
         const moveNode = movableMap.get(fKey)!;
         this.drawMovePath(ctx, moveNode.path, m);
-        this.drawHoveredCoverPreviews(ctx, battle, focusTile, m);
+        this.drawHoveredCoverPreviews(ctx, battle, focusTile, m, focusCoverBadges);
       } else if (mode === 'ability' && abilityKeySet.has(fKey) && !samePos(selectedUnit.pos, focusTile)) {
         this.drawPaperRibbonArch(ctx, selectedUnit.pos, focusTile, m, '#b77af2', 54 * m.scale, true);
       } else if (mode === 'item' && itemKeySet.has(fKey) && !samePos(selectedUnit.pos, focusTile)) {
@@ -1563,7 +1942,7 @@ export class PaperCraftRenderer {
         }
 
         if (canDirectlyAttackFocus) {
-          const fc = forecastAttack(battle, selectedUnit, focusTile);
+          const fc = focusForecast ?? forecastAttack(battle, selectedUnit, focusTile);
           const isLob = selectedUnit.weapon.arc === 'lobbed';
           this.drawPaperRibbonArch(
             ctx,
@@ -1953,16 +2332,6 @@ export class PaperCraftRenderer {
       ctx.moveTo((pts[0].x + pts[3].x) / 2, (pts[0].y + pts[3].y) / 2);
       ctx.lineTo((pts[1].x + pts[2].x) / 2, (pts[1].y + pts[2].y) / 2);
       ctx.stroke();
-    } else if (tile.terrain === 'sunbeam') {
-      const shimmer = 0.22 + Math.sin(this.elapsedTotal * 3.2 + tile.x) * 0.08;
-      ctx.fillStyle = `rgba(255, 253, 214, ${shimmer})`;
-      ctx.beginPath();
-      ctx.ellipse(c.x, c.y, 16 * s, 9 * s, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#754600';
-      ctx.font = `700 ${Math.round(9 * s)}px "Fredoka", sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('☀ +2 ATK', c.x, c.y + 4 * s);
     }
   }
 
@@ -2396,9 +2765,10 @@ export class PaperCraftRenderer {
     ctx: CanvasRenderingContext2D,
     battle: BattleState,
     pos: GridPos,
-    m: IsoMetrics
+    m: IsoMetrics,
+    cachedBadges?: AdjacentCoverBadge[] | null
   ): void {
-    const badges = getAdjacentCoverBadges(battle, pos, 'player');
+    const badges = cachedBadges ?? getAdjacentCoverBadges(battle, pos, 'player');
     const center = gridToScreen(pos.x, pos.y, m);
     for (const b of badges) {
       const covCenter = gridToScreen(b.coverPos.x, b.coverPos.y, m);

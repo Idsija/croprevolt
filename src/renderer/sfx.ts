@@ -42,17 +42,21 @@ class CartoonSfx {
 
   private ensureContext(): AudioContext | null {
     if (this.muted || typeof window === 'undefined') return null;
-    if (!this.ctx) {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx) return null;
-      this.ctx = new AudioCtx();
+    try {
+      if (!this.ctx || this.ctx.state === 'closed') {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!AudioCtx) return null;
+        this.ctx = new AudioCtx();
+      }
+      if (this.ctx.state === 'suspended') {
+        void this.ctx.resume().catch(() => {});
+      }
+      return this.ctx;
+    } catch {
+      return null;
     }
-    if (this.ctx.state === 'suspended') {
-      void this.ctx.resume();
-    }
-    return this.ctx;
   }
 
   private tone(
@@ -64,52 +68,69 @@ class CartoonSfx {
     delay = 0
   ): void {
     const ctx = this.ensureContext();
-    if (!ctx) return;
+    if (!ctx || ctx.state !== 'running') return;
 
-    const now = ctx.currentTime + delay;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    try {
+      const now = ctx.currentTime + delay;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
 
-    osc.type = type;
-    osc.frequency.setValueAtTime(freqStart, now);
-    osc.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), now + duration);
+      osc.type = type;
+      osc.frequency.setValueAtTime(freqStart, now);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), now + duration);
 
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(gainPeak, now + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(gainPeak, now + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + duration + 0.02);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.onended = () => {
+        osc.disconnect();
+        gain.disconnect();
+      };
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    } catch {
+      // ignore WebAudio scheduling errors on restricted browsers
+    }
   }
 
   private noise(duration: number, gainPeak = 0.12, delay = 0): void {
     const ctx = this.ensureContext();
-    if (!ctx) return;
-    const now = ctx.currentTime + delay;
-    const bufferSize = Math.floor(ctx.sampleRate * duration);
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    if (!ctx || ctx.state !== 'running') return;
+    try {
+      const now = ctx.currentTime + delay;
+      const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * duration));
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+      }
+
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 950;
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(gainPeak, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      src.onended = () => {
+        src.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      };
+      src.start(now);
+    } catch {
+      // ignore WebAudio scheduling errors on restricted browsers
     }
-
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 950;
-
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(gainPeak, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-
-    src.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    src.start(now);
   }
 
   public click(): void {

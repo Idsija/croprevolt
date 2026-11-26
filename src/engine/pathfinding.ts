@@ -38,8 +38,13 @@ export function computeReachableMap(state: BattleState, unit: BattleUnit): Map<s
   const queue: ReachableNode[] = [{ pos: unit.pos, cost: 0, path: [unit.pos] }];
 
   while (queue.length > 0) {
-    queue.sort((a, b) => a.cost - b.cost);
-    const current = queue.shift()!;
+    let bestIdx = 0;
+    for (let i = 1; i < queue.length; i++) {
+      if (queue[i].cost < queue[bestIdx].cost) bestIdx = i;
+    }
+    const current = queue[bestIdx];
+    queue[bestIdx] = queue[queue.length - 1];
+    queue.pop();
     const currentBest = result.get(posKey(current.pos));
     if (currentBest && current.cost > currentBest.cost) continue;
 
@@ -143,7 +148,6 @@ export function computeTeamJumpOptions(state: BattleState, unit: BattleUnit): Ma
   }
 
   const reachable = computeReachableMap(state, unit);
-  const movable = computeMovableTiles(state, unit);
 
   // Find every alive ally that this unit can reach adjacent to (or walk through)
   const springboardAllies: Array<{ ally: BattleUnit; approach: GridPos }> = [];
@@ -177,7 +181,7 @@ export function computeTeamJumpOptions(state: BattleState, unit: BattleUnit): Ma
         const key = posKey(dest);
         // Keep normal blue tiles clean; Team-Jump highlights extend beyond normal walking reach
         // (or vault past obstacles into new tiles)
-        if (movable.has(key)) continue;
+        if (reachable.has(key)) continue;
 
         if (!out.has(key)) {
           out.set(key, {

@@ -476,10 +476,10 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
 
 @keyframes pulseCard {
   0%, 100% {
-    box-shadow: 0 0 0 2px rgba(246, 200, 68, 0.45), var(--shadow-cutout);
+    transform: translateY(0) scale(1);
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(246, 200, 68, 0.78), var(--shadow-cutout);
+    transform: translateY(-2px) scale(1.015);
   }
 }
 

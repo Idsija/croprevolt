@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, toRaw } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
 import { RELIC_REGISTRY } from '../data/relics';
@@ -348,8 +348,31 @@ const jumpHintCount = computed(() =>
     : 0
 );
 
+const heroDoneMap = computed(() => {
+  // Touch reactive dependencies so Vue invalidates whenever battle actions, turns, items, or events change
+  void gameStore.eventQueueVersion;
+  void battle.value.phase;
+  void battle.value.turn;
+  void totalItemsLeft.value;
+  void aliveEnemiesCount.value;
+  const map: Record<string, boolean> = {};
+  const rawBattle = toRaw(battle.value);
+  for (const u of playerUnits.value) {
+    void u.alive;
+    void u.actions.hasMoved;
+    void u.actions.hasAttacked;
+    void u.actions.hasUsedSkill;
+    void u.abilityCooldown;
+    void u.statuses.length;
+    void u.pos.x;
+    void u.pos.y;
+    map[u.id] = !u.alive || !unitHasMeaningfulAction(rawBattle, toRaw(u));
+  }
+  return map;
+});
+
 const readyHeroesCount = computed(
-  () => playerUnits.value.filter((u) => unitHasMeaningfulAction(battle.value, u)).length
+  () => playerUnits.value.filter((u) => u.alive && !heroDoneMap.value[u.id]).length
 );
 
 const totalItemsLeft = computed(() =>
@@ -361,9 +384,7 @@ const showBottomConsoleDeck = computed(() =>
 );
 
 function isHeroDone(unitId: string): boolean {
-  const u = battle.value.units.find((x) => x.id === unitId);
-  if (!u || !u.alive) return true;
-  return !unitHasMeaningfulAction(battle.value, u);
+  return heroDoneMap.value[unitId] ?? true;
 }
 
 function hpRingOffset(hp: number, maxHp: number): number {
@@ -486,14 +507,14 @@ onMounted(() => {
     () => {
       if (!gameStore.battle) return null;
       return {
-        battle: gameStore.battle,
+        battle: toRaw(gameStore.battle),
         selectedUnitId: gameStore.selectedUnitId,
         inspectedEnemyId: gameStore.inspectedEnemyId,
         showAllDangerZone: gameStore.showAllDangerZone,
         mode: gameStore.mode,
         selectedItemId: gameStore.selectedItemId,
-        hoveredTile: gameStore.hoveredTile,
-        previewTile: gameStore.previewTile,
+        hoveredTile: gameStore.hoveredTile ? toRaw(gameStore.hoveredTile) : null,
+        previewTile: gameStore.previewTile ? toRaw(gameStore.previewTile) : null,
         viewMode: gameStore.viewMode,
       };
     },
@@ -2613,8 +2634,8 @@ onBeforeUnmount(() => {
 }
 
 @keyframes readyPop {
-  0%, 100% { filter: brightness(1); }
-  50% { filter: brightness(1.08); }
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
 }
 
 .tab-badge {
