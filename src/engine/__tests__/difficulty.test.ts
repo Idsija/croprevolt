@@ -130,3 +130,30 @@ describe('randomized battle setups', () => {
     expect(mirroredSeen).toBe(true);
   });
 });
+
+import { heatRunRules } from '../difficulty';
+import { generateMarketOffers } from '../run';
+
+describe('heat run rules', () => {
+  it('leaves Heat 0 untouched and never eases off as heat rises', () => {
+    expect(heatRunRules(0)).toEqual({ bellTurnsLost: 0, marketPriceMult: 1, breatherHeal: 3 });
+    for (let h = 1; h <= 5; h++) {
+      const prev = heatRunRules(h - 1);
+      const cur = heatRunRules(h);
+      expect(cur.bellTurnsLost).toBeGreaterThanOrEqual(prev.bellTurnsLost);
+      expect(cur.marketPriceMult).toBeGreaterThanOrEqual(prev.marketPriceMult);
+      expect(cur.breatherHeal).toBeLessThanOrEqual(prev.breatherHeal);
+      expect(cur).not.toEqual(heatRunRules(0));
+    }
+  });
+
+  it('shortens the Harvest Bell and raises market prices in a real run', () => {
+    const cool = createNewRun(defaultMetaProgress(), 'spring', 7, 0);
+    const hot = createNewRun(defaultMetaProgress(), 'spring', 7, 5);
+    expect(hot.harvestBellLimit).toBe((cool.harvestBellLimit ?? 0) - 2);
+    const rng = () => 0.42;
+    const coolOffers = generateMarketOffers(cool, rng);
+    const hotOffers = generateMarketOffers(hot, rng);
+    hotOffers.forEach((o, i) => expect(o.cost).toBe(Math.ceil(coolOffers[i].cost * 1.5)));
+  });
+});

@@ -247,7 +247,7 @@ export class TitleBackdropRenderer {
       }
     }
 
-    // 4. Tactile 3D Props (Crates, Haystack, Beehive, Red Mini-Barn!)
+    // 4. Tactile 3D Props (Crates, Haystack, Mossy Boulder, Textured Red Barn + Silo!)
     const crateMat = new THREE.MeshStandardMaterial({ map: this.textures.crateMap, roughness: 0.85 });
     const crate1 = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.64, 0.78), crateMat);
     crate1.position.set(-1.18, 0.32, 1.18);
@@ -257,72 +257,180 @@ export class TitleBackdropRenderer {
     this.root.add(crate1);
 
     const hayMat = new THREE.MeshStandardMaterial({ map: this.textures.haystackMap, roughness: 0.92 });
-    const hay = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.05, 0.95), hayMat);
-    hay.position.set(1.18, 0.52, -1.18);
+    const hay = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.48, 0.96, 10), hayMat);
+    hay.position.set(1.18, 0.48, -1.18);
     hay.castShadow = true;
     hay.receiveShadow = true;
-    this.addInkEdges(hay);
+    this.addInkEdges(hay, 0.45);
     this.root.add(hay);
 
-    // Classic Red Paper Barn in the back-left corner
+    // Sculpted Mossy Storybook Boulder on the raised hill!
+    const boulderGroup = new THREE.Group();
+    boulderGroup.position.set(3.55, 0.52, 0.05);
+    const stoneMat = new THREE.MeshStandardMaterial({
+      map: this.textures.stoneMap,
+      roughness: 0.92,
+      flatShading: true,
+    });
+    const mainRock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.46, 0), stoneMat);
+    mainRock.scale.set(1.05, 0.95, 0.92);
+    mainRock.position.y = 0.38;
+    mainRock.castShadow = true;
+    mainRock.receiveShadow = true;
+    this.addInkEdges(mainRock, 0.55);
+    const sideRock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.24, 0), stoneMat);
+    sideRock.position.set(-0.34, 0.18, 0.22);
+    sideRock.castShadow = true;
+    this.addInkEdges(sideRock, 0.5);
+    const mossCap = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.24, 0.3, 0.08, 8),
+      new THREE.MeshStandardMaterial({ color: '#74bf3e', roughness: 0.88 })
+    );
+    mossCap.position.set(0.05, 0.78, 0.02);
+    mossCap.rotation.z = -0.15;
+    boulderGroup.add(mainRock, sideRock, mossCap);
+    this.root.add(boulderGroup);
+
+    // Classic Storybook Red Plank Barn + Striped Silo in the back-left corner!
     const barn = new THREE.Group();
     barn.position.set(-4.6, -0.05, -3.7);
     barn.rotation.y = 0.25;
     const barnBody = new THREE.Mesh(
       new THREE.BoxGeometry(2.3, 1.65, 1.75),
-      new THREE.MeshStandardMaterial({ color: '#c44536', roughness: 0.86 })
+      new THREE.MeshStandardMaterial({
+        map: this.textures.barnWallMap,
+        roughness: 0.85,
+        bumpMap: this.textures.paperBump,
+        bumpScale: 0.018,
+      })
     );
     barnBody.position.y = 0.82;
     barnBody.castShadow = true;
+    barnBody.receiveShadow = true;
     this.addInkEdges(barnBody);
     const roof = new THREE.Mesh(
-      new THREE.ConeGeometry(1.72, 1.05, 4),
-      new THREE.MeshStandardMaterial({ color: '#6b3e24', roughness: 0.9 })
+      new THREE.ConeGeometry(1.78, 1.08, 4),
+      new THREE.MeshStandardMaterial({
+        map: this.textures.barnRoofMap,
+        roughness: 0.88,
+        bumpMap: this.textures.paperBump,
+        bumpScale: 0.02,
+      })
     );
     roof.rotation.y = Math.PI / 4;
-    roof.position.y = 2.15;
+    roof.position.y = 2.16;
     roof.castShadow = true;
     this.addInkEdges(roof);
-    barn.add(barnBody, roof);
+
+    // Framed white barn door & hayloft window
+    const door = new THREE.Mesh(
+      new THREE.BoxGeometry(0.74, 0.82, 0.08),
+      new THREE.MeshStandardMaterial({ map: this.textures.fenceWoodMap, roughness: 0.84 })
+    );
+    door.position.set(0, 0.42, 0.88);
+    this.addInkEdges(door);
+    const loft = new THREE.Mesh(
+      new THREE.BoxGeometry(0.46, 0.36, 0.08),
+      new THREE.MeshStandardMaterial({ color: '#382012', roughness: 0.9 })
+    );
+    loft.position.set(0, 1.24, 0.88);
+    this.addInkEdges(loft);
+
+    // Storybook farm silo right next to the barn
+    const silo = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.42, 0.44, 1.95, 14),
+      new THREE.MeshStandardMaterial({ map: this.textures.barnWallMap, roughness: 0.86 })
+    );
+    silo.position.set(-1.38, 0.97, -0.15);
+    silo.castShadow = true;
+    const siloDome = new THREE.Mesh(
+      new THREE.SphereGeometry(0.43, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new THREE.MeshStandardMaterial({ map: this.textures.barnRoofMap, roughness: 0.84 })
+    );
+    siloDome.position.set(-1.38, 1.94, -0.15);
+    siloDome.castShadow = true;
+    barn.add(barnBody, roof, door, loft, silo, siloDome);
     this.root.add(barn);
 
-    // 5. Swaying Folded-Paper Trees around perimeter
+    // 5. Swaying Textured Storybook Trees (Round Cherry-Blossom + Apple Orchard Trees!)
     const treePositions = [
-      [-5.6, -1.2, 1.1],
-      [-5.1, 2.5, 0.9],
+      [-5.6, -1.2, 1.12],
+      [-5.1, 2.5, 0.94],
       [5.5, -2.1, 1.15],
-      [5.6, 2.0, 0.95],
-      [1.4, -3.9, 1.05],
+      [5.6, 2.0, 0.98],
+      [1.4, -3.9, 1.08],
     ];
+    const barkMat = new THREE.MeshStandardMaterial({
+      map: this.textures.treeBarkMap,
+      roughness: 0.9,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.02,
+    });
+    const greenFoliageMat = new THREE.MeshStandardMaterial({
+      map: this.textures.getTreeFoliageTexture('spring_green'),
+      roughness: 0.84,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.018,
+    });
+    const blossomFoliageMat = new THREE.MeshStandardMaterial({
+      map: this.textures.getTreeFoliageTexture('spring_blossom'),
+      roughness: 0.84,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.018,
+    });
+
     for (let i = 0; i < treePositions.length; i++) {
       const [tx, tz, sc] = treePositions[i];
       const tree = new THREE.Group();
       tree.position.set(tx, -0.1, tz);
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.11, 0.15, 0.95, 6),
-        new THREE.MeshStandardMaterial({ color: '#7d4d27', roughness: 0.9 })
-      );
-      trunk.position.y = 0.45;
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.17, 1.05, 8), barkMat);
+      trunk.position.y = 0.52;
       trunk.castShadow = true;
-      const foliage = new THREE.Mesh(
-        new THREE.ConeGeometry(0.72, 1.55, 6),
-        new THREE.MeshStandardMaterial({
-          color: i % 2 === 0 ? '#5c9c38' : '#77b546',
-          roughness: 0.86,
-          flatShading: true,
-        })
-      );
-      foliage.position.y = 1.45;
-      foliage.castShadow = true;
-      this.addInkEdges(foliage, 0.35);
-      tree.add(trunk, foliage);
+      this.addInkEdges(trunk, 0.45);
+      tree.add(trunk);
+
+      const fMat = i % 2 === 1 ? blossomFoliageMat : greenFoliageMat;
+      if (i % 2 === 1) {
+        // Plump round storybook cherry-blossom crown!
+        const crownSpecs: Array<[number, number, number, number]> = [
+          [0, 1.48, 0, 0.64],
+          [-0.4, 1.24, 0.14, 0.46],
+          [0.42, 1.28, -0.1, 0.44],
+          [0.05, 1.82, 0.05, 0.42],
+        ];
+        for (const [ox, oy, oz, r] of crownSpecs) {
+          const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), fMat);
+          puff.position.set(ox, oy, oz);
+          puff.castShadow = true;
+          puff.receiveShadow = true;
+          tree.add(puff);
+        }
+      } else {
+        // Layered textured orchard pine tiers!
+        for (const [ty, tr, th] of [
+          [1.22, 0.78, 0.62],
+          [1.68, 0.62, 0.54],
+          [2.08, 0.42, 0.46],
+        ]) {
+          const cone = new THREE.Mesh(new THREE.ConeGeometry(tr, th, 9), fMat);
+          cone.position.y = ty;
+          cone.castShadow = true;
+          this.addInkEdges(cone, 0.32);
+          tree.add(cone);
+        }
+      }
       tree.scale.setScalar(sc);
       this.root.add(tree);
       this.trees.push({ obj: tree, phase: i * 1.3 });
     }
 
-    // 6. Floating Paper Clouds on thin craft wires
-    const cloudMat = new THREE.MeshStandardMaterial({ color: '#fffbf0', roughness: 0.92 });
+    // 6. Floating Watercolor Paper Clouds on thin craft wires
+    const cloudMat = new THREE.MeshStandardMaterial({
+      map: this.textures.cloudMap,
+      roughness: 0.9,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.01,
+    });
     const cloudConfigs = [
       [-3.8, 3.6, -4.6, 1.05],
       [2.6, 4.0, -5.0, 1.2],
@@ -336,7 +444,7 @@ export class TitleBackdropRenderer {
         [-0.4, 0, 0.35],
         [0.42, -0.02, 0.33],
       ]) {
-        const disc = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.12, 12), cloudMat);
+        const disc = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.12, 14), cloudMat);
         disc.rotation.x = Math.PI / 2;
         disc.position.set(ox, oy, 0);
         g.add(disc);
@@ -357,11 +465,11 @@ export class TitleBackdropRenderer {
       boss?: boolean;
     }> = [
       { kind: 'cow', team: 'player', x: -1.2, y: 0, z: 0.0 },
-      { kind: 'lettuce', team: 'player', x: -2.4, y: 0, z: 0.7 },
-      { kind: 'pea', team: 'player', x: -2.5, y: 0, z: -1.1 },
-      { kind: 'lemon', team: 'player', x: -3.5, y: 0, z: 0.1 },
-      { kind: 'digger', team: 'enemy', x: 1.3, y: 0, z: 0.9 },
-      { kind: 'trimmer', team: 'enemy', x: 2.35, y: 0.52, z: -0.05 },
+      { kind: 'strawberry', team: 'player', x: -2.4, y: 0, z: 0.75 },
+      { kind: 'duck', team: 'player', x: -2.5, y: 0, z: -1.1 },
+      { kind: 'mushroom', team: 'player', x: -3.5, y: 0, z: 0.1 },
+      { kind: 'pitchfork', team: 'enemy', x: 1.3, y: 0, z: 0.9 },
+      { kind: 'hound', team: 'enemy', x: 2.35, y: 0.52, z: -0.05 },
       { kind: 'scarecrow', team: 'enemy', x: 3.55, y: 0.52, z: -1.1, boss: true },
     ];
 

@@ -1,6 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
+import {
+  flushQueuedScores,
+  loadPlayerName,
+  onlineConfig,
+  queueScore,
+  toRow,
+} from '../engine/onlineScores';
+import { activeStreak, dailyShareText, isPracticeRun, loadDailyState } from '../engine/daily';
+import { ACHIEVEMENTS } from '../engine/history';
 import { computeRunScore, loadScores, rankOf, scoreEntryForRun } from '../engine/score';
 import { gameStore, playAgain, returnToTitle } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
@@ -12,6 +21,32 @@ const score = computed(() => computeRunScore(run.value));
 /** 1-based place on this device's board (the run was recorded when it ended), 0 if off the board. */
 const rank = computed(() => rankOf(loadScores(), scoreEntryForRun(run.value)));
 const fmt = (n: number) => n.toLocaleString('en-US');
+
+/** Upload to the shared board when one is configured; unsent scores stay queued for later. */
+const earnedAchievements = computed(() =>
+  ACHIEVEMENTS.filter((a) => run.value.earnedAchievementIds?.includes(a.id))
+);
+const isPractice = computed(() => isPracticeRun(run.value));
+/** Day streak including this run (the run was recorded when it ended). */
+const streak = isDaily.value ? activeStreak(loadDailyState().streak, run.value.dailyKey ?? '') : 0;
+const copied = ref<'idle' | 'done' | 'failed'>('idle');
+async function copyResult(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(dailyShareText(run.value, streak));
+    copied.value = 'done';
+  } catch {
+    copied.value = 'failed';
+  }
+}
+
+const online = isPractice.value ? null : onlineConfig();
+const playerName = online ? loadPlayerName() : '';
+const uploadState = ref<'sending' | 'sent' | 'queued'>('sending');
+onMounted(async () => {
+  if (!online) return;
+  queueScore(toRow(scoreEntryForRun(run.value), playerName));
+  uploadState.value = (await flushQueuedScores(online)) === 0 ? 'sent' : 'queued';
+});
 </script>
 
 <template>
@@ -61,11 +96,22 @@ const fmt = (n: number) => n.toLocaleString('en-US');
 
       <div class="seed-packet score-card" aria-label="Run score">
         <div class="score-head">
-          <span class="score-kicker">{{ isDaily ? `Daily Run · ${run.dailyKey}` : 'Run Score' }}</span>
+          <span class="score-kicker">{{ isDaily ? `Daily Run · ${run.dailyKey}${isPractice ? ' · Practice' : ''}` : 'Run Score' }}</span>
           <strong class="score-total">{{ fmt(score.total) }}</strong>
-          <span v-if="rank === 1" class="paper-pill rank-pill best">★ New best on this device!</span>
+          <span v-if="isPractice" class="paper-pill rank-pill">Practice run, not ranked</span>
+          <span v-else-if="rank === 1" class="paper-pill rank-pill best">★ New best on this device!</span>
           <span v-else-if="rank > 0" class="paper-pill rank-pill">#{{ rank }} on this device</span>
+          <span v-if="streak > 1 && !isPractice" class="paper-pill rank-pill streak">{{ streak }}-day streak</span>
         </div>
+        <small v-if="online" class="upload-note" aria-live="polite">
+          {{
+            uploadState === 'sent'
+              ? `Posted to the shared board as ${playerName}.`
+              : uploadState === 'queued'
+                ? "Couldn't reach the shared board. Your score is saved and will be sent next time."
+                : 'Posting to the shared board…'
+          }}
+        </small>
         <dl class="score-lines">
           <div v-for="line in score.lines" :key="line.label" class="score-line">
             <dt>{{ line.label }} <small>{{ line.detail }}</small></dt>
@@ -77,6 +123,12 @@ const fmt = (n: number) => n.toLocaleString('en-US');
           </div>
         </dl>
       </div>
+
+      <ul v-if="earnedAchievements.length > 0" class="earned-list" aria-label="Achievements earned">
+        <li v-for="a in earnedAchievements" :key="a.id" class="paper-pill earned-pill">
+          {{ a.icon }} <strong>{{ a.name }}</strong> · +{{ a.seeds }} seeds
+        </li>
+      </ul>
 
       <div class="final-squad">
         <h3>Final Produce Roster</h3>
@@ -97,9 +149,18 @@ const fmt = (n: number) => n.toLocaleString('en-US');
         </div>
       </div>
 
+      <div v-if="isDaily" class="share-row">
+        <button class="paper-btn sky share-btn" @click="copyResult">
+          {{ copied === 'done' ? 'Copied!' : 'Copy result to share' }}
+        </button>
+        <small v-if="copied === 'failed'" class="upload-note" role="status">
+          Couldn't copy here. Your browser blocked clipboard access.
+        </small>
+      </div>
+
       <div class="actions">
         <button class="paper-btn primary diecut act-btn" @click="playAgain()">
-          <CraftIcon name="play" :size="18" /> {{ isDaily ? 'Retry Daily Run' : 'Play Another Run' }}
+          <CraftIcon name="play" :size="18" /> {{ isDaily ? 'Practice Daily Again' : 'Play Another Run' }}
         </button>
         <button class="paper-btn gold diecut act-btn" @click="returnToTitle">
           <CraftIcon name="shed" :size="18" /> Seed Shed
@@ -223,6 +284,43 @@ const fmt = (n: number) => n.toLocaleString('en-US');
 
 .rank-pill.best {
   background: #fde89b;
+}
+
+.rank-pill.streak {
+  background: #ffd9b0;
+}
+
+.share-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.share-btn {
+  min-height: 42px;
+  padding-inline: 18px;
+}
+
+.earned-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.earned-pill {
+  background: #fde89b;
+}
+
+.upload-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink-soft);
 }
 
 .score-lines {

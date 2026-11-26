@@ -6,7 +6,10 @@ import { PRODUCE_BLUEPRINTS } from '../data/produce';
 import { RELIC_REGISTRY } from '../data/relics';
 import { getHeroSkillTree } from '../data/skills';
 import { ALT_WEAPONS, getSpeciesWeapons } from '../data/weapons';
+import { activeStreak, loadDailyState } from '../engine/daily';
+import { ACHIEVEMENTS, loadHistory } from '../engine/history';
 import { getFamilyLabel } from '../engine/hooks';
+import { dailyKeyFor } from '../engine/score';
 import { hasVariantSprite, resolveVariantSpriteKey, type SpriteVariantKind } from '../renderer3d/textures';
 import CraftIcon from './CraftIcon.vue';
 
@@ -21,7 +24,25 @@ function onAlmanacKeyDown(e: KeyboardEvent): void {
 onMounted(() => window.addEventListener('keydown', onAlmanacKeyDown));
 onBeforeUnmount(() => window.removeEventListener('keydown', onAlmanacKeyDown));
 
-type AlmanacTab = 'heroes' | 'enemies' | 'weapons' | 'relics';
+type AlmanacTab = 'heroes' | 'enemies' | 'weapons' | 'relics' | 'records';
+
+const history = loadHistory();
+const dailyStreak = loadDailyState().streak;
+const streakNow = activeStreak(dailyStreak, dailyKeyFor());
+const earnedCount = ACHIEVEMENTS.filter((a) => history.achievements[a.id]).length;
+const fmt = (n: number) => n.toLocaleString('en-US');
+const shortDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const records = [
+  { label: 'Runs played', value: fmt(history.stats.runs) },
+  { label: 'Runs won', value: fmt(history.stats.wins) },
+  { label: 'Best score', value: fmt(history.stats.bestScore) },
+  { label: 'Best daily score', value: fmt(history.stats.bestDailyScore) },
+  { label: 'Highest Heat won', value: history.stats.highestHeatWon >= 0 ? `Heat ${history.stats.highestHeatWon}` : 'None yet' },
+  { label: 'Fastest win', value: history.stats.fastestWinTurns > 0 ? `${history.stats.fastestWinTurns} battle turns` : 'None yet' },
+  { label: 'Farmers routed', value: fmt(history.stats.enemiesDefeated) },
+  { label: 'Daily streak', value: `${streakNow} now · best ${dailyStreak.best}` },
+];
 
 const activeTab = ref<AlmanacTab>('heroes');
 const heroesList = Object.values(PRODUCE_BLUEPRINTS);
@@ -148,6 +169,13 @@ const cardTransformStyle = computed(() => ({
           @click="activeTab = 'relics'"
         >
           ✨ Relics &amp; Grafts
+        </button>
+        <button
+          class="paper-btn tab-btn"
+          :class="{ gold: activeTab === 'records' }"
+          @click="activeTab = 'records'"
+        >
+          🏅 Records ({{ earnedCount }}/{{ ACHIEVEMENTS.length }})
         </button>
       </nav>
 
@@ -314,6 +342,47 @@ const cardTransformStyle = computed(() => ({
             <p class="cat-desc">{{ entry.weapon.description }}</p>
           </div>
         </div>
+      </div>
+
+      <!-- TAB 5: RECORDS, ACHIEVEMENTS & RUN HISTORY -->
+      <div v-else-if="activeTab === 'records'" class="grid-pane scroll-soft">
+        <h3 class="sub-sec-head">Records</h3>
+        <dl class="record-grid">
+          <div v-for="r in records" :key="r.label" class="seed-packet record-card">
+            <dt>{{ r.label }}</dt>
+            <dd>{{ r.value }}</dd>
+          </div>
+        </dl>
+
+        <h3 class="sub-sec-head" style="margin-top: 12px">Achievements ({{ earnedCount }}/{{ ACHIEVEMENTS.length }})</h3>
+        <div class="catalog-grid">
+          <div
+            v-for="a in ACHIEVEMENTS"
+            :key="a.id"
+            class="catalog-card seed-packet"
+            :class="{ 'ach-locked': !history.achievements[a.id] }"
+          >
+            <strong>{{ a.icon }} {{ a.name }}</strong>
+            <p class="cat-desc">{{ a.desc }}</p>
+            <small class="ach-state">
+              {{ history.achievements[a.id] ? `Earned ${shortDate(history.achievements[a.id])}` : `Reward: ${a.seeds} seeds` }}
+            </small>
+          </div>
+        </div>
+
+        <h3 class="sub-sec-head" style="margin-top: 12px">Recent Runs</h3>
+        <ol v-if="history.runs.length > 0" class="run-list">
+          <li v-for="r in history.runs" :key="r.id" class="seed-packet run-row">
+            <strong>{{ fmt(r.score) }}</strong>
+            <span>
+              {{ r.victory ? 'Garden freed' : `Fell in Act ${r.act}` }} · {{ r.battlesWon }} battles
+              <template v-if="r.heat > 0"> · Heat {{ r.heat }}</template>
+              <template v-if="r.mode === 'daily'"> · Daily{{ r.practice ? ' practice' : '' }}</template>
+            </span>
+            <small>{{ shortDate(r.at) }}</small>
+          </li>
+        </ol>
+        <p v-else class="cat-desc">Finish a run and it will show up here.</p>
       </div>
 
       <!-- TAB 4: RELICS & GRAFTS -->
@@ -729,5 +798,67 @@ const cardTransformStyle = computed(() => ({
   .entry-btn {
     flex: 0 0 auto;
   }
+}
+.record-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.record-card {
+  padding: 9px 12px;
+  color: var(--ink);
+}
+
+.record-card dt {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+.record-card dd {
+  margin: 2px 0 0;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 700;
+}
+
+.ach-locked {
+  opacity: 0.62;
+}
+
+.ach-state {
+  color: var(--ink-soft);
+}
+
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  color: var(--ink);
+}
+
+.run-row strong {
+  font-family: 'Fredoka', sans-serif;
+  min-width: 3.6em;
+  font-variant-numeric: tabular-nums;
+}
+
+.run-row span {
+  flex: 1;
+  min-width: 0;
+}
+
+.run-row small {
+  color: var(--ink-soft);
 }
 </style>
