@@ -1,4 +1,4 @@
-import { evaluateCover, manhattan, posKey, tileAt, unitAt } from './grid';
+import { evaluateCover, inBounds, manhattan, posKey, tileAt, unitAt } from './grid';
 import {
   getEffectiveCoverDamage,
   getMatchup,
@@ -10,8 +10,17 @@ import {
 import { computeMovableTiles } from './pathfinding';
 import type { BattleState, BattleUnit, CombatForecast, GridPos } from './types';
 
+export function computePushDirection(from: GridPos, to: GridPos): GridPos {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return { x: dx >= 0 ? 1 : -1, y: 0 };
+  }
+  return { x: 0, y: dy >= 0 ? 1 : -1 };
+}
+
 /**
- * Predicts exact hit chance (100 / 50 / 0), cover protection, triangle multiplier, and damage.
+ * Predicts exact hit chance (100 / 50 / 0), cover protection, triangle multiplier, knockback, and damage.
  * Shared identically by the Hover Forecast UI and the Battle Executor!
  */
 export function forecastAttack(
@@ -55,8 +64,9 @@ export function forecastAttack(
     return invalid('No valid target');
   }
 
-  // Raw base attack including temporary bonuses (Bouncy Mulch, Cluck Norris jump, Spicy Pep boost)
-  const boostBonus = (hasStatus(attacker, 'boosted') ? 2 : 0) + attacker.tempAttackBonus;
+  // Raw base attack including temporary bonuses (Bouncy Mulch, Cluck Norris jump, Spicy Pep, Sunbeam tile!)
+  const sunbeamBonus = tileAt(state, attacker.pos)?.terrain === 'sunbeam' ? 2 : 0;
+  const boostBonus = (hasStatus(attacker, 'boosted') ? 2 : 0) + attacker.tempAttackBonus + sunbeamBonus;
   const rawBase = w.damage + boostBonus;
   const effCoverDmg = getEffectiveCoverDamage(attacker) + boostBonus;
 
@@ -117,6 +127,15 @@ export function forecastAttack(
     w.appliesStatus?.kind ??
     (hitChance === 100 && hasGraft(attacker, 'spicy_shot') ? 'burn' : undefined);
 
+  let knockbackDir: GridPos | undefined;
+  let knockbackWillBump = false;
+  if (w.knockback && w.knockback > 0 && hitChance > 0) {
+    knockbackDir = computePushDirection(attacker.pos, defender.pos);
+    const dest = { x: defender.pos.x + knockbackDir.x, y: defender.pos.y + knockbackDir.y };
+    knockbackWillBump =
+      !inBounds(state, dest) || Boolean(tileAt(state, dest)?.cover) || Boolean(unitAt(state, dest));
+  }
+
   return {
     attackerId: attacker.id,
     targetUnitId: defender.id,
@@ -128,7 +147,9 @@ export function forecastAttack(
     baseDamage: rawBase,
     finalDamage: hitChance === 0 ? 0 : dmg,
     coverDamage: effCoverDmg,
-    isLethal: hitChance > 0 && dmg >= defender.hp,
+    isLethal: hitChance > 0 && dmg + (knockbackWillBump ? 2 : 0) >= defender.hp,
+    knockbackDir,
+    knockbackWillBump,
     appliesStatus,
     canAttack: hitChance > 0,
     reason: hitChance === 0 ? 'Blocked by Full Cover! Flank, lob, or smash cover.' : undefined,

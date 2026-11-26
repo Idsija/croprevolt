@@ -1,14 +1,16 @@
 import { ALL_GRAFT_IDS, GRAFT_REGISTRY } from '../data/grafts';
-import { ALL_ITEM_IDS } from '../data/items';
+import { ALL_ITEM_IDS, ITEM_REGISTRY } from '../data/items';
 import { PRODUCE_BLUEPRINTS, RECRUITABLE_BLUEPRINT_IDS, STARTER_BLUEPRINT_IDS } from '../data/produce';
 import { ALL_RELIC_IDS } from '../data/relics';
 import type {
   BattleState,
+  MarketOffer,
   MetaProgress,
   PromotionTier,
   RewardBundle,
   RosterHero,
   RunState,
+  SeasonId,
   SeasonNode,
 } from './types';
 
@@ -137,6 +139,7 @@ export function createHeroFromBlueprint(blueprintId: string, bonusMaxHp = 0): Ro
     moveRange: bp.moveRange,
     jumpRange: bp.jumpRange,
     dashDamage: bp.dashDamage,
+    dashKnockback: bp.dashKnockback,
     dashStatus: bp.dashStatus ? { ...bp.dashStatus } : undefined,
     weapon: { ...bp.weapon, appliesStatus: bp.weapon.appliesStatus ? { ...bp.weapon.appliesStatus } : undefined },
     ability: { ...bp.ability, appliesStatus: bp.ability.appliesStatus ? { ...bp.ability.appliesStatus } : undefined },
@@ -218,7 +221,77 @@ export function createMiniSeasonNodes(): SeasonNode[] {
   ];
 }
 
-export function createNewRun(meta: MetaProgress): RunState {
+export function createSummerSeasonNodes(): SeasonNode[] {
+  return [
+    {
+      id: 'n0',
+      stage: 0,
+      lane: 0,
+      type: 'skirmish',
+      name: 'Sun-Baked Glasshouse',
+      subtitle: 'Defeat All — Use Sunbeams (+2 ATK) & Beehives to break the guard',
+      mapId: 'greenhouse_entry',
+      nextIds: ['n1a', 'n1b'],
+      completed: false,
+    },
+    {
+      id: 'n1a',
+      stage: 1,
+      lane: 0,
+      type: 'escape',
+      name: 'Sprinkler Alley Breakout',
+      subtitle: 'Reach the Gate — Blast Sprinklers & rush north for Graft + Relic',
+      mapId: 'irrigation_run',
+      nextIds: ['n2a', 'n2b'],
+      completed: false,
+    },
+    {
+      id: 'n1b',
+      stage: 1,
+      lane: 1,
+      type: 'shop',
+      name: "Farmer's Compost Market",
+      subtitle: 'Safe Market — Spend run Seeds on Grafts, Items, Healing & Recruits!',
+      nextIds: ['n2a', 'n2b'],
+      completed: false,
+    },
+    {
+      id: 'n2a',
+      stage: 2,
+      lane: 0,
+      type: 'barn_rescue',
+      name: 'Old Barn Rescue',
+      subtitle: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
+      mapId: 'barn_raid',
+      nextIds: ['n3'],
+      completed: false,
+    },
+    {
+      id: 'n2b',
+      stage: 2,
+      lane: 1,
+      type: 'elite',
+      name: 'Beehive Apiary Elite',
+      subtitle: 'Elite Fight — Chain-detonate Beehives for rare Graft + Soil Relic',
+      mapId: 'apiary_ambush',
+      nextIds: ['n3'],
+      completed: false,
+    },
+    {
+      id: 'n3',
+      stage: 3,
+      lane: 0,
+      type: 'boss',
+      name: "Baron Combine's Conservatory",
+      subtitle: 'Summer Season Boss — Topple the vintage red harvester tractor!',
+      mapId: 'combine_throne',
+      nextIds: [],
+      completed: false,
+    },
+  ];
+}
+
+export function createNewRun(meta: MetaProgress, seasonId: SeasonId = 'spring'): RunState {
   const hpBonus = meta.unlocks.heirloomSoil ? 2 : 0;
   // Starter squad: Spudnik, Snap-Pea, Zestia & Truffle Boar active + Habanero on bench (swap anytime!)
   const roster = STARTER_BLUEPRINT_IDS.map((id) => createHeroFromBlueprint(id, hpBonus));
@@ -231,15 +304,16 @@ export function createNewRun(meta: MetaProgress): RunState {
 
   return {
     id: `run_${Date.now()}`,
-    seasonName: 'Spring Mini-Season',
-    nodes: createMiniSeasonNodes(),
+    seasonId,
+    seasonName: seasonId === 'summer' ? 'Summer Greenhouse' : 'Spring Mini-Season',
+    nodes: seasonId === 'summer' ? createSummerSeasonNodes() : createMiniSeasonNodes(),
     currentNodeId: null,
     completedNodeIds: [],
     roster,
     activeSquadUids: roster.slice(0, 4).map((h) => h.uid),
     relicIds,
     items,
-    seeds: 0,
+    seeds: seasonId === 'summer' ? 8 : 0,
     battlesWon: 0,
     enemiesDefeated: 0,
     pendingReward: null,
@@ -267,21 +341,87 @@ function pickRandomDistinct<T>(pool: readonly T[], count: number, rng = Math.ran
   return out;
 }
 
+export function generateMarketOffers(run: RunState, rng = Math.random): MarketOffer[] {
+  const graftPicks = pickRandomDistinct(ALL_GRAFT_IDS, 2, rng);
+  const offers: MarketOffer[] = graftPicks.map((gid, i) => {
+    const g = GRAFT_REGISTRY[gid];
+    return {
+      id: `mkt_graft_${i}_${gid}`,
+      kind: 'graft',
+      title: g.name,
+      desc: g.description,
+      icon: g.badgeIcon,
+      cost: 10,
+      graftId: gid,
+      purchased: false,
+    };
+  });
+
+  const bomb = ITEM_REGISTRY.fertilizer_bomb;
+  const can = ITEM_REGISTRY.watering_can;
+  offers.push(
+    {
+      id: 'mkt_item_bomb',
+      kind: 'item',
+      title: `+1 ${bomb.name}`,
+      desc: bomb.description,
+      icon: bomb.icon,
+      cost: 6,
+      itemId: 'fertilizer_bomb',
+      purchased: false,
+    },
+    {
+      id: 'mkt_item_can',
+      kind: 'item',
+      title: `+1 ${can.name}`,
+      desc: can.description,
+      icon: can.icon,
+      cost: 5,
+      itemId: 'watering_can',
+      purchased: false,
+    },
+    {
+      id: 'mkt_heal_spa',
+      kind: 'heal',
+      title: 'Compost Spa (+6 HP)',
+      desc: 'Restore +6 HP to every active & bench hero.',
+      icon: '🌿',
+      cost: 7,
+      purchased: false,
+    }
+  );
+
+  if (run.roster.some((h) => h.harvested)) {
+    offers.push({
+      id: 'mkt_rescue_bail',
+      kind: 'rescue',
+      title: 'Barn Bailout',
+      desc: 'Bribe the farmhand to free one bagged hero immediately at 70% HP!',
+      icon: '🔓',
+      cost: 12,
+      purchased: false,
+    });
+  }
+
+  return offers;
+}
+
 export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Math.random): RewardBundle {
   const ownedRelics = new Set(run.relicIds);
   const availableRelics = ALL_RELIC_IDS.filter((id) => !ownedRelics.has(id));
   const ownedBlueprints = new Set(run.roster.map((h) => h.blueprintId));
   const recruitPool = RECRUITABLE_BLUEPRINT_IDS.filter((id) => !ownedBlueprints.has(id));
 
-  if (node.type === 'vault') {
+  if (node.type === 'vault' || node.type === 'shop') {
     const picks = pickRandomDistinct(recruitPool, 3, rng);
     return {
-      seedsEarned: 6,
+      seedsEarned: node.type === 'shop' ? 8 : 6,
       graftChoices: [],
       relicChoices: [],
       recruitChoices: picks,
-      freeHealAmount: 6,
-      itemGrant: { itemId: 'watering_can', count: 1 },
+      freeHealAmount: node.type === 'vault' ? 6 : 3,
+      itemGrant: node.type === 'vault' ? { itemId: 'watering_can', count: 1 } : undefined,
+      marketOffers: generateMarketOffers(run, rng),
       claimedGraft: true,
       claimedRelic: true,
       claimedRecruit: picks.length === 0,
@@ -312,12 +452,13 @@ export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Mat
 
 export function openVaultNode(run: RunState, nodeId: string): boolean {
   const node = run.nodes.find((n) => n.id === nodeId);
-  if (!node || node.type !== 'vault') return false;
+  if (!node || (node.type !== 'vault' && node.type !== 'shop')) return false;
   run.currentNodeId = nodeId;
-  // Heal squad at Compost Vault immediately!
+  const freeHeal = node.type === 'vault' ? 6 : 3;
+  // Heal squad at Vault / Market immediately!
   for (const hero of run.roster) {
     if (!hero.harvested) {
-      hero.hp = Math.min(hero.maxHp, hero.hp + 6);
+      hero.hp = Math.min(hero.maxHp, hero.hp + freeHeal);
     }
   }
   run.pendingReward = generateRewardForNode(run, node);
@@ -330,7 +471,40 @@ export function openVaultNode(run: RunState, nodeId: string): boolean {
   if (!run.completedNodeIds.includes(nodeId)) {
     run.completedNodeIds.push(nodeId);
   }
-  run.status = 'vault';
+  run.status = node.type === 'shop' ? 'shop' : 'vault';
+  return true;
+}
+
+export function buyMarketOffer(run: RunState, offerId: string, targetHeroUid?: string): boolean {
+  const offers = run.pendingReward?.marketOffers;
+  if (!offers) return false;
+  const offer = offers.find((o) => o.id === offerId && !o.purchased);
+  if (!offer || run.seeds < offer.cost) return false;
+
+  if (offer.kind === 'graft') {
+    if (!offer.graftId || !targetHeroUid) return false;
+    const prevClaimed = run.pendingReward!.claimedGraft;
+    const ok = applyGraftToHero(run, targetHeroUid, offer.graftId);
+    run.pendingReward!.claimedGraft = prevClaimed;
+    if (!ok) return false;
+  } else if (offer.kind === 'item' && offer.itemId) {
+    run.items[offer.itemId] = (run.items[offer.itemId] ?? 0) + 1;
+  } else if (offer.kind === 'heal') {
+    for (const h of run.roster) {
+      if (!h.harvested) h.hp = Math.min(h.maxHp, h.hp + 6);
+    }
+  } else if (offer.kind === 'rescue') {
+    const bagged = run.roster.find((h) => h.harvested);
+    if (!bagged) return false;
+    bagged.harvested = false;
+    bagged.hp = Math.max(4, Math.round(bagged.maxHp * 0.7));
+    if (run.activeSquadUids.length < 4 && !run.activeSquadUids.includes(bagged.uid)) {
+      run.activeSquadUids.push(bagged.uid);
+    }
+  }
+
+  run.seeds -= offer.cost;
+  offer.purchased = true;
   return true;
 }
 

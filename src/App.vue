@@ -11,7 +11,7 @@ import { gameStore } from './stores/gameStore';
   <TitleScreen v-if="gameStore.screen === 'title' || !gameStore.run" />
   <BattleView v-else-if="gameStore.run.status === 'battle' && gameStore.battle" />
   <RewardModal
-    v-else-if="(gameStore.run.status === 'reward' || gameStore.run.status === 'vault') && gameStore.run.pendingReward"
+    v-else-if="(gameStore.run.status === 'reward' || gameStore.run.status === 'vault' || gameStore.run.status === 'shop') && gameStore.run.pendingReward"
   />
   <RunSummary
     v-else-if="gameStore.run.status === 'victory' || gameStore.run.status === 'defeat'"

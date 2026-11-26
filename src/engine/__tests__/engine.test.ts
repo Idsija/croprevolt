@@ -37,10 +37,12 @@ import { computeDashOptions, computeTeamJumpOptions } from '../pathfinding';
 import {
   applyBattleOutcomeToRun,
   applyGraftToHero,
+  buyMarketOffer,
   claimRecruitReward,
   createNewRun,
   defaultMetaProgress,
   MAX_GRAFTS_PER_HERO,
+  openVaultNode,
 } from '../run';
 
 describe('Crop Revolt! Tactical Engine', () => {
@@ -531,5 +533,143 @@ describe('Crop Revolt! Tactical Engine', () => {
     expect(gameStore.selectedUnitId).toBe(pea.id);
     triggerUndoMove();
     expect(gameStore.selectedUnitId).toBe(spud.id);
+  });
+
+  it('resolves Knockback slide, +2 BUMP crunch, Beehive chain explosions, Sprinkler jets, and Sunbeam +2 ATK', () => {
+    const run = createNewRun(defaultMetaProgress(), 'summer');
+    const battle = createBattleFromMap('greenhouse_entry', run.roster.slice(0, 4), [], run.items);
+    for (let y = 0; y < battle.height; y++) {
+      for (let x = 0; x < battle.width; x++) {
+        battle.tiles[y][x].cover = null;
+        battle.tiles[y][x].terrain = 'soil';
+      }
+    }
+
+    const spud = battle.units.find((u) => u.visualKind === 'potato')!;
+    const boar = battle.units.find((u) => u.visualKind === 'pig')!;
+    const enemies = battle.units.filter((u) => u.team === 'enemy');
+    const foeA = enemies[0];
+    const foeB = enemies[1];
+    foeA.hp = 20;
+    foeA.maxHp = 20;
+    foeB.hp = 20;
+    foeB.maxHp = 20;
+
+    // 1. Sunbeam (+2 ATK) + Open Knockback slide (Spudnik pushes foeA north from (3,5) -> (3,4))
+    battle.tiles[6][3].terrain = 'sunbeam';
+    spud.pos = { x: 3, y: 6 };
+    foeA.pos = { x: 3, y: 5 };
+    foeB.pos = { x: 1, y: 1 };
+
+    const sunFc = forecastAttack(battle, spud, foeA.pos);
+    expect(sunFc.knockbackDir).toEqual({ x: 0, y: -1 });
+    expect(sunFc.knockbackWillBump).toBe(false);
+    // Compare against standing on regular soil
+    battle.tiles[6][3].terrain = 'soil';
+    const soilFc = forecastAttack(battle, spud, foeA.pos);
+    expect(sunFc.finalDamage).toBeGreaterThanOrEqual(soilFc.finalDamage + 2);
+
+    battle.tiles[6][3].terrain = 'sunbeam';
+    expect(executeAttack(battle, spud.id, foeA.pos, () => 0)).toBe(true);
+    expect(foeA.pos).toEqual({ x: 3, y: 4 });
+
+    // 2. Bump Crunch (+2 BUMP!) when pushed into another unit!
+    spud.actions.hasAttacked = false;
+    spud.pos = { x: 3, y: 5 };
+    foeA.pos = { x: 3, y: 4 };
+    foeB.pos = { x: 3, y: 3 };
+    const bumpFc = forecastAttack(battle, spud, foeA.pos);
+    expect(bumpFc.knockbackWillBump).toBe(true);
+
+    const foeAHpBefore = foeA.hp;
+    const foeBHpBefore = foeB.hp;
+    expect(executeAttack(battle, spud.id, foeA.pos, () => 0)).toBe(true);
+    expect(foeA.pos).toEqual({ x: 3, y: 4 }); // Blocked by foeB
+    expect(foeA.hp).toBe(foeAHpBefore - bumpFc.finalDamage - 2);
+    expect(foeB.hp).toBe(foeBHpBefore - 2);
+
+    // 3. Truffle Boar Dash Knockback slams foeA into a Beehive -> triggers 3x3 Bee Explosion!
+    spud.pos = { x: 0, y: 8 }; // Clear (3,5) so Boar charges straight north!
+    battle.tiles[3][3].cover = null;
+    foeB.pos = { x: 2, y: 2 }; // Within 3x3 of Beehive at (3,3)
+    battle.tiles[3][3].cover = createCover('beehive');
+    boar.pos = { x: 3, y: 6 };
+    foeA.pos = { x: 3, y: 4 };
+    foeA.hp = 20;
+    foeB.hp = 20;
+    const beeEventCountBefore = battle.pendingEvents.length;
+    expect(executeDash(battle, boar.id, foeA.id)).toBe(true);
+    // Beehive at (3,3) took 4 crunch damage -> exploded (cover cleared, both foes stung for 3 dmg)!
+    expect(battle.tiles[3][3].cover).toBeNull();
+    expect(foeB.hp).toBeLessThan(20);
+    expect(
+      battle.pendingEvents.slice(beeEventCountBefore).some((e) => e.type === 'hazard' && e.kind === 'beehive')
+    ).toBe(true);
+
+    // 4. Irrigation Sprinkler jet pushes units along N/S/E/W cross, cleanses Burn, and hits enemies!
+    const sprinklerPos = { x: 3, y: 4 };
+    battle.tiles[4][3].cover = createCover('sprinkler');
+    battle.tiles[4][3].cover!.hp = 2;
+    spud.pos = { x: 3, y: 5 };
+    applyStatusToUnit(spud, 'burn', 2);
+    foeA.pos = { x: 3, y: 3 };
+    foeA.hp = 15;
+    spud.actions.hasAttacked = false;
+    expect(executeAttack(battle, spud.id, sprinklerPos, () => 0)).toBe(true);
+    expect(battle.tiles[4][3].cover).toBeNull();
+    // Spudnik was doused (Burn cleansed) and pushed south (3,5 -> 3,6)
+    expect(spud.statuses.some((s) => s.kind === 'burn')).toBe(false);
+    expect(spud.pos).toEqual({ x: 3, y: 6 });
+    // foeA was blasted north (3,3 -> 3,2) and took 2 water jet damage
+    expect(foeA.pos).toEqual({ x: 3, y: 2 });
+    expect(foeA.hp).toBe(13);
+  });
+
+  it('supports Season 2 Summer Greenhouse, Corn-elius, Baron Combine, and Farmer Compost Market purchases', () => {
+    const meta = defaultMetaProgress();
+    const run = createNewRun(meta, 'summer');
+    expect(run.seasonId).toBe('summer');
+    expect(run.nodes.some((n) => n.type === 'shop')).toBe(true);
+    expect(run.nodes.find((n) => n.type === 'boss')?.mapId).toBe('combine_throne');
+
+    // Recruit Corn-elius & test Baron Combine boss arena!
+    expect(claimRecruitReward(run, 'corn')).toBe(true);
+    const cornHero = run.roster.find((h) => h.blueprintId === 'corn')!;
+    expect(cornHero).toBeDefined();
+
+    const bossBattle = createBattleFromMap('combine_throne', [cornHero, run.roster[0]], [], run.items);
+    expect(bossBattle.theme).toBe('greenhouse');
+    expect(bossBattle.units.some((u) => u.visualKind === 'corn')).toBe(true);
+    const baron = bossBattle.units.find((u) => u.visualKind === 'tractor')!;
+    expect(baron).toBeDefined();
+    expect(baron.isBoss).toBe(true);
+    expect(baron.weapon.knockback).toBe(1);
+
+    // Open Farmer's Compost Market & buy Graft + Item + Bagged Ally Bailout with run.seeds!
+    run.seeds = 40;
+    run.roster[1].harvested = true;
+    run.roster[0].hp = 4;
+    expect(openVaultNode(run, 'n1b')).toBe(true);
+    expect(run.status).toBe('shop');
+    const offers = run.pendingReward?.marketOffers ?? [];
+    expect(offers.length).toBeGreaterThanOrEqual(4);
+
+    const graftOffer = offers.find((o) => o.kind === 'graft')!;
+    const itemOffer = offers.find((o) => o.kind === 'item')!;
+    const rescueOffer = offers.find((o) => o.kind === 'rescue')!;
+    expect(graftOffer && itemOffer && rescueOffer).toBeTruthy();
+
+    const seedsBefore = run.seeds;
+    expect(buyMarketOffer(run, graftOffer.id, run.roster[0].uid)).toBe(true);
+    expect(run.roster[0].graftIds).toContain(graftOffer.graftId);
+    expect(run.seeds).toBe(seedsBefore - graftOffer.cost);
+    expect(buyMarketOffer(run, graftOffer.id, run.roster[0].uid)).toBe(false); // Cannot double-buy
+
+    const itemCountBefore = run.items[itemOffer.itemId!] ?? 0;
+    expect(buyMarketOffer(run, itemOffer.id)).toBe(true);
+    expect(run.items[itemOffer.itemId!]).toBe(itemCountBefore + 1);
+
+    expect(buyMarketOffer(run, rescueOffer.id)).toBe(true);
+    expect(run.roster[1].harvested).toBe(false);
   });
 });

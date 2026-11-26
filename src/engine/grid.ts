@@ -73,6 +73,10 @@ export function createCover(
       return { kind: 'stone', level: 'full', hp: 99, maxHp: 99, destructible: false };
     case 'thorns':
       return { kind: 'thorns', level: 'half', hp: 5, maxHp: 5, destructible: true };
+    case 'beehive':
+      return { kind: 'beehive', level: 'half', hp: 4, maxHp: 4, destructible: true };
+    case 'sprinkler':
+      return { kind: 'sprinkler', level: 'half', hp: 4, maxHp: 4, destructible: true };
     case 'cage':
       return {
         kind: 'cage',

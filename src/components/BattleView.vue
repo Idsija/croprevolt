@@ -44,13 +44,65 @@ import {
 } from '../stores/gameStore';
 import CraftIcon, { type CraftIconName } from './CraftIcon.vue';
 
+const COACH_STORAGE_KEY = 'crop_revolt_coach_v1';
+const COACH_TIPS = [
+  {
+    title: '1/3 · Preview Before Moving',
+    body: 'Tap any blue tile to preview Cover shields & live Attack range from that spot. Tap again (or Confirm) to move!',
+  },
+  {
+    title: '2/3 · Dash, Knockback & Hazards',
+    body: 'Dash orange-ringed foes mid-move! Slam farmers into crates, allies, Beehives, or Sprinklers for +2 BUMP! combos.',
+  },
+  {
+    title: '3/3 · Cover, Team-Jump & Danger',
+    body: '100% Open · 50% Half · 0% Full Cover. Vault gold tiles over allies to flank, or tap ⚠ up top to see all enemy threats!',
+  },
+] as const;
+
+function loadCoachStep(): number {
+  try {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem(COACH_STORAGE_KEY) === 'done') {
+      return -1;
+    }
+  } catch {
+    // ignore
+  }
+  return 0;
+}
+
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const showItemsMenu = ref(false);
 const showUtilityMenu = ref(false);
 const inspectedNote = ref<{ title: string; desc: string } | null>(null);
 const zoomPercent = ref(100);
 const endConfirmPending = ref(false);
+const coachStep = ref<number>(loadCoachStep());
 let endConfirmTimer: ReturnType<typeof setTimeout> | null = null;
+
+function advanceCoach(): void {
+  if (coachStep.value < COACH_TIPS.length - 1) {
+    coachStep.value += 1;
+  } else {
+    dismissCoach();
+  }
+}
+
+function dismissCoach(): void {
+  coachStep.value = -1;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(COACH_STORAGE_KEY, 'done');
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function replayCoachTips(): void {
+  showUtilityMenu.value = false;
+  coachStep.value = 0;
+}
 
 let renderer: PaperCraftRenderer | null = null;
 let unsubscribeEvents: (() => void) | null = null;
@@ -155,10 +207,23 @@ const moveDestinationSummary = computed(() => {
     ).length;
   }
 
+  const destTerrain = tileAt(battle.value, dest)?.terrain ?? 'grass';
+  const terrainNote =
+    destTerrain === 'sunbeam'
+      ? '☀ Sunbeam (+2 ATK)'
+      : destTerrain === 'compost'
+        ? '🌿 Compost (+2 HP/turn)'
+        : destTerrain === 'mud'
+          ? '💧 Mud (2 Move cost)'
+          : destTerrain === 'gate'
+            ? '▲ Exit Gate (Win!)'
+            : null;
+
   return {
     isJump,
     bestCover,
     projectedFoes,
+    terrainNote,
   };
 });
 
@@ -588,6 +653,26 @@ onBeforeUnmount(() => {
       <span>{{ zoomPercent }}%</span>
     </button>
 
+    <!-- Turn-1 Sticky-Note Coachmarks (Dismissible, stored in localStorage) -->
+    <div
+      v-if="coachStep >= 0 && battle.phase === 'player' && battle.status === 'ongoing'"
+      class="coach-note paper-card pinned-card"
+    >
+      <span class="brass-pin tl"></span>
+      <div class="coach-copy">
+        <strong>{{ COACH_TIPS[coachStep].title }}</strong>
+        <small>{{ COACH_TIPS[coachStep].body }}</small>
+      </div>
+      <div class="coach-actions">
+        <button class="paper-btn gold mini-act" @click="advanceCoach">
+          {{ coachStep < COACH_TIPS.length - 1 ? 'Next →' : 'Got it!' }}
+        </button>
+        <button class="mini-close-x" aria-label="Dismiss tips" @click="dismissCoach">
+          <CraftIcon name="close" :size="13" />
+        </button>
+      </div>
+    </div>
+
     <!-- Tap-to-Inspect Toast (Hero Details, Grafts, Relics & Co-op Passives) -->
     <div v-if="inspectedNote" class="paper-card inspect-toast craft-fold" @click="inspectedNote = null">
       <strong>{{ inspectedNote.title }}</strong>
@@ -633,6 +718,10 @@ onBeforeUnmount(() => {
           >
             <CraftIcon name="auto_end" :size="16" />
             <span>Auto End Turn: {{ gameStore.autoEndTurnEnabled ? 'ON' : 'OFF' }}</span>
+          </button>
+          <button class="paper-btn toggle-wide" @click="replayCoachTips">
+            <CraftIcon name="book" :size="16" />
+            <span>Replay Quick Tips</span>
           </button>
         </div>
 
@@ -754,6 +843,12 @@ onBeforeUnmount(() => {
           </div>
           <small v-if="focusedCover.isObjectiveCage">
             Smash ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) to free a bagged ally!
+          </small>
+          <small v-else-if="focusedCover.kind === 'beehive'">
+            Explosive Beehive ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) — bursts 3×3 Bees (-3 dmg + Push)!
+          </small>
+          <small v-else-if="focusedCover.kind === 'sprinkler'">
+            Garden Sprinkler ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) — cross water jet pushes units &amp; douses Burn!
           </small>
           <small v-else-if="focusedCover.destructible">
             Destructible ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP)
@@ -924,7 +1019,15 @@ onBeforeUnmount(() => {
                     HP {{ focusedUnit.hp }}/{{ focusedUnit.maxHp }} · {{ getFamilyLabel(focusedUnit.family) }}
                   </small>
                   <small v-else-if="focusedCover">
-                    {{ focusedCover.hp }}/{{ focusedCover.maxHp }} Cover HP
+                    <template v-if="focusedCover.kind === 'beehive'">
+                      Beehive ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) · 3×3 Bees + Push!
+                    </template>
+                    <template v-else-if="focusedCover.kind === 'sprinkler'">
+                      Sprinkler ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) · Cross Jet Push!
+                    </template>
+                    <template v-else>
+                      {{ focusedCover.hp }}/{{ focusedCover.maxHp }} Cover HP
+                    </template>
                   </small>
                 </div>
               </div>
@@ -952,6 +1055,13 @@ onBeforeUnmount(() => {
                     :class="activeForecast.matchup"
                   >
                     {{ activeForecast.matchup === 'advantage' ? `▲ ${advantagePctLabel}` : '▼ -20%' }}
+                  </span>
+                  <span
+                    v-if="activeForecast.knockbackDir"
+                    class="kb-tag"
+                    :class="{ bump: activeForecast.knockbackWillBump }"
+                  >
+                    {{ activeForecast.knockbackWillBump ? '⇄ +2 BUMP!' : '⇄ Push' }}
                   </span>
                   <span v-if="activeForecast.isLethal" class="ko-tag">KO!</span>
                 </template>
@@ -1009,7 +1119,7 @@ onBeforeUnmount(() => {
                 <strong>
                   {{ moveDestinationSummary.isJump ? '★ Team-Jump Landing' : 'Move Destination' }}
                 </strong>
-                <small>Tap tile again or press confirm</small>
+                <small>{{ moveDestinationSummary.terrainNote ?? 'Tap tile again or press confirm' }}</small>
               </div>
               <div class="mh-stats">
                 <span
@@ -1540,6 +1650,79 @@ onBeforeUnmount(() => {
   font-weight: 700;
   cursor: pointer;
   z-index: 12;
+}
+
+/* ===== Turn-1 Paper Sticky-Note Coachmark ===== */
+.coach-note {
+  position: absolute;
+  top: calc(54px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(370px, calc(100vw - 18px));
+  padding: 8px 10px 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 249, 212, 0.96) 0%, rgba(250, 232, 152, 0.96) 100%),
+    var(--tex-paper) center / 300px 300px repeat;
+  z-index: 25;
+}
+
+.coach-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coach-copy strong {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.8rem;
+  color: #5a340a;
+}
+
+.coach-copy small {
+  font-size: 0.72rem;
+  color: #4f3116;
+  line-height: 1.25;
+}
+
+.coach-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.mini-close-x {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1.5px solid var(--ink);
+  background: #fffaf0;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.kb-tag {
+  background: #d3eef8;
+  color: #124b63;
+  border: 1.4px solid var(--ink);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.kb-tag.bump {
+  background: #ffd18c;
+  color: #8f220b;
 }
 
 /* ===== Tap-to-Inspect Toast ===== */

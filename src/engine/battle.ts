@@ -2,7 +2,7 @@ import { ENEMY_BLUEPRINTS } from '../data/enemies';
 import { ITEM_REGISTRY } from '../data/items';
 import { MAP_TEMPLATES } from '../data/maps';
 import { PRODUCE_BLUEPRINTS } from '../data/produce';
-import { forecastAttack } from './combat';
+import { computePushDirection, forecastAttack } from './combat';
 import {
   chebyshev,
   createCover,
@@ -66,6 +66,7 @@ export function createBattleUnitFromHero(hero: RosterHero, pos: GridPos): Battle
     moveRange: hero.moveRange,
     jumpRange: hero.jumpRange,
     dashDamage: hero.dashDamage,
+    dashKnockback: hero.dashKnockback,
     dashStatus: hero.dashStatus ? { ...hero.dashStatus } : undefined,
     weapon: { ...hero.weapon, appliesStatus: hero.weapon.appliesStatus ? { ...hero.weapon.appliesStatus } : undefined },
     ability: { ...hero.ability, appliesStatus: hero.ability.appliesStatus ? { ...hero.ability.appliesStatus } : undefined },
@@ -105,6 +106,7 @@ export function createBattleUnitFromEnemy(blueprintId: string, index: number, po
     moveRange: bp.moveRange,
     jumpRange: 0,
     dashDamage: bp.dashDamage,
+    dashKnockback: bp.isBoss && bp.archetype === 'tractor' ? 1 : undefined,
     weapon: { ...bp.weapon, appliesStatus: bp.weapon.appliesStatus ? { ...bp.weapon.appliesStatus } : undefined },
     ability: bp.ability
       ? { ...bp.ability, appliesStatus: bp.ability.appliesStatus ? { ...bp.ability.appliesStatus } : undefined }
@@ -190,6 +192,7 @@ export function createBattleFromMap(
   return {
     mapId: map.id,
     mapName: map.name,
+    theme: map.theme ?? 'spring',
     objective: map.objective,
     objectiveLabel: map.objectiveLabel,
     width: map.width,
@@ -256,7 +259,7 @@ function checkBattleEnd(state: BattleState): void {
     if (!bossAlive) {
       state.status = 'victory';
       state.pendingEvents.push({ type: 'banner', text: 'HARVEST REVOLT VICTORY!', tone: 'victory' });
-      pushLog(state, 'Captain Scarecrow toppled! The garden is yours!');
+      pushLog(state, 'The season boss toppled! The garden is yours!');
       return;
     }
   }
@@ -315,12 +318,93 @@ function handleUnitKO(state: BattleState, unit: BattleUnit): void {
   );
 }
 
+/**
+ * Directional Knockback & Bump Crunch (Into the Breach style):
+ * - Slides target 1 tile in `dir` if walkable & empty.
+ * - If blocked by a unit, cover, or board edge, deals +2 BUMP! damage (and +2 to blocking unit,
+ *   or 4 crunch damage to destructible cover — letting you slam foes into Beehives & Sprinklers!).
+ */
+export function applyKnockback(
+  state: BattleState,
+  target: BattleUnit,
+  dir: GridPos,
+  rosterLookup?: RosterHero[],
+  visitedHazards: Set<string> = new Set()
+): void {
+  if (!target.alive) return;
+  if (dir.x === 0 && dir.y === 0) return;
+
+  const nextPos: GridPos = { x: target.pos.x + dir.x, y: target.pos.y + dir.y };
+  const inGrid = inBounds(state, nextPos);
+  const nextTile = inGrid ? tileAt(state, nextPos) : null;
+  const blockerUnit = inGrid ? unitAt(state, nextPos) : undefined;
+
+  if (inGrid && nextTile && !nextTile.cover && !blockerUnit) {
+    const from = { ...target.pos };
+    target.pos = { ...nextPos };
+    state.pendingEvents.push({
+      type: 'knockback',
+      unitId: target.id,
+      from,
+      to: { ...nextPos },
+      bumped: false,
+    });
+    pushLog(state, `${target.name} was knocked back!`);
+    return;
+  }
+
+  // BUMP CRUNCH!
+  const bumpDmg = 2;
+  target.hp -= bumpDmg;
+
+  if (blockerUnit && blockerUnit.alive) {
+    blockerUnit.hp -= bumpDmg;
+    state.pendingEvents.push({
+      type: 'knockback',
+      unitId: target.id,
+      from: { ...target.pos },
+      to: { ...target.pos },
+      bumped: true,
+      bumpDamage: bumpDmg,
+      bumpedUnitId: blockerUnit.id,
+    });
+    pushLog(state, `BUMP! ${target.name} slammed into ${blockerUnit.name} (-${bumpDmg} HP each)!`);
+    handleUnitKO(state, blockerUnit);
+  } else if (nextTile?.cover) {
+    state.pendingEvents.push({
+      type: 'knockback',
+      unitId: target.id,
+      from: { ...target.pos },
+      to: { ...target.pos },
+      bumped: true,
+      bumpDamage: bumpDmg,
+    });
+    pushLog(state, `CRUNCH! ${target.name} slammed into ${nextTile.cover.kind} (-${bumpDmg} HP)!`);
+    if (nextTile.cover.destructible) {
+      damageCoverAt(state, nextPos, 4, 'player', rosterLookup, visitedHazards);
+    }
+  } else {
+    state.pendingEvents.push({
+      type: 'knockback',
+      unitId: target.id,
+      from: { ...target.pos },
+      to: { ...target.pos },
+      bumped: true,
+      bumpDamage: bumpDmg,
+    });
+    pushLog(state, `BUMP! ${target.name} slammed against the board edge (-${bumpDmg} HP)!`);
+  }
+
+  handleUnitKO(state, target);
+}
+
 function damageCoverAt(
   state: BattleState,
   pos: GridPos,
   amount: number,
   attackerTeam: 'player' | 'enemy',
-  rosterLookup?: RosterHero[]
+  rosterLookup?: RosterHero[],
+  visitedHazards: Set<string> = new Set()
 ): boolean {
   const tile = tileAt(state, pos);
   if (!tile?.cover || !tile.cover.destructible) return false;
@@ -349,6 +433,67 @@ function damageCoverAt(
       if (adjEnemy && adjEnemy.team === 'enemy') {
         adjEnemy.hp -= splash;
         handleUnitKO(state, adjEnemy);
+      }
+    }
+  }
+
+  // Interactive Hazard 1: Explosive Beehive (3x3 angry bee swarm: 3 dmg + push outward + chain cover crunch!)
+  const hazKey = posKey(pos);
+  if (destroyedCover.kind === 'beehive' && !visitedHazards.has(hazKey)) {
+    visitedHazards.add(hazKey);
+    state.pendingEvents.push({ type: 'hazard', kind: 'beehive', pos: { ...pos }, damage: 3 });
+    pushLog(state, `BEEHIVE BOOM! Angry bees swarmed 3×3 for 3 dmg & knocked everyone back!`);
+    const victims: BattleUnit[] = [];
+    for (let y = pos.y - 1; y <= pos.y + 1; y++) {
+      for (let x = pos.x - 1; x <= pos.x + 1; x++) {
+        const p = { x, y };
+        if (samePos(p, pos) || !inBounds(state, p)) continue;
+        const u = unitAt(state, p);
+        if (u && u.alive) victims.push(u);
+        const adjTile = tileAt(state, p);
+        if (adjTile?.cover?.destructible) {
+          damageCoverAt(state, p, 4, attackerTeam, rosterLookup, visitedHazards);
+        }
+      }
+    }
+    for (const v of victims) {
+      if (!v.alive) continue;
+      v.hp -= 3;
+      handleUnitKO(state, v);
+      if (v.alive) {
+        applyKnockback(state, v, computePushDirection(pos, v.pos), rosterLookup, visitedHazards);
+      }
+    }
+  }
+
+  // Interactive Hazard 2: Irrigation Sprinkler (N/S/E/W water jet up to 2 tiles: pushes units, douses Burn, 2 dmg to foes!)
+  if (destroyedCover.kind === 'sprinkler' && !visitedHazards.has(hazKey)) {
+    visitedHazards.add(hazKey);
+    state.pendingEvents.push({ type: 'hazard', kind: 'sprinkler', pos: { ...pos }, damage: 2 });
+    pushLog(state, `SPRINKLER BLAST! Cross water jets pushed units & extinguished Burn!`);
+    const dirs: GridPos[] = [
+      { x: 1, y: 0 },
+      { x: -1, y: 0 },
+      { x: 0, y: 1 },
+      { x: 0, y: -1 },
+    ];
+    for (const d of dirs) {
+      for (let step = 1; step <= 2; step++) {
+        const p = { x: pos.x + d.x * step, y: pos.y + d.y * step };
+        if (!inBounds(state, p)) break;
+        if (tileAt(state, p)?.cover) break;
+        const u = unitAt(state, p);
+        if (u && u.alive) {
+          u.statuses = u.statuses.filter((s) => s.kind !== 'burn');
+          if (u.team === 'enemy') {
+            u.hp -= 2;
+            handleUnitKO(state, u);
+          }
+          if (u.alive) {
+            applyKnockback(state, u, d, rosterLookup, visitedHazards);
+          }
+          break;
+        }
       }
     }
   }
@@ -488,6 +633,9 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
   );
 
   handleUnitKO(state, target);
+  if (target.alive && opt.knockback && opt.knockback > 0) {
+    applyKnockback(state, target, computePushDirection(opt.stopPos, target.pos));
+  }
   checkBattleEnd(state);
   return true;
 }
@@ -513,8 +661,10 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
   unit.actions.hasJumped = true;
   unit.actions.hasMoved = true;
 
+  let coopBoost: string | undefined;
   if (hasRelic(state.relicIds, 'bouncy_mulch')) {
     unit.tempAttackBonus = Math.min(3, unit.tempAttackBonus + 2);
+    coopBoost = 'BOUNCY MULCH +2!';
     pushLog(state, `Bouncy Mulch energized ${unit.name} (+2 Attack this turn)!`);
   }
 
@@ -522,6 +672,7 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
   const springboardAlly = getUnitById(state, opt.allyId);
   if (springboardAlly?.launchpadCoop) {
     unit.tempAttackBonus = Math.min(3, unit.tempAttackBonus + 2);
+    coopBoost = `CLUCK LAUNCH +${unit.tempAttackBonus} ATK!`;
     pushLog(state, `CO-OP LAUNCH! ${springboardAlly.name} boosted ${unit.name} (+${unit.tempAttackBonus} Attack this turn)!`);
   }
 
@@ -531,6 +682,7 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
     allyPos: { ...opt.allyPos },
     from,
     to: { ...dest },
+    coopBoost,
   });
   pushLog(state, `${unit.name} Team-Jumped across the garden!`);
 
@@ -572,6 +724,7 @@ export function executeAttack(
     state.pendingEvents.push({
       type: 'attack',
       attackerId: attacker.id,
+      attackerKind: attacker.visualKind,
       from: { ...attacker.pos },
       to: { ...targetPos },
       arc: attacker.weapon.arc,
@@ -604,6 +757,7 @@ export function executeAttack(
     state.pendingEvents.push({
       type: 'attack',
       attackerId: attacker.id,
+      attackerKind: attacker.visualKind,
       from: { ...attacker.pos },
       to: { ...targetPos },
       arc: attacker.weapon.arc,
@@ -633,6 +787,7 @@ export function executeAttack(
   state.pendingEvents.push({
     type: 'attack',
     attackerId: attacker.id,
+    attackerKind: attacker.visualKind,
     from: { ...attacker.pos },
     to: { ...targetPos },
     arc: attacker.weapon.arc,
@@ -666,7 +821,13 @@ export function executeAttack(
 
   handleUnitKO(state, defender);
 
-  // Lobbed AoE splash (e.g. Zestia's Citrus Mortar, Pesticide Pete, Captain Scarecrow)
+  // Weapon Knockback (e.g. Spudnik, Billy Batter, Corn-elius, Baron Combine)
+  if (defender.alive && attacker.weapon.knockback && attacker.weapon.knockback > 0) {
+    const pushDir = fc.knockbackDir ?? computePushDirection(attacker.pos, defender.pos);
+    applyKnockback(state, defender, pushDir, rosterLookup);
+  }
+
+  // Lobbed AoE splash (e.g. Zestia's Citrus Mortar, Corn-elius, Pesticide Pete, Captain Scarecrow)
   if (attacker.weapon.aoeRadius && attacker.weapon.aoeRadius > 0) {
     applyWeaponSplash(state, attacker, targetPos, defender.id, rosterLookup);
   }
@@ -846,6 +1007,10 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
           }
           if (ab.appliesStatus && target.alive) {
             applyStatusToUnit(target, ab.appliesStatus.kind, ab.appliesStatus.turns);
+          }
+          if (ab.knockback && ab.knockback > 0 && target.alive) {
+            const origin = samePos(target.pos, targetPos) ? unit.pos : targetPos;
+            applyKnockback(state, target, computePushDirection(origin, target.pos));
           }
           affectedIds.push(target.id);
         }

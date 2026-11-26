@@ -15,6 +15,7 @@ const PNG_SPRITE_KEYS = [
   'chili',
   'carrot',
   'blackberry',
+  'corn',
   'pig',
   'rooster',
   'sheep',
@@ -25,11 +26,14 @@ const PNG_SPRITE_KEYS = [
   'sprayer',
   'mower',
   'scarecrow',
+  'tractor',
   'crate',
   'haystack',
   'stone',
   'thorns',
   'cage',
+  'beehive',
+  'sprinkler',
 ] as const;
 
 const SPRITE_MAP = new Map<string, HTMLImageElement>();
@@ -71,6 +75,7 @@ const UNIT_HEIGHTS: Record<string, number> = {
   chili: 66,
   carrot: 76,
   blackberry: 68,
+  corn: 76,
   pig: 70,
   rooster: 80,
   sheep: 76,
@@ -81,6 +86,7 @@ const UNIT_HEIGHTS: Record<string, number> = {
   sprayer: 88,
   mower: 72,
   scarecrow: 118,
+  tractor: 102,
 };
 
 const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
@@ -90,6 +96,7 @@ const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   chili: 'right',
   carrot: 'right',
   blackberry: 'right',
+  corn: 'right',
   pig: 'right',
   rooster: 'right',
   sheep: 'right',
@@ -100,6 +107,7 @@ const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   sprayer: 'left',
   mower: 'left',
   scarecrow: 'left',
+  tractor: 'left',
 };
 
 function drawSoftGroundShadow(
@@ -139,6 +147,7 @@ export function drawUnitStandee(
     isAttackTarget?: boolean;
     hitFlash?: number;
     jumpHeight?: number;
+    squash?: number;
   } = {}
 ): void {
   const s = scale;
@@ -252,6 +261,10 @@ export function drawUnitStandee(
 
   ctx.save();
   ctx.translate(0, -jumpLift + bob);
+  if (opts.squash && opts.squash > 0.01) {
+    const sq = Math.sin(opts.squash * Math.PI);
+    ctx.scale(1 + sq * 0.2, 1 - sq * 0.16);
+  }
   if (opts.isDone && !opts.isSelected) {
     ctx.globalAlpha = 0.72;
   }
@@ -528,10 +541,22 @@ export function drawCoverObject(
       drawW = tileW * 0.84;
       drawH = drawW / aspect;
       anchorY = tileH * 0.28;
+    } else if (cover.kind === 'beehive') {
+      drawH = 74 * scale;
+      drawW = drawH * aspect;
+      anchorY = tileH * 0.32;
+    } else if (cover.kind === 'sprinkler') {
+      drawH = 68 * scale;
+      drawW = drawH * aspect;
+      anchorY = tileH * 0.34;
     }
 
-    ctx.drawImage(img, -drawW / 2, -drawH + anchorY, drawW, drawH);
-    topY = -drawH + anchorY;
+    const hazardBob =
+      cover.kind === 'beehive' || cover.kind === 'sprinkler'
+        ? Math.sin(time * 4.5 + cx) * 1.4 * scale
+        : 0;
+    ctx.drawImage(img, -drawW / 2, -drawH + anchorY + hazardBob, drawW, drawH);
+    topY = -drawH + anchorY + hazardBob;
   } else {
     ctx.fillStyle = '#c89457';
     ctx.strokeStyle = INK;

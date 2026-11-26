@@ -118,6 +118,7 @@ export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOp
         enemyPos: target.pos,
         stopPos: bestNode.pos,
         damage: getEffectiveDashDamage(unit) + dashBonus,
+        knockback: unit.dashKnockback,
         appliesStatus: dashStatus,
       });
     }

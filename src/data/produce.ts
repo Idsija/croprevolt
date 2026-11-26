@@ -19,7 +19,8 @@ export const PRODUCE_BLUEPRINTS: Record<string, ProduceBlueprint> = {
       maxRange: 2,
       damage: 5,
       coverDamage: 6,
-      description: 'Heavy close-range whack that shatters crates and ignores half cover.',
+      knockback: 1,
+      description: 'Heavy close-range whack that knocks foes back 1 tile (+2 BUMP into cover/allies!).',
     },
     ability: {
       id: 'root_down',
@@ -209,6 +210,44 @@ export const PRODUCE_BLUEPRINTS: Record<string, ProduceBlueprint> = {
     accentColor: '#3d1d63',
     blurb: 'Supportive vine healer who keeps the squad fresh and shielded.',
   },
+  corn: {
+    id: 'corn',
+    name: 'Corn-elius',
+    species: 'corn',
+    title: 'Popcorn Artillery',
+    family: 'vine',
+    maxHp: 13,
+    moveRange: 4,
+    jumpRange: 3,
+    dashDamage: 2,
+    weapon: {
+      id: 'popcorn_mortar',
+      name: 'Popcorn Mortar',
+      arc: 'lobbed',
+      minRange: 2,
+      maxRange: 5,
+      damage: 4,
+      coverDamage: 5,
+      aoeRadius: 1,
+      knockback: 1,
+      description: 'Lobs buttered kernels over Full Cover, splashing 3×3 and knocking targets back!',
+    },
+    ability: {
+      id: 'kernel_burst',
+      name: 'Kernel Burst',
+      cooldown: 3,
+      targetType: 'tile',
+      range: 5,
+      aoeRadius: 1,
+      damage: 3,
+      knockback: 1,
+      appliesStatus: { kind: 'burn', turns: 1 },
+      description: 'Pop a scorching 3×3 popcorn blast that Burns & knocks foes outward!',
+    },
+    color: '#f5cc42',
+    accentColor: '#4c8c2b',
+    blurb: 'Husk-caped bombardier who lobs explosive popcorn to trigger Beehives and scatter farmers.',
+  },
 
   // ===== Barnyard Animal Allies (Full Playable Characters with Co-op Passives!) =====
   pig: {
@@ -218,12 +257,13 @@ export const PRODUCE_BLUEPRINTS: Record<string, ProduceBlueprint> = {
     title: 'Barnyard Charger',
     family: 'root',
     isAnimal: true,
-    coopPassive: 'Mud Runner: Ignores Mud penalties & hits hard on Dash!',
+    coopPassive: 'Mud Runner: Ignores Mud penalties & Dash knocks farmers back 1 tile!',
     ignoresMud: true,
     maxHp: 15,
     moveRange: 5,
     jumpRange: 3,
     dashDamage: 5,
+    dashKnockback: 1,
     weapon: {
       id: 'tusk_charge',
       name: 'Tusk Bash',
@@ -332,11 +372,12 @@ export const PRODUCE_BLUEPRINTS: Record<string, ProduceBlueprint> = {
     title: 'Barnyard Wrecker',
     family: 'vine',
     isAnimal: true,
-    coopPassive: 'Cover Wrecker: Smashes crates in 1 hit & Headbutt Dash applies Acid (+2 dmg taken)!',
+    coopPassive: 'Cover Wrecker: Smashes crates in 1 hit & Ramming Dash knocks back + applies Acid!',
     maxHp: 14,
     moveRange: 5,
     jumpRange: 4,
     dashDamage: 4,
+    dashKnockback: 1,
     dashStatus: { kind: 'acid', turns: 2 },
     weapon: {
       id: 'billy_ram',
@@ -346,7 +387,8 @@ export const PRODUCE_BLUEPRINTS: Record<string, ProduceBlueprint> = {
       maxRange: 2,
       damage: 5,
       coverDamage: 10,
-      description: 'Obliterates crates and haystacks in a single headbutt!',
+      knockback: 1,
+      description: 'Obliterates crates in 1 hit & knocks farmers 1 tile back into hazards!',
     },
     ability: {
       id: 'tin_can_chew',
@@ -365,4 +407,4 @@ export const PRODUCE_BLUEPRINTS: Record<string, ProduceBlueprint> = {
 };
 
 export const STARTER_BLUEPRINT_IDS = ['potato', 'pea', 'lemon', 'pig', 'chili'] as const;
-export const RECRUITABLE_BLUEPRINT_IDS = ['rooster', 'sheep', 'goat', 'carrot', 'blackberry'] as const;
+export const RECRUITABLE_BLUEPRINT_IDS = ['corn', 'rooster', 'sheep', 'goat', 'carrot', 'blackberry'] as const;

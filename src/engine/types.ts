@@ -6,9 +6,9 @@ export type UnitFamily = ProduceFamily | ToolFamily | 'neutral';
 
 export type MatchupResult = 'advantage' | 'neutral' | 'disadvantage';
 
-export type TerrainType = 'grass' | 'soil' | 'mud' | 'compost' | 'gate' | 'barn_floor';
+export type TerrainType = 'grass' | 'soil' | 'mud' | 'compost' | 'gate' | 'barn_floor' | 'sunbeam';
 
-export type CoverKind = 'none' | 'crate' | 'haystack' | 'stone' | 'thorns' | 'cage';
+export type CoverKind = 'none' | 'crate' | 'haystack' | 'stone' | 'thorns' | 'cage' | 'beehive' | 'sprinkler';
 export type CoverLevel = 'none' | 'half' | 'full';
 
 export type WeaponArc = 'direct' | 'lobbed' | 'melee' | 'pierce';
@@ -57,6 +57,7 @@ export interface WeaponDef {
   maxRange: number;
   damage: number;
   coverDamage: number;
+  knockback?: number;
   aoeRadius?: number;
   appliesStatus?: StatusEffect;
   description: string;
@@ -73,6 +74,7 @@ export interface AbilityDef {
   aoeRadius?: number;
   damage?: number;
   heal?: number;
+  knockback?: number;
   appliesStatus?: StatusEffect;
   spawnsCover?: 'thorns';
   description: string;
@@ -85,6 +87,7 @@ export type HeroSpecies =
   | 'chili'
   | 'carrot'
   | 'blackberry'
+  | 'corn'
   | 'pig'
   | 'rooster'
   | 'sheep'
@@ -105,6 +108,7 @@ export interface ProduceBlueprint {
   moveRange: number;
   jumpRange: number;
   dashDamage: number;
+  dashKnockback?: number;
   dashStatus?: StatusEffect;
   weapon: WeaponDef;
   ability: AbilityDef;
@@ -116,7 +120,7 @@ export interface ProduceBlueprint {
 export interface EnemyBlueprint {
   id: string;
   name: string;
-  archetype: 'digger' | 'trimmer' | 'sprayer' | 'mower' | 'scarecrow';
+  archetype: 'digger' | 'trimmer' | 'sprayer' | 'mower' | 'scarecrow' | 'tractor';
   title: string;
   family: ToolFamily;
   isBoss?: boolean;
@@ -204,6 +208,7 @@ export interface RosterHero {
   moveRange: number;
   jumpRange: number;
   dashDamage: number;
+  dashKnockback?: number;
   dashStatus?: StatusEffect;
   weapon: WeaponDef;
   ability: AbilityDef;
@@ -241,6 +246,7 @@ export interface BattleUnit {
   moveRange: number;
   jumpRange: number;
   dashDamage: number;
+  dashKnockback?: number;
   dashStatus?: StatusEffect;
   weapon: WeaponDef;
   ability?: AbilityDef;
@@ -272,6 +278,8 @@ export interface CombatForecast {
   finalDamage: number;
   coverDamage: number;
   isLethal: boolean;
+  knockbackDir?: GridPos;
+  knockbackWillBump?: boolean;
   appliesStatus?: StatusKind;
   canAttack: boolean;
   reason?: string;
@@ -289,14 +297,17 @@ export interface DashOption {
   enemyPos: GridPos;
   stopPos: GridPos;
   damage: number;
+  knockback?: number;
   appliesStatus?: StatusKind;
 }
 
 export type BattleEvent =
   | { type: 'move'; unitId: string; path: GridPos[] }
   | { type: 'dash'; unitId: string; targetId: string; from: GridPos; to: GridPos; targetPos: GridPos; damage: number; status?: StatusKind }
-  | { type: 'jump'; unitId: string; allyPos: GridPos; from: GridPos; to: GridPos }
-  | { type: 'attack'; attackerId: string; from: GridPos; to: GridPos; arc: WeaponArc; hit: boolean; damage: number; targetId?: string; matchup: MatchupResult; coverHitPos?: GridPos; coverDestroyed?: boolean; status?: StatusKind }
+  | { type: 'jump'; unitId: string; allyPos: GridPos; from: GridPos; to: GridPos; coopBoost?: string }
+  | { type: 'knockback'; unitId: string; from: GridPos; to: GridPos; bumped: boolean; bumpDamage?: number; bumpedUnitId?: string }
+  | { type: 'hazard'; kind: 'beehive' | 'sprinkler'; pos: GridPos; damage: number }
+  | { type: 'attack'; attackerId: string; attackerKind: string; from: GridPos; to: GridPos; arc: WeaponArc; hit: boolean; damage: number; targetId?: string; matchup: MatchupResult; coverHitPos?: GridPos; coverDestroyed?: boolean; status?: StatusKind }
   | { type: 'ability'; unitId: string; abilityName: string; from: GridPos; to: GridPos; affectedIds: string[]; heal?: number; damage?: number; status?: StatusKind; coverSpawned?: GridPos }
   | { type: 'item'; unitId: string; itemName: string; from: GridPos; to: GridPos; affectedIds: string[]; heal?: number; damage?: number; status?: StatusKind }
   | { type: 'status_tick'; unitId: string; pos: GridPos; status: StatusKind; damage: number }
@@ -306,10 +317,13 @@ export type BattleEvent =
   | { type: 'unit_ko'; unitId: string; pos: GridPos; team: Team; unitName: string }
   | { type: 'banner'; text: string; tone: 'player' | 'enemy' | 'victory' | 'defeat' };
 
+export type BoardTheme = 'spring' | 'greenhouse';
+
 export interface MapTemplate {
   id: string;
   name: string;
   subtitle: string;
+  theme?: BoardTheme;
   objective: ObjectiveType;
   objectiveLabel: string;
   width: number;
@@ -335,6 +349,7 @@ export type BattleStatus = 'ongoing' | 'victory' | 'defeat';
 export interface BattleState {
   mapId: string;
   mapName: string;
+  theme?: BoardTheme;
   objective: ObjectiveType;
   objectiveLabel: string;
   width: number;
@@ -354,7 +369,9 @@ export interface BattleState {
   undoSnapshot: string | null;
 }
 
-export type NodeType = 'skirmish' | 'escape' | 'vault' | 'barn_rescue' | 'elite' | 'boss';
+export type SeasonId = 'spring' | 'summer';
+
+export type NodeType = 'skirmish' | 'escape' | 'vault' | 'shop' | 'barn_rescue' | 'elite' | 'boss';
 
 export interface SeasonNode {
   id: string;
@@ -368,6 +385,18 @@ export interface SeasonNode {
   completed: boolean;
 }
 
+export interface MarketOffer {
+  id: string;
+  kind: 'graft' | 'item' | 'heal' | 'rescue';
+  title: string;
+  desc: string;
+  icon: string;
+  cost: number;
+  graftId?: string;
+  itemId?: string;
+  purchased: boolean;
+}
+
 export interface RewardBundle {
   seedsEarned: number;
   graftChoices: string[];
@@ -375,6 +404,7 @@ export interface RewardBundle {
   recruitChoices: string[];
   itemGrant?: { itemId: string; count: number };
   freeHealAmount?: number;
+  marketOffers?: MarketOffer[];
   claimedGraft: boolean;
   claimedRelic: boolean;
   claimedRecruit: boolean;
@@ -382,6 +412,7 @@ export interface RewardBundle {
 
 export interface RunState {
   id: string;
+  seasonId?: SeasonId;
   seasonName: string;
   nodes: SeasonNode[];
   currentNodeId: string | null;
@@ -394,7 +425,7 @@ export interface RunState {
   battlesWon: number;
   enemiesDefeated: number;
   pendingReward: RewardBundle | null;
-  status: 'map' | 'battle' | 'vault' | 'reward' | 'victory' | 'defeat';
+  status: 'map' | 'battle' | 'vault' | 'shop' | 'reward' | 'victory' | 'defeat';
 }
 
 export interface MetaProgress {

@@ -84,6 +84,8 @@ interface ProjectileAnim {
   duration: number;
   color: string;
   lobbed: boolean;
+  arc: string;
+  attackerKind: string;
 }
 
 interface PhaseBanner {
@@ -106,15 +108,18 @@ const STANDEE_HIT_HEIGHTS: Record<string, number> = {
   chili: 66,
   carrot: 76,
   blackberry: 68,
+  corn: 76,
   pig: 70,
   rooster: 80,
   sheep: 76,
   goat: 80,
-  digger: 88,
-  trimmer: 84,
+  digger: 94,
+  digger_heavy: 88,
+  trimmer: 98,
   sprayer: 88,
   mower: 72,
-  scarecrow: 112,
+  scarecrow: 118,
+  tractor: 102,
 };
 
 // Shared neighbor offsets matching edge i -> (i+1)%4 of getTileDiamond() in BOTH topdown & iso!
@@ -155,9 +160,12 @@ export class PaperCraftRenderer {
   private particles = new ParticleSystem();
   private unitAnims = new Map<string, UnitAnimOverride>();
   private hitFlashes = new Map<string, number>();
+  private unitSquashes = new Map<string, number>();
   private projectiles: ProjectileAnim[] = [];
   private tapRipples: TapRipple[] = [];
   private banner: PhaseBanner | null = null;
+  private shakeTimer = 0;
+  private shakeMagnitude = 0;
 
   private woodBgCanvas: HTMLCanvasElement | null = null;
   private woodBgW = 0;
@@ -698,6 +706,8 @@ export class PaperCraftRenderer {
             arcHeight: 10,
           });
           this.hitFlashes.set(ev.targetId, 1);
+          this.unitSquashes.set(ev.targetId, 1);
+          this.triggerShake(4.5, 0.16);
           this.focusOnGrid(ev.targetPos);
           const pt = gridToScreen(ev.targetPos.x, ev.targetPos.y, m);
           this.particles.spawnBurst(pt.x, pt.y - 24 * m.scale, ['#ff7b29', '#ffd166', '#fbf3df'], 15, 'rect');
@@ -723,11 +733,69 @@ export class PaperCraftRenderer {
             duration: 0.44,
             arcHeight: 82,
           });
+          this.unitSquashes.set(ev.unitId, 1);
           this.focusOnGrid(ev.to);
           const allyPt = gridToScreen(ev.allyPos.x, ev.allyPos.y, m);
+          const destPt = gridToScreen(ev.to.x, ev.to.y, m);
           this.particles.spawnBurst(allyPt.x, allyPt.y - 18 * m.scale, ['#f6d55c', '#fbf3df'], 12, 'circle');
           this.particles.spawnPopup(allyPt.x, allyPt.y - 58 * m.scale, 'TEAM JUMP!', '#6b4700', '#fff4b8', 1.08);
+          if (ev.coopBoost) {
+            this.particles.spawnBurst(destPt.x, destPt.y - 24 * m.scale, ['#fce078', '#ff9234', '#fbf3df'], 14, 'circle');
+            this.particles.spawnPopup(destPt.x, destPt.y - 72 * m.scale, ev.coopBoost, '#8a3c00', '#ffe994', 1.12);
+          }
           sfx.jump();
+          break;
+        }
+
+        case 'knockback': {
+          if (!ev.bumped) {
+            this.unitAnims.set(ev.unitId, {
+              fromX: ev.from.x,
+              fromY: ev.from.y,
+              toX: ev.to.x,
+              toY: ev.to.y,
+              elapsed: 0,
+              duration: 0.2,
+              arcHeight: 14,
+            });
+            this.unitSquashes.set(ev.unitId, 0.9);
+            const pt = gridToScreen(ev.to.x, ev.to.y, m);
+            this.particles.spawnBurst(pt.x, pt.y - 14 * m.scale, ['#fbf3df', '#d9c095'], 9, 'circle');
+          } else {
+            this.hitFlashes.set(ev.unitId, 1);
+            this.unitSquashes.set(ev.unitId, 1);
+            if (ev.bumpedUnitId) {
+              this.hitFlashes.set(ev.bumpedUnitId, 1);
+              this.unitSquashes.set(ev.bumpedUnitId, 1);
+            }
+            this.triggerShake(6.5, 0.22);
+            const pt = gridToScreen(ev.to.x, ev.to.y, m);
+            this.particles.spawnBurst(pt.x, pt.y - 24 * m.scale, ['#ff9f43', '#e53e30', '#fbf3df'], 18, 'rect');
+            this.particles.spawnPopup(
+              pt.x,
+              pt.y - 78 * m.scale,
+              `BUMP! -${ev.bumpDamage ?? 2}`,
+              '#8a1c0b',
+              '#ffe09e',
+              1.15
+            );
+            sfx.coverBreak();
+          }
+          break;
+        }
+
+        case 'hazard': {
+          const pt = gridToScreen(ev.pos.x, ev.pos.y, m);
+          this.triggerShake(8, 0.26);
+          if (ev.kind === 'beehive') {
+            this.particles.spawnBurst(pt.x, pt.y - 24 * m.scale, ['#f6c945', '#452a16', '#fff2a6', '#e67e22'], 30, 'circle');
+            this.particles.spawnPopup(pt.x, pt.y - 68 * m.scale, 'BEEHIVE BOOM! -3', '#7a3500', '#ffe985', 1.2);
+            sfx.coverBreak();
+          } else {
+            this.particles.spawnBurst(pt.x, pt.y - 24 * m.scale, ['#5bc0eb', '#b8ebff', '#fbf3df'], 28, 'circle');
+            this.particles.spawnPopup(pt.x, pt.y - 68 * m.scale, 'SPRINKLER BLAST!', '#0d4a6b', '#d9f6ff', 1.16);
+            sfx.dash();
+          }
           break;
         }
 
@@ -737,9 +805,11 @@ export class PaperCraftRenderer {
             from: ev.from,
             to: ev.to,
             elapsed: 0,
-            duration: lobbed ? 0.34 : 0.2,
+            duration: lobbed ? 0.34 : ev.arc === 'melee' ? 0.16 : 0.22,
             color: lobbed ? '#f5d742' : ev.arc === 'melee' ? '#e59f47' : '#80d85a',
             lobbed,
+            arc: ev.arc,
+            attackerKind: ev.attackerKind,
           });
           this.focusOnGrid(ev.to);
           if (lobbed) sfx.lob();
@@ -751,8 +821,12 @@ export class PaperCraftRenderer {
             this.particles.spawnPopup(pt.x, pt.y - 52 * m.scale, 'COVER BLOCK!', '#5d4037', '#f5e8d0');
             sfx.miss();
           } else {
-            if (ev.targetId) this.hitFlashes.set(ev.targetId, 1);
+            if (ev.targetId) {
+              this.hitFlashes.set(ev.targetId, 1);
+              this.unitSquashes.set(ev.targetId, 1);
+            }
             const strong = ev.matchup === 'advantage';
+            this.triggerShake(strong ? 6 : 3.2, strong ? 0.2 : 0.12);
             this.particles.spawnBurst(
               pt.x,
               pt.y - 26 * m.scale,
@@ -942,6 +1016,16 @@ export class PaperCraftRenderer {
       else this.hitFlashes.set(id, next);
     }
 
+    for (const [id, sq] of this.unitSquashes.entries()) {
+      const next = sq - dt * 3.8;
+      if (next <= 0) this.unitSquashes.delete(id);
+      else this.unitSquashes.set(id, next);
+    }
+
+    if (this.shakeTimer > 0) {
+      this.shakeTimer = Math.max(0, this.shakeTimer - dt);
+    }
+
     for (const proj of this.projectiles) {
       proj.elapsed += dt;
     }
@@ -960,6 +1044,11 @@ export class PaperCraftRenderer {
     }
   }
 
+  private triggerShake(magnitude: number, duration: number): void {
+    this.shakeMagnitude = Math.max(this.shakeMagnitude, magnitude);
+    this.shakeTimer = Math.max(this.shakeTimer, duration);
+  }
+
   private render(): void {
     const ctx = this.ctx;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -971,6 +1060,15 @@ export class PaperCraftRenderer {
 
     const wood = this.ensureWoodBackdrop(w, h);
     ctx.drawImage(wood, 0, 0, w, h);
+
+    if (this.shakeTimer > 0) {
+      const decay = Math.min(1, this.shakeTimer / 0.22);
+      const sx = (Math.random() - 0.5) * 2 * this.shakeMagnitude * decay;
+      const sy = (Math.random() - 0.5) * 2 * this.shakeMagnitude * decay;
+      ctx.translate(sx, sy);
+    } else {
+      this.shakeMagnitude = 0;
+    }
 
     const vs = this.getState();
     if (!vs) {
@@ -1396,6 +1494,7 @@ export class PaperCraftRenderer {
         unit.team === 'enemy' &&
         (attackKeySet.has(uKey) || (isProjectingFromMove && weaponRangeKeys.has(uKey)));
       const flash = this.hitFlashes.get(unit.id) ?? 0;
+      const squash = this.unitSquashes.get(unit.id) ?? 0;
       const sprScale = m.viewMode === 'topdown' ? m.scale * 0.85 : m.scale;
 
       itemsToDraw.push({
@@ -1416,6 +1515,7 @@ export class PaperCraftRenderer {
               isAttackTarget,
               hitFlash: flash,
               jumpHeight,
+              squash,
             }
           );
         },
@@ -1480,18 +1580,28 @@ export class PaperCraftRenderer {
             drawPaperShieldBadge(ctx, covPt.x, covPt.y - 42 * m.scale, fc.coverLevel, m.scale * 1.2, true);
           }
 
+          // Directional Knockback preview arrow + BUMP +2 warning!
+          if (fc.knockbackDir && fc.canAttack) {
+            const pushedTo = {
+              x: focusTile.x + fc.knockbackDir.x,
+              y: focusTile.y + fc.knockbackDir.y,
+            };
+            this.drawKnockbackArrow(ctx, focusTile, pushedTo, m, Boolean(fc.knockbackWillBump));
+          }
+
           const tPt = gridToScreen(focusTile.x, focusTile.y, m);
           const matchGlyph =
             fc.matchup === 'advantage' ? ' ▲' : fc.matchup === 'disadvantage' ? ' ▼' : '';
+          const bumpTag = fc.knockbackWillBump ? ' +2 BUMP!' : fc.knockbackDir ? ' ⇄' : '';
           const pillText =
             dashOpt && fc.canAttack
-              ? `DASH -${dashOpt.damage} | ${fc.hitChance}%${matchGlyph} (-${fc.finalDamage})`
+              ? `DASH -${dashOpt.damage} | ${fc.hitChance}%${matchGlyph} (-${fc.finalDamage}${bumpTag})`
               : !fc.canAttack
                 ? dashOpt
                   ? `DASH -${dashOpt.damage} | BLOCKED`
                   : '0% BLOCKED'
                 : fc.targetUnitId
-                  ? `${fc.hitChance}%${matchGlyph} · -${fc.finalDamage} HP`
+                  ? `${fc.hitChance}%${matchGlyph} · -${fc.finalDamage} HP${bumpTag}`
                   : tileAt(battle, focusTile)?.cover
                     ? `SMASH -${fc.coverDamage}`
                     : `SPLASH -${fc.finalDamage}`;
@@ -1517,23 +1627,9 @@ export class PaperCraftRenderer {
       }
     }
 
-    // 8. Projectiles
+    // 8. Illustrated Die-Cut Paper-Craft Projectiles
     for (const proj of this.projectiles) {
-      const t = Math.min(1, proj.elapsed / proj.duration);
-      const a = gridToScreen(proj.from.x, proj.from.y, m);
-      const b = gridToScreen(proj.to.x, proj.to.y, m);
-      const px = a.x + (b.x - a.x) * t;
-      const py = a.y - 30 * m.scale + (b.y - a.y) * t - Math.sin(t * Math.PI) * (proj.lobbed ? 92 : 18) * m.scale;
-
-      ctx.save();
-      ctx.fillStyle = proj.color;
-      ctx.strokeStyle = INK;
-      ctx.lineWidth = 2.2;
-      ctx.beginPath();
-      ctx.arc(px, py, (proj.lobbed ? 8.5 : 6) * m.scale, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
+      this.drawIllustratedProjectile(ctx, proj, m);
     }
 
     // 9. Particles, Tap Ripples & Popups
@@ -1731,8 +1827,15 @@ export class PaperCraftRenderer {
     const gridW = battle.width;
     const gridH = battle.height;
 
-    let fill = checker ? '#8fb649' : '#85ac41';
-    let topEdgeCol = '#6f9333';
+    const isGreenhouse = battle.theme === 'greenhouse';
+    let fill = isGreenhouse
+      ? checker
+        ? '#7eb353'
+        : '#73a849'
+      : checker
+        ? '#8fb649'
+        : '#85ac41';
+    let topEdgeCol = isGreenhouse ? '#5c8c38' : '#6f9333';
     if (tile.terrain === 'soil') {
       fill = checker ? '#bf7d46' : '#b5743f';
       topEdgeCol = '#8a552a';
@@ -1746,8 +1849,17 @@ export class PaperCraftRenderer {
       fill = checker ? '#f3cb5b' : '#e6b640';
       topEdgeCol = '#b58420';
     } else if (tile.terrain === 'barn_floor') {
-      fill = checker ? '#bc8753' : '#b27d4a';
-      topEdgeCol = '#83562d';
+      fill = isGreenhouse
+        ? checker
+          ? '#cf8d5d'
+          : '#c38151'
+        : checker
+          ? '#bc8753'
+          : '#b27d4a';
+      topEdgeCol = isGreenhouse ? '#9c5b31' : '#83562d';
+    } else if (tile.terrain === 'sunbeam') {
+      fill = checker ? '#f7dc6f' : '#f2cf57';
+      topEdgeCol = '#c4961a';
     }
 
     const d = m.boardDepth;
@@ -1841,7 +1953,226 @@ export class PaperCraftRenderer {
       ctx.moveTo((pts[0].x + pts[3].x) / 2, (pts[0].y + pts[3].y) / 2);
       ctx.lineTo((pts[1].x + pts[2].x) / 2, (pts[1].y + pts[2].y) / 2);
       ctx.stroke();
+    } else if (tile.terrain === 'sunbeam') {
+      const shimmer = 0.22 + Math.sin(this.elapsedTotal * 3.2 + tile.x) * 0.08;
+      ctx.fillStyle = `rgba(255, 253, 214, ${shimmer})`;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, 16 * s, 9 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#754600';
+      ctx.font = `700 ${Math.round(9 * s)}px "Fredoka", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('☀ +2 ATK', c.x, c.y + 4 * s);
     }
+  }
+
+  private drawKnockbackArrow(
+    ctx: CanvasRenderingContext2D,
+    from: GridPos,
+    to: GridPos,
+    m: IsoMetrics,
+    willBump: boolean
+  ): void {
+    const a = gridToScreen(from.x, from.y, m);
+    const b = gridToScreen(to.x, to.y, m);
+    const angle = Math.atan2(b.y - a.y, b.x - a.x);
+    const midX = a.x + (b.x - a.x) * 0.72;
+    const midY = a.y + (b.y - a.y) * 0.72;
+    const s = m.scale;
+
+    ctx.save();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 6.5 * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(midX, midY);
+    ctx.stroke();
+
+    ctx.strokeStyle = willBump ? '#ff7b29' : '#fff4b8';
+    ctx.lineWidth = 3.6 * s;
+    ctx.stroke();
+
+    ctx.translate(midX, midY);
+    ctx.rotate(angle);
+    ctx.fillStyle = willBump ? '#ff7b29' : '#fff4b8';
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 2 * s;
+    ctx.beginPath();
+    ctx.moveTo(8 * s, 0);
+    ctx.lineTo(-5 * s, -6.5 * s);
+    ctx.lineTo(-5 * s, 6.5 * s);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawIllustratedProjectile(
+    ctx: CanvasRenderingContext2D,
+    proj: ProjectileAnim,
+    m: IsoMetrics
+  ): void {
+    const t = Math.min(1, proj.elapsed / proj.duration);
+    const a = gridToScreen(proj.from.x, proj.from.y, m);
+    const b = gridToScreen(proj.to.x, proj.to.y, m);
+    const px = a.x + (b.x - a.x) * t;
+    const arcLift = Math.sin(t * Math.PI) * (proj.lobbed ? 96 : 16) * m.scale;
+    const py = a.y - 30 * m.scale + (b.y - a.y) * t - arcLift;
+    const angle = Math.atan2(b.y - a.y, b.x - a.x);
+    const s = m.scale;
+
+    ctx.save();
+    ctx.translate(px, py);
+
+    // Subtle paper-craft speed trail
+    if (proj.arc !== 'melee') {
+      ctx.save();
+      ctx.rotate(angle);
+      ctx.strokeStyle = 'rgba(255, 250, 232, 0.72)';
+      ctx.lineWidth = 3 * s;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-18 * s, 0);
+      ctx.lineTo(-6 * s, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (proj.arc === 'melee') {
+      // Crisp hand-inked melee impact crescent slash
+      ctx.rotate(angle);
+      ctx.strokeStyle = '#fbf3df';
+      ctx.lineWidth = 7 * s;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(0, 0, 15 * s, -0.95, 0.95);
+      ctx.stroke();
+      ctx.strokeStyle = '#ff9838';
+      ctx.lineWidth = 4 * s;
+      ctx.stroke();
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.6 * s;
+      ctx.stroke();
+    } else if (proj.attackerKind === 'lemon') {
+      // Spinning sliced golden citrus wheel!
+      ctx.rotate(t * Math.PI * 5);
+      ctx.fillStyle = '#fbf3df';
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2.2 * s;
+      ctx.beginPath();
+      ctx.arc(0, 0, 11.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#f6d544';
+      ctx.beginPath();
+      ctx.arc(0, 0, 8.8 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff9d6';
+      ctx.lineWidth = 1.4 * s;
+      for (let i = 0; i < 6; i++) {
+        const ang = (i * Math.PI) / 3;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(ang) * 8 * s, Math.sin(ang) * 8 * s);
+        ctx.stroke();
+      }
+    } else if (proj.attackerKind === 'corn') {
+      // Fluffy golden popped popcorn kernel cloud!
+      ctx.rotate(t * Math.PI * 4);
+      ctx.fillStyle = '#fff4bf';
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2 * s;
+      const puffs = [
+        [0, -4],
+        [4.5, 1.5],
+        [-4.5, 1.5],
+        [0, 4],
+      ];
+      ctx.beginPath();
+      for (const [ox, oy] of puffs) {
+        ctx.moveTo(ox * s + 5.5 * s, oy * s);
+        ctx.arc(ox * s, oy * s, 5.5 * s, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#f0ba30';
+      ctx.beginPath();
+      ctx.arc(0, 0, 3.2 * s, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (proj.attackerKind === 'carrot' || proj.attackerKind === 'rooster') {
+      // Pointed root lance or crimson feather dart aligned to flight angle
+      ctx.rotate(angle);
+      const isCarrot = proj.attackerKind === 'carrot';
+      ctx.fillStyle = isCarrot ? '#f28729' : '#fff6e4';
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath();
+      ctx.moveTo(12 * s, 0);
+      ctx.lineTo(-9 * s, -5.2 * s);
+      ctx.lineTo(-6 * s, 0);
+      ctx.lineTo(-9 * s, 5.2 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = isCarrot ? '#58a83b' : '#d64535';
+      ctx.beginPath();
+      ctx.arc(-7 * s, 0, 3.2 * s, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (proj.attackerKind === 'scarecrow') {
+      // Flapping silhouette paper crow!
+      const wing = Math.sin(t * Math.PI * 6) * 7 * s;
+      ctx.fillStyle = '#332419';
+      ctx.strokeStyle = '#fbf3df';
+      ctx.lineWidth = 1.8 * s;
+      ctx.beginPath();
+      ctx.moveTo(0, 2 * s);
+      ctx.quadraticCurveTo(-8 * s, -7 * s + wing, -14 * s, wing);
+      ctx.quadraticCurveTo(-5 * s, 4 * s, 0, 5 * s);
+      ctx.quadraticCurveTo(5 * s, 4 * s, 14 * s, wing);
+      ctx.quadraticCurveTo(8 * s, -7 * s + wing, 0, 2 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (proj.attackerKind === 'chili') {
+      // Sizzling pepper ember fireball
+      ctx.fillStyle = '#ff6b35';
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath();
+      ctx.arc(0, 0, 8 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#ffe066';
+      ctx.beginPath();
+      ctx.arc(0, 0, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Die-cut glossy pea / berry / mist orb with paper cream rim
+      const r = (proj.lobbed ? 9 : 6.8) * s;
+      ctx.fillStyle = '#fbf3df';
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2.2 * s;
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 1.8 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle =
+        proj.attackerKind === 'blackberry'
+          ? '#6b3fa0'
+          : proj.attackerKind === 'sprayer'
+            ? '#9ec940'
+            : proj.color;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.88, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.beginPath();
+      ctx.arc(-r * 0.28, -r * 0.28, r * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
   }
 
   private drawCorrugatedFace(

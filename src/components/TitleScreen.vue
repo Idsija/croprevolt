@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { META_UNLOCK_COSTS } from '../engine/run';
-import type { MetaProgress } from '../engine/types';
+import type { MetaProgress, SeasonId } from '../engine/types';
 import {
   buyMetaUnlock,
   continueSavedRun,
@@ -13,6 +13,7 @@ import CraftIcon from './CraftIcon.vue';
 import CropRevoltLogo from './CropRevoltLogo.vue';
 
 const activeModal = ref<'none' | 'shed' | 'guide'>('none');
+const selectedSeason = ref<SeasonId>('spring');
 
 const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
   'extraItemSatchel',
@@ -41,9 +42,30 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
       <span class="brass-pin tr"></span>
 
       <div class="title-lockup">
-        <span class="paper-pill season-tag">Spring Mini-Season</span>
+        <div class="season-switcher">
+          <button
+            class="season-chip"
+            :class="{ active: selectedSeason === 'spring' }"
+            @click="selectedSeason = 'spring'"
+          >
+            Spring Patch
+          </button>
+          <button
+            class="season-chip summer"
+            :class="{ active: selectedSeason === 'summer' }"
+            @click="selectedSeason = 'summer'"
+          >
+            ☀ Summer Greenhouse
+          </button>
+        </div>
         <CropRevoltLogo />
-        <p class="tagline">Vertical paper-craft tactical roguelite — produce vs. farmers</p>
+        <p class="tagline">
+          {{
+            selectedSeason === 'summer'
+              ? 'Sunbeams, Beehives, Sprinklers & Baron Combine!'
+              : 'Vertical paper-craft tactical roguelite — produce vs. farmers'
+          }}
+        </p>
       </div>
 
       <!-- Mini Live Paper-Craft Diorama Strip -->
@@ -51,15 +73,27 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
         <div class="standee-row">
           <div class="team-left">
             <img class="st st-1" src="/sprites/potato.png" alt="Spudnik" />
-            <img class="st st-2" src="/sprites/pea.png" alt="Snap-Pea" />
+            <img class="st st-2" :src="selectedSeason === 'summer' ? '/sprites/corn.png' : '/sprites/pea.png'" alt="Hero" />
             <img class="st st-3" src="/sprites/lemon.png" alt="Zestia" />
             <img class="st st-4" src="/sprites/pig.png" alt="Truffle Boar" />
           </div>
-          <img class="st st-crate" src="/sprites/crate.png" alt="Crate Cover" />
+          <img
+            class="st st-crate"
+            :src="selectedSeason === 'summer' ? '/sprites/beehive.png' : '/sprites/crate.png'"
+            alt="Garden Prop"
+          />
           <div class="team-right">
-            <img class="st st-5" src="/sprites/digger.png" alt="Barnaby Digger" />
+            <img
+              class="st st-5"
+              :src="selectedSeason === 'summer' ? '/sprites/sprinkler.png' : '/sprites/digger.png'"
+              alt="Hazard or Farmer"
+            />
             <img class="st st-trim" src="/sprites/trimmer.png" alt="Snips McGee" />
-            <img class="st st-6" src="/sprites/scarecrow.png" alt="Captain Scarecrow" />
+            <img
+              class="st st-6"
+              :src="selectedSeason === 'summer' ? '/sprites/tractor.png' : '/sprites/scarecrow.png'"
+              :alt="selectedSeason === 'summer' ? 'Baron Combine' : 'Captain Scarecrow'"
+            />
           </div>
         </div>
         <div class="cardboard-grass-strip">
@@ -80,10 +114,18 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
 
         <button
           class="paper-btn primary diecut cta-main"
-          @click="startNewSeasonRun"
+          @click="startNewSeasonRun(selectedSeason)"
         >
           <CraftIcon name="play" :size="18" />
-          <span>{{ gameStore.savedRunAvailable ? 'Start Fresh Spring Run' : 'Play Spring Run' }}</span>
+          <span>
+            {{
+              selectedSeason === 'summer'
+                ? 'Play Summer Greenhouse'
+                : gameStore.savedRunAvailable
+                  ? 'Start Fresh Spring Run'
+                  : 'Play Spring Run'
+            }}
+          </span>
         </button>
 
         <div class="secondary-row">
@@ -286,10 +328,44 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
   width: 100%;
 }
 
-.season-tag {
+.season-switcher {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(246, 234, 206, 0.88);
+  border: 2px solid var(--ink);
+  box-shadow: 0 2px 0 rgba(48, 28, 12, 0.22);
+}
+
+.season-chip {
+  border: 1.8px solid transparent;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease, color 0.12s ease;
+  touch-action: manipulation;
+}
+
+.season-chip.active {
   background: #e2f5cf;
   color: var(--leaf-dark);
-  font-size: 0.72rem;
+  border-color: var(--ink);
+  box-shadow: 0 2px 0 rgba(48, 28, 12, 0.28);
+}
+
+.season-chip.summer.active {
+  background: linear-gradient(180deg, #fff1b5 0%, #f4c855 100%);
+  color: #5b3109;
+}
+
+.season-chip:active {
+  transform: translateY(1px);
 }
 
 .tagline {

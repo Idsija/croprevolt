@@ -12,14 +12,39 @@ import {
   graftHero,
   pickRecruit,
   pickRelic,
+  purchaseMarketOffer,
 } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
 
 const run = computed(() => gameStore.run!);
 const reward = computed(() => run.value.pendingReward!);
 const selectedGraftId = ref<string | null>(null);
+const selectedMarketGraftOfferId = ref<string | null>(null);
 const targetHeroBoxRef = ref<HTMLElement | null>(null);
 const confirmSkipUnclaimed = ref(false);
+
+const activeMarketGraftOffer = computed(() =>
+  reward.value.marketOffers?.find(
+    (o) => o.id === selectedMarketGraftOfferId.value && !o.purchased
+  ) ?? null
+);
+
+function buyOffer(offerId: string, kind: string): void {
+  if (kind === 'graft') {
+    selectedMarketGraftOfferId.value =
+      selectedMarketGraftOfferId.value === offerId ? null : offerId;
+    return;
+  }
+  purchaseMarketOffer(offerId);
+}
+
+function buyMarketGraftForHero(heroUid: string): void {
+  if (!selectedMarketGraftOfferId.value) return;
+  const ok = purchaseMarketOffer(selectedMarketGraftOfferId.value, heroUid);
+  if (ok) {
+    selectedMarketGraftOfferId.value = null;
+  }
+}
 
 const healthyRoster = computed(() => run.value.roster.filter((h) => !h.harvested));
 
@@ -77,11 +102,17 @@ function nextTierLabel(graftCount: number): string {
       <header class="reward-head">
         <div>
           <h2>
-            {{ run.status === 'vault' ? 'Seed Vault & Compost' : 'Harvest Spoils & Grafting' }}
+            {{
+              run.status === 'shop'
+                ? "Farmer's Compost Market"
+                : run.status === 'vault'
+                  ? 'Seed Vault & Compost Market'
+                  : 'Harvest Spoils & Grafting'
+            }}
           </h2>
           <div class="spoils-strip">
             <span class="paper-pill seed-pill">
-              <CraftIcon name="seed" :size="14" /> +{{ reward.seedsEarned }} Seeds
+              <CraftIcon name="seed" :size="14" /> {{ run.seeds }} Run Seeds (+{{ reward.seedsEarned }})
             </span>
             <span v-if="reward.itemGrant" class="paper-pill">
               {{ ITEM_REGISTRY[reward.itemGrant.itemId]?.icon }}
@@ -220,6 +251,68 @@ function nextTierLabel(graftCount: number): string {
         <div v-else-if="reward.relicChoices.length > 0" class="claimed-banner">
           <CraftIcon name="check" :size="16" /> Soil Relic added to your garden!
         </div>
+
+        <!-- 4. Mid-Run Compost Market (Spend Run Seeds on Grafts, Items, Healing & Bailout!) -->
+        <section v-if="reward.marketOffers && reward.marketOffers.length > 0" class="reward-sec">
+          <h3>Compost Market — Spend Your Run Seeds ({{ run.seeds }} available)</h3>
+          <div class="choice-grid">
+            <div
+              v-for="offer in reward.marketOffers"
+              :key="offer.id"
+              class="seed-packet choice-card"
+              :class="{ picked: selectedMarketGraftOfferId === offer.id, sold: offer.purchased }"
+            >
+              <div class="choice-top">
+                <strong>{{ offer.icon }} {{ offer.title }}</strong>
+                <span class="paper-pill seed-pill">
+                  <CraftIcon name="seed" :size="12" /> {{ offer.cost }}
+                </span>
+              </div>
+              <p>{{ offer.desc }}</p>
+              <button
+                v-if="!offer.purchased"
+                class="paper-btn gold"
+                :disabled="run.seeds < offer.cost"
+                @click="buyOffer(offer.id, offer.kind)"
+              >
+                {{
+                  offer.kind === 'graft'
+                    ? selectedMarketGraftOfferId === offer.id
+                      ? 'Pick Hero Below ↓'
+                      : `Buy Graft (${offer.cost})`
+                    : `Buy (${offer.cost} Seeds)`
+                }}
+              </button>
+              <span v-else class="claimed-mini">
+                <CraftIcon name="check" :size="14" /> Purchased
+              </span>
+            </div>
+          </div>
+
+          <div v-if="activeMarketGraftOffer?.graftId" class="target-hero-box">
+            <strong>
+              Buy &amp; attach {{ activeMarketGraftOffer.icon }} {{ activeMarketGraftOffer.title }} ({{ activeMarketGraftOffer.cost }} Seeds) to:
+            </strong>
+            <div class="hero-targets">
+              <button
+                v-for="h in healthyRoster"
+                :key="h.uid"
+                class="paper-btn gold hero-graft-btn"
+                :disabled="
+                  h.graftIds.includes(activeMarketGraftOffer.graftId) ||
+                  h.graftIds.length >= MAX_GRAFTS_PER_HERO
+                "
+                @click="buyMarketGraftForHero(h.uid)"
+              >
+                <img class="mini-spr" :src="`/sprites/${h.species}.png`" :alt="h.name" />
+                <div class="hg-copy">
+                  <span>{{ h.name }}</span>
+                  <small>{{ nextTierLabel(h.graftIds.length) }}</small>
+                </div>
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- Sticky Thumb-Friendly Footer CTA -->
@@ -444,6 +537,21 @@ function nextTierLabel(graftCount: number): string {
   display: flex;
   align-items: center;
   gap: 7px;
+}
+
+.choice-card.sold {
+  opacity: 0.65;
+  background: #e9f2e1;
+}
+
+.claimed-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.82rem;
+  color: #215218;
+  font-weight: 700;
 }
 
 .reward-foot {

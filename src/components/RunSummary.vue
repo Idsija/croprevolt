@@ -15,14 +15,24 @@ const isVictory = computed(() => run.value.status === 'victory');
 
       <div class="ribbon" :class="{ defeat: !isVictory }">
         <CraftIcon :name="isVictory ? 'trophy' : 'bag'" :size="18" />
-        <span>{{ isVictory ? 'SPRING REVOLT VICTORY!' : 'SQUAD HARVESTED!' }}</span>
+        <span>
+          {{
+            isVictory
+              ? run.seasonId === 'summer'
+                ? 'SUMMER GREENHOUSE VICTORY!'
+                : 'SPRING REVOLT VICTORY!'
+              : 'SQUAD HARVESTED!'
+          }}
+        </span>
       </div>
 
       <h1>{{ isVictory ? 'The Garden Stands Free!' : 'Bagged by the Farmers...' }}</h1>
       <p class="desc">
         {{
           isVictory
-            ? 'Captain Scarecrow toppled in a shower of straw! Your heirloom squad rules the Spring Patch.'
+            ? run.seasonId === 'summer'
+              ? 'Baron Combine ground to a halt in a burst of steam and popcorn! Your heirloom squad rules the Summer Greenhouse.'
+              : 'Captain Scarecrow toppled in a shower of straw! Your heirloom squad rules the Spring Patch.'
             : 'Every revolt plants stronger seeds. Visit the Seed Shed to unlock permanent perks for your next run!'
         }}
       </p>
@@ -59,7 +69,7 @@ const isVictory = computed(() => run.value.status === 'victory');
       </div>
 
       <div class="actions">
-        <button class="paper-btn primary diecut act-btn" @click="startNewSeasonRun">
+        <button class="paper-btn primary diecut act-btn" @click="startNewSeasonRun(run.seasonId)">
           <CraftIcon name="play" :size="18" /> Play Another Run
         </button>
         <button class="paper-btn gold diecut act-btn" @click="returnToTitle">

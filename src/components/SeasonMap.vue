@@ -31,17 +31,19 @@ const stages = computed(() => {
 function nodeSprite(type: SeasonNode['type']): string {
   switch (type) {
     case 'skirmish':
-      return '/sprites/digger.png';
+      return run.value.seasonId === 'summer' ? '/sprites/beehive.png' : '/sprites/digger.png';
     case 'escape':
-      return '/sprites/mower.png';
+      return run.value.seasonId === 'summer' ? '/sprites/sprinkler.png' : '/sprites/mower.png';
     case 'vault':
       return '/sprites/carrot.png';
+    case 'shop':
+      return '/sprites/corn.png';
     case 'barn_rescue':
       return '/sprites/cage.png';
     case 'elite':
-      return '/sprites/sprayer.png';
+      return run.value.seasonId === 'summer' ? '/sprites/beehive.png' : '/sprites/sprayer.png';
     case 'boss':
-      return '/sprites/scarecrow.png';
+      return run.value.seasonId === 'summer' ? '/sprites/tractor.png' : '/sprites/scarecrow.png';
   }
 }
 
@@ -53,6 +55,8 @@ function nodeTypeTag(type: SeasonNode['type']): string {
       return 'Breakout';
     case 'vault':
       return 'Safe Vault';
+    case 'shop':
+      return 'Compost Market';
     case 'barn_rescue':
       return 'Barn Rescue';
     case 'elite':
@@ -108,8 +112,14 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
         <div class="washi-tape"></div>
         <div class="route-board scroll-soft">
           <div class="route-head">
-            <h3>Garden Trail Map</h3>
-            <small>Choose a glowing stop to march toward Captain Scarecrow</small>
+            <h3>{{ run.seasonId === 'summer' ? 'Summer Greenhouse Trail' : 'Garden Trail Map' }}</h3>
+            <small>
+              {{
+                run.seasonId === 'summer'
+                  ? 'Choose a glowing stop to storm Baron Combine in the Conservatory'
+                  : 'Choose a glowing stop to march toward Captain Scarecrow'
+              }}
+            </small>
           </div>
 
           <div class="stages-track">
@@ -128,6 +138,7 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
                     completed: node.completed,
                     boss: node.type === 'boss',
                     vault: node.type === 'vault',
+                    shop: node.type === 'shop',
                     rescue: node.type === 'barn_rescue',
                   }"
                   :disabled="!availableIds.has(node.id)"
@@ -482,6 +493,12 @@ const harvestedCount = computed(() => run.value.roster.filter((h) => h.harvested
 .node-card.boss.available {
   background:
     linear-gradient(180deg, rgba(255, 240, 222, 0.92) 0%, rgba(245, 192, 148, 0.94) 100%),
+    var(--tex-paper) center / 300px 300px repeat;
+}
+
+.node-card.shop.available {
+  background:
+    linear-gradient(180deg, rgba(255, 250, 214, 0.94) 0%, rgba(248, 218, 122, 0.94) 100%),
     var(--tex-paper) center / 300px 300px repeat;
 }
 

@@ -30,6 +30,7 @@ import {
 import {
   applyBattleOutcomeToRun,
   applyGraftToHero,
+  buyMarketOffer,
   claimRecruitReward,
   claimRelicReward,
   clearSavedRun,
@@ -48,6 +49,7 @@ import type {
   GridPos,
   MetaProgress,
   RunState,
+  SeasonId,
 } from '../engine/types';
 import type { InteractionMode } from '../renderer/canvas';
 import type { BoardViewMode } from '../renderer/iso';
@@ -271,13 +273,13 @@ export function buyMetaUnlock(key: keyof MetaProgress['unlocks']): boolean {
   return ok;
 }
 
-export function startNewSeasonRun(): void {
+export function startNewSeasonRun(seasonId: SeasonId = 'spring'): void {
   sfx.click();
   battleSessionId += 1;
   lastUndoUnitId = null;
   clearAutoEndTimer();
   clearSavedRun();
-  const run = createNewRun(gameStore.meta);
+  const run = createNewRun(gameStore.meta, seasonId);
   gameStore.run = run;
   gameStore.battle = null;
   gameStore.enemyTurnRunning = false;
@@ -340,7 +342,7 @@ export function enterSeasonNode(nodeId: string): void {
   lastUndoUnitId = null;
   clearAutoEndTimer();
 
-  if (node.type === 'vault') {
+  if (node.type === 'vault' || node.type === 'shop') {
     openVaultNode(run, nodeId);
     saveRun(run);
     return;
@@ -1028,6 +1030,16 @@ export function toggleSquadMember(heroUid: string): boolean {
   const ok = toggleHeroActiveSquad(gameStore.run, heroUid);
   if (ok) {
     sfx.click();
+    saveRun(gameStore.run);
+  }
+  return ok;
+}
+
+export function purchaseMarketOffer(offerId: string, targetHeroUid?: string): boolean {
+  if (!gameStore.run) return false;
+  const ok = buyMarketOffer(gameStore.run, offerId, targetHeroUid);
+  if (ok) {
+    sfx.rescue();
     saveRun(gameStore.run);
   }
   return ok;

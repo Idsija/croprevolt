@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crop-revolt-v1';
+const CACHE_NAME = 'crop-revolt-v2';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -9,6 +9,11 @@ self.addEventListener('install', (event) => {
         '/manifest.webmanifest',
         '/icon-192.png',
         '/icon-512.png',
+        '/sprites/logo.png',
+        '/sprites/beehive.png',
+        '/sprites/sprinkler.png',
+        '/sprites/corn.png',
+        '/sprites/tractor.png',
       ]).catch(() => undefined)
     )
   );
