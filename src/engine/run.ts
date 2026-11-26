@@ -10,7 +10,7 @@ import {
   buildScaledWeaponForHero,
   STARTER_UNLOCKED_WEAPONS,
 } from '../data/weapons';
-import { battleRng, getHeatSeedMultiplier, MAX_HARVEST_HEAT } from './difficulty';
+import { battleRng, getHeatSeedMultiplier, heatRunRules, MAX_HARVEST_HEAT } from './difficulty';
 import { recordDailyFinish } from './daily';
 import { dailyKeyFor, dailySeedFor, recordRunScore } from './score';
 import {
@@ -235,7 +235,7 @@ export function createNewRun(
     completedNodeIds: [startId],
     travelHand: drawTravelHand(rng),
     boardTurn: 0,
-    harvestBellLimit: HARVEST_BELL_LIMIT,
+    harvestBellLimit: HARVEST_BELL_LIMIT - heatRunRules(resolvedHeat).bellTurnsLost,
     nextBattleBuff: null,
     roster,
     activeSquadUids: roster.slice(0, 4).map((h) => h.uid),
@@ -275,7 +275,7 @@ export function advanceToNextAct(run: RunState): void {
   run.currentNodeId = startId;
   run.travelHand = drawTravelHand(rng);
   run.boardTurn = 0;
-  run.harvestBellLimit = HARVEST_BELL_LIMIT;
+  run.harvestBellLimit = HARVEST_BELL_LIMIT - heatRunRules(run.harvestHeat).bellTurnsLost;
   run.pendingShrine = null;
   // Breather between acts: patch up the surviving squad.
   for (const hero of run.roster) {
@@ -503,6 +503,10 @@ export function generateMarketOffers(run: RunState, rng = Math.random): MarketOf
     });
   }
 
+  const priceMult = heatRunRules(run.harvestHeat).marketPriceMult;
+  if (priceMult !== 1) {
+    for (const offer of offers) offer.cost = Math.ceil(offer.cost * priceMult);
+  }
   return offers;
 }
 
@@ -824,10 +828,11 @@ export function applyBattleOutcomeToRun(
     }
   }
 
-  // Light post-battle breather heal (+3 HP for surviving heroes)
+  // Light post-battle breather heal (+3 HP for surviving heroes, +1 from Heat 3)
+  const breatherHeal = heatRunRules(run.harvestHeat).breatherHeal;
   for (const hero of run.roster) {
     if (!hero.harvested) {
-      hero.hp = Math.min(hero.maxHp, hero.hp + 3);
+      hero.hp = Math.min(hero.maxHp, hero.hp + breatherHeal);
     }
   }
 
