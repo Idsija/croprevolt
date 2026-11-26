@@ -51,12 +51,34 @@ export interface HarvestHeatInfo {
 
 export const HARVEST_HEAT_LEVELS: HarvestHeatInfo[] = [
   { level: 0, name: 'Heat 0 · Morning Dew', desc: 'Standard storybook adventure.', seedBonusPct: 0 },
-  { level: 1, name: 'Heat 1 · High Noon', desc: 'All farmhands gain +15% Max HP.', seedBonusPct: 20 },
-  { level: 2, name: 'Heat 2 · Barn Veterans', desc: 'Elites & battles field +1 Veteran farmhand.', seedBonusPct: 40 },
-  { level: 3, name: 'Heat 3 · Brittle Crates', desc: 'Wooden crates start cracked (-2 HP).', seedBonusPct: 60 },
-  { level: 4, name: 'Heat 4 · Wrathful Wardens', desc: 'Act Bosses gain +20% HP & +1 telegraph DMG.', seedBonusPct: 80 },
-  { level: 5, name: 'Heat 5 · Scorching Harvest', desc: 'All enemies gain +1 Weapon Damage!', seedBonusPct: 100 },
+  { level: 1, name: 'Heat 1 · High Noon', desc: 'All farmhands gain +15% Max HP. The Harvest Bell rings 1 turn sooner.', seedBonusPct: 20 },
+  { level: 2, name: 'Heat 2 · Barn Veterans', desc: 'Elites & battles field +1 Veteran farmhand. Market prices rise 25%.', seedBonusPct: 40 },
+  { level: 3, name: 'Heat 3 · Brittle Crates', desc: 'Wooden crates start cracked (-2 HP). The rest after a battle heals 1 HP, not 3.', seedBonusPct: 60 },
+  { level: 4, name: 'Heat 4 · Wrathful Wardens', desc: 'Act Bosses gain +20% HP & +1 telegraph DMG. The Harvest Bell rings 2 turns sooner.', seedBonusPct: 80 },
+  { level: 5, name: 'Heat 5 · Scorching Harvest', desc: 'All enemies gain +1 Weapon Damage! Market prices rise 50%.', seedBonusPct: 100 },
 ];
+
+/**
+ * Run-level rule twists per Harvest Heat, on top of the tougher farmers in difficultyFor.
+ * Each level keeps the twists of the levels below it.
+ */
+export interface HeatRunRules {
+  /** Board turns taken off the Harvest Bell limit of every act. */
+  bellTurnsLost: number;
+  /** Multiplier on every market price (rounded up). */
+  marketPriceMult: number;
+  /** HP each surviving hero recovers after a won battle. */
+  breatherHeal: number;
+}
+
+export function heatRunRules(harvestHeat = 0): HeatRunRules {
+  const heat = Math.max(0, Math.min(MAX_HARVEST_HEAT, Math.floor(harvestHeat)));
+  return {
+    bellTurnsLost: heat >= 4 ? 2 : heat >= 1 ? 1 : 0,
+    marketPriceMult: heat >= 5 ? 1.5 : heat >= 2 ? 1.25 : 1,
+    breatherHeal: heat >= 3 ? 1 : 3,
+  };
+}
 
 export function getHeatSeedMultiplier(heat = 0): number {
   const clamped = Math.max(0, Math.min(MAX_HARVEST_HEAT, Math.floor(heat)));
