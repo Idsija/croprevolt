@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { compactMultiMaterialMesh } from './geometryUtils';
 import { ACTS } from '../engine/mapgen';
 import type { BoardTheme, NodeType, SeasonNode } from '../engine/types';
 import { roundRect } from '../renderer/particles';
@@ -416,7 +417,7 @@ export class OverworldMapRenderer {
     });
     const bottomMat = new THREE.MeshStandardMaterial({ color: '#7a5230', roughness: 0.92 });
 
-    const boardSlab = new THREE.Mesh(new THREE.BoxGeometry(BOARD_W, BOARD_TOP_Y, BOARD_H), [
+    const boardSlab = compactMultiMaterialMesh(new THREE.BoxGeometry(BOARD_W, BOARD_TOP_Y, BOARD_H), [
       sideMat,
       sideMat,
       topMat,
