@@ -540,43 +540,43 @@ export class CraftTextureLibrary {
     const isAutumn = theme === 'autumn';
     const isGreenhouse = theme === 'greenhouse';
 
-    // Vibrant cartoon-watercolor palette aligned with redesigned boards & hero standees
+    // Refined subtle storybook watercolor palette harmonizing with Ghibli-style seasonal boards
     let base = isAutumn
       ? checker
-        ? '#d9ae4e'
-        : '#cca041'
+        ? '#cfad62'
+        : '#c4a156'
       : isGreenhouse
         ? checker
-          ? '#7ec752'
-          : '#71ba46'
+          ? '#8eb868'
+          : '#83ad5e'
         : checker
-          ? '#92cd4c'
-          : '#84bf40';
+          ? '#9ec26a'
+          : '#92b65f';
 
-    if (terrain === 'soil') base = checker ? '#cf884a' : '#c27b3f';
-    else if (terrain === 'mud') base = checker ? '#755238' : '#6a4930';
-    else if (terrain === 'compost') base = checker ? '#5e432b' : '#543b24';
-    else if (terrain === 'gate') base = checker ? '#fad562' : '#edc145';
+    if (terrain === 'soil') base = checker ? '#c48c58' : '#b8804d';
+    else if (terrain === 'mud') base = checker ? '#75563f' : '#6b4d37';
+    else if (terrain === 'compost') base = checker ? '#614831' : '#573f29';
+    else if (terrain === 'gate') base = checker ? '#f0cf6c' : '#e3be54';
     else if (terrain === 'barn_floor') {
       base = isGreenhouse
         ? checker
-          ? '#db9763'
-          : '#ce8a56'
+          ? '#cfa074'
+          : '#c49468'
         : checker
-          ? '#c99259'
-          : '#bc854d';
+          ? '#c49866'
+          : '#b88c5b';
     } else if (terrain === 'sunbeam') {
-      base = checker ? '#fae47a' : '#f2d45c';
+      base = checker ? '#f5e28c' : '#ebd473';
     } else if (terrain === 'water') {
-      base = checker ? '#2ac0db' : '#22b1cc';
+      base = checker ? '#5caeb8' : '#51a2ad';
     } else if (terrain === 'bridge') {
-      base = checker ? '#c6874a' : '#b87a3f';
+      base = checker ? '#bf8d5a' : '#b2804e';
     } else if (terrain === 'lava') {
-      base = checker ? '#c43614' : '#ae2c0e';
+      base = checker ? '#c43e1c' : '#ae3315';
     } else if (terrain === 'ramp') {
-      base = checker ? '#c89658' : '#ba884c';
+      base = checker ? '#c29763' : '#b58a57';
     } else if (terrain === 'burrow') {
-      base = checker ? '#8f653d' : '#835a34';
+      base = checker ? '#8f6b47' : '#835f3d';
     }
 
     ctx.fillStyle = base;
@@ -584,26 +584,26 @@ export class CraftTextureLibrary {
 
     const seed =
       theme.charCodeAt(0) * 101 + terrain.charCodeAt(0) * 37 + (checker ? 11 : 23);
-    paintPaperGrain(ctx, s, s, seed, 0.1);
+    paintPaperGrain(ctx, s, s, seed, 0.13);
 
     const rng = mulberry(seed + 99);
 
     if (terrain === 'grass') {
-      // Soft dappled sunlit watercolor patches
-      for (let i = 0; i < 6; i++) {
-        const px = 28 + rng() * (s - 56);
-        const py = 28 + rng() * (s - 56);
-        const pr = 26 + rng() * 36;
+      // Soft wet-on-wet watercolor pigment blooms (sunlit sage & warm shadow washes)
+      for (let i = 0; i < 8; i++) {
+        const px = 22 + rng() * (s - 44);
+        const py = 22 + rng() * (s - 44);
+        const pr = 30 + rng() * 44;
         const g = ctx.createRadialGradient(px, py, 2, px, py, pr);
         g.addColorStop(
           0,
           isAutumn
             ? i % 2 === 0
-              ? 'rgba(255, 232, 138, 0.28)'
-              : 'rgba(176, 98, 28, 0.16)'
+              ? 'rgba(248, 228, 162, 0.26)'
+              : 'rgba(166, 102, 42, 0.14)'
             : i % 2 === 0
-              ? 'rgba(218, 250, 128, 0.30)'
-              : 'rgba(58, 122, 28, 0.16)'
+              ? 'rgba(232, 245, 168, 0.26)'
+              : 'rgba(72, 114, 52, 0.14)'
         );
         g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g;
@@ -612,86 +612,82 @@ export class CraftTextureLibrary {
         ctx.fill();
       }
 
-      // Chunky hand-inked grass tufts & clover sprigs
+      // Delicate sepia-moss ink nib grass tufts
       ctx.lineCap = 'round';
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 7; i++) {
         const bx = 26 + rng() * (s - 52);
         const by = 26 + rng() * (s - 52);
-        ctx.strokeStyle = isAutumn ? '#7d4d16' : '#3a6e1c';
-        ctx.lineWidth = 4.2;
+        ctx.strokeStyle = isAutumn ? 'rgba(116, 76, 32, 0.56)' : 'rgba(66, 102, 44, 0.52)';
+        ctx.lineWidth = 2.8;
         ctx.beginPath();
-        ctx.moveTo(bx - 6, by + 7);
-        ctx.quadraticCurveTo(bx - 10, by, bx - 12, by - 8);
-        ctx.moveTo(bx, by + 7);
-        ctx.quadraticCurveTo(bx + 1, by - 2, bx + 2, by - 11);
-        ctx.moveTo(bx + 6, by + 7);
-        ctx.quadraticCurveTo(bx + 10, by + 1, bx + 12, by - 7);
+        ctx.moveTo(bx - 5, by + 6);
+        ctx.quadraticCurveTo(bx - 8, by, bx - 10, by - 7);
+        ctx.moveTo(bx, by + 6);
+        ctx.quadraticCurveTo(bx + 1, by - 2, bx + 2, by - 9);
+        ctx.moveTo(bx + 5, by + 6);
+        ctx.quadraticCurveTo(bx + 8, by + 1, bx + 10, by - 6);
         ctx.stroke();
 
-        // Sunlit highlight blade
-        ctx.strokeStyle = isAutumn ? 'rgba(255, 240, 168, 0.55)' : 'rgba(204, 247, 126, 0.55)';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = isAutumn ? 'rgba(255, 242, 184, 0.42)' : 'rgba(226, 247, 168, 0.42)';
+        ctx.lineWidth = 1.6;
         ctx.beginPath();
         ctx.moveTo(bx, by + 4);
-        ctx.lineTo(bx + 2, by - 9);
+        ctx.lineTo(bx + 1.5, by - 8);
         ctx.stroke();
       }
 
-      // Tiny storybook seasonal flora accents (daisies / clovers / inked maple leaves)
+      // Subtle painted storybook flora accents (soft daisies / dusty blush blooms / russet leaves)
       if (isAutumn) {
-        for (let i = 0; i < 5; i++) {
-          const lx = 32 + rng() * 192;
-          const ly = 32 + rng() * 192;
+        for (let i = 0; i < 4; i++) {
+          const lx = 34 + rng() * 188;
+          const ly = 34 + rng() * 188;
           const ang = rng() * Math.PI * 2;
           ctx.save();
           ctx.translate(lx, ly);
           ctx.rotate(ang);
-          ctx.fillStyle = i % 3 === 0 ? '#d94826' : i % 3 === 1 ? '#f08c24' : '#f5c23b';
-          ctx.strokeStyle = '#4a2610';
-          ctx.lineWidth = 2.4;
+          ctx.fillStyle = i % 3 === 0 ? '#c45b38' : i % 3 === 1 ? '#d98e3b' : '#e0b853';
+          ctx.strokeStyle = 'rgba(78, 44, 22, 0.55)';
+          ctx.lineWidth = 1.8;
           ctx.beginPath();
-          ctx.ellipse(0, 0, 11, 5.5, 0, 0, Math.PI * 2);
+          ctx.ellipse(0, 0, 10, 4.8, 0, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
           ctx.restore();
         }
       } else {
-        // Tiny inked white/pink daisies or shamrock clovers
-        const flowerCount = checker ? 3 : 2;
+        const flowerCount = checker ? 2 : 1;
         for (let i = 0; i < flowerCount; i++) {
-          const fx = 34 + rng() * 188;
-          const fy = 34 + rng() * 188;
+          const fx = 36 + rng() * 184;
+          const fy = 36 + rng() * 184;
           const petalCol = isGreenhouse
-            ? i % 2 === 0
-              ? '#fff6c2'
-              : '#ffd480'
+            ? '#faf0c8'
             : i % 2 === 0
-              ? '#fffdf2'
-              : '#ffb8cc';
+              ? '#fcf8eb'
+              : '#f0bcc8';
           ctx.fillStyle = petalCol;
-          ctx.strokeStyle = 'rgba(69, 42, 22, 0.65)';
-          ctx.lineWidth = 1.8;
+          ctx.strokeStyle = 'rgba(92, 62, 38, 0.42)';
+          ctx.lineWidth = 1.4;
           for (let p = 0; p < 5; p++) {
             const a = (p / 5) * Math.PI * 2;
             ctx.beginPath();
-            ctx.arc(fx + Math.cos(a) * 5.2, fy + Math.sin(a) * 5.2, 4.2, 0, Math.PI * 2);
+            ctx.arc(fx + Math.cos(a) * 4.8, fy + Math.sin(a) * 4.8, 3.8, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
           }
-          ctx.fillStyle = '#f5c63b';
+          ctx.fillStyle = '#e8be4a';
           ctx.beginPath();
-          ctx.arc(fx, fy, 3.6, 0, Math.PI * 2);
+          ctx.arc(fx, fy, 3.2, 0, Math.PI * 2);
           ctx.fill();
         }
       }
     } else if (terrain === 'soil') {
-      // Rich tilled cartoon garden furrows with sunlit crests & warm pebbles
+      // Soft tilled garden furrows with warm watercolor wash & pebbles
       for (let y = 24; y < s; y += 44) {
-        ctx.fillStyle = 'rgba(72, 36, 12, 0.28)';
+        ctx.fillStyle = 'rgba(78, 44, 18, 0.22)';
         ctx.beginPath();
         ctx.roundRect(14, y, s - 28, 13, 6);
         ctx.fill();
-        ctx.fillStyle = 'rgba(255, 228, 184, 0.24)';
+        ctx.fillStyle = 'rgba(250, 228, 194, 0.2)';
         ctx.beginPath();
         ctx.roundRect(16, y + 13, s - 32, 6, 3);
         ctx.fill();
@@ -699,23 +695,22 @@ export class CraftTextureLibrary {
       for (let i = 0; i < 16; i++) {
         const px = 22 + rng() * 212;
         const py = 22 + rng() * 212;
-        ctx.fillStyle = i % 4 === 0 ? '#dfc5a2' : 'rgba(74, 40, 16, 0.42)';
+        ctx.fillStyle = i % 4 === 0 ? '#dfd0b4' : 'rgba(78, 46, 22, 0.36)';
         ctx.beginPath();
-        ctx.ellipse(px, py, 5.5, 3.4, rng(), 0, Math.PI * 2);
+        ctx.ellipse(px, py, 5.2, 3.2, rng(), 0, Math.PI * 2);
         ctx.fill();
       }
-      // Cute tiny painted sprouting bud
       if (checker) {
-        ctx.strokeStyle = '#3b6e1d';
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(66, 102, 42, 0.72)';
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
         ctx.moveTo(s * 0.72, s * 0.34);
         ctx.lineTo(s * 0.72, s * 0.26);
         ctx.stroke();
-        ctx.fillStyle = '#8be054';
+        ctx.fillStyle = '#99c96b';
         ctx.beginPath();
-        ctx.ellipse(s * 0.68, s * 0.25, 8, 4.5, -0.5, 0, Math.PI * 2);
-        ctx.ellipse(s * 0.76, s * 0.25, 8, 4.5, 0.5, 0, Math.PI * 2);
+        ctx.ellipse(s * 0.68, s * 0.25, 7.5, 4.2, -0.5, 0, Math.PI * 2);
+        ctx.ellipse(s * 0.76, s * 0.25, 7.5, 4.2, 0.5, 0, Math.PI * 2);
         ctx.fill();
       }
     } else if (terrain === 'mud') {
@@ -729,40 +724,40 @@ export class CraftTextureLibrary {
       ctx.ellipse(s * 0.5, s * 0.52, s * 0.42, s * 0.35, 0.12, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.strokeStyle = 'rgba(255, 246, 224, 0.45)';
-      ctx.lineWidth = 5;
+      ctx.strokeStyle = 'rgba(255, 246, 224, 0.42)';
+      ctx.lineWidth = 4.5;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.arc(s * 0.44, s * 0.46, 38, Math.PI * 1.12, Math.PI * 1.68);
       ctx.stroke();
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2.8;
       ctx.beginPath();
       ctx.arc(s * 0.58, s * 0.58, 22, Math.PI * 0.1, Math.PI * 0.55);
       ctx.stroke();
     } else if (terrain === 'compost') {
-      // Rich dark soil + bright healing sprout emblem
+      // Rich dark soil + soft painted healing sprout emblem
       for (let i = 0; i < 24; i++) {
-        ctx.fillStyle = i % 3 === 0 ? 'rgba(138, 214, 78, 0.55)' : 'rgba(38, 22, 10, 0.42)';
+        ctx.fillStyle = i % 3 === 0 ? 'rgba(146, 198, 96, 0.48)' : 'rgba(38, 22, 10, 0.42)';
         ctx.beginPath();
         ctx.arc(24 + rng() * 208, 24 + rng() * 208, 3 + rng() * 5, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.strokeStyle = '#36691b';
-      ctx.lineWidth = 7;
+      ctx.strokeStyle = '#3f6e28';
+      ctx.lineWidth = 5.5;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(s / 2, s * 0.66);
       ctx.lineTo(s / 2, s * 0.44);
       ctx.stroke();
-      ctx.fillStyle = '#8ee359';
-      ctx.strokeStyle = '#36691b';
-      ctx.lineWidth = 3.5;
+      ctx.fillStyle = '#97cf6e';
+      ctx.strokeStyle = '#3f6e28';
+      ctx.lineWidth = 2.8;
       ctx.beginPath();
-      ctx.ellipse(s * 0.42, s * 0.44, 20, 10, -0.45, 0, Math.PI * 2);
+      ctx.ellipse(s * 0.42, s * 0.44, 19, 9.5, -0.45, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       ctx.beginPath();
-      ctx.ellipse(s * 0.58, s * 0.44, 20, 10, 0.45, 0, Math.PI * 2);
+      ctx.ellipse(s * 0.58, s * 0.44, 19, 9.5, 0.45, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     } else if (terrain === 'barn_floor') {
@@ -771,12 +766,12 @@ export class CraftTextureLibrary {
         const cell = 64;
         for (let gy = 0; gy < 4; gy++) {
           for (let gx = 0; gx < 4; gx++) {
-            ctx.fillStyle = (gx + gy) % 2 === 0 ? 'rgba(255,232,198,0.12)' : 'rgba(92,46,20,0.09)';
+            ctx.fillStyle = (gx + gy) % 2 === 0 ? 'rgba(255,238,210,0.12)' : 'rgba(92,50,24,0.08)';
             ctx.fillRect(gx * cell + 3, gy * cell + 3, cell - 6, cell - 6);
           }
         }
-        ctx.strokeStyle = 'rgba(72, 38, 16, 0.48)';
-        ctx.lineWidth = 4;
+        ctx.strokeStyle = 'rgba(78, 44, 22, 0.38)';
+        ctx.lineWidth = 3.2;
         for (let i = 0; i <= s; i += cell) {
           ctx.beginPath();
           ctx.moveTo(0, i);
@@ -787,36 +782,33 @@ export class CraftTextureLibrary {
         }
       } else {
         for (let y = 0; y < s; y += 64) {
-          ctx.fillStyle = (y / 64) % 2 === 0 ? 'rgba(255,238,200,0.1)' : 'rgba(74,40,14,0.08)';
+          ctx.fillStyle = (y / 64) % 2 === 0 ? 'rgba(255,242,210,0.1)' : 'rgba(78,44,18,0.07)';
           ctx.fillRect(0, y, s, 64);
-          // Wood grain waves
-          ctx.strokeStyle = 'rgba(78, 44, 16, 0.16)';
-          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = 'rgba(78, 44, 18, 0.15)';
+          ctx.lineWidth = 2.2;
           ctx.beginPath();
           ctx.moveTo(0, y + 22);
           ctx.bezierCurveTo(s * 0.3, y + 14, s * 0.7, y + 32, s, y + 20);
           ctx.moveTo(0, y + 46);
           ctx.bezierCurveTo(s * 0.4, y + 52, s * 0.7, y + 38, s, y + 48);
           ctx.stroke();
-          // Plank seam
-          ctx.strokeStyle = 'rgba(66, 36, 14, 0.48)';
-          ctx.lineWidth = 4;
+          ctx.strokeStyle = 'rgba(70, 40, 18, 0.4)';
+          ctx.lineWidth = 3.2;
           ctx.beginPath();
           ctx.moveTo(0, y);
           ctx.lineTo(s, y);
           ctx.stroke();
-          // Iron nail heads
-          ctx.fillStyle = '#422510';
+          ctx.fillStyle = '#4a2b14';
           ctx.beginPath();
-          ctx.arc(22, y + 32, 4.2, 0, Math.PI * 2);
-          ctx.arc(s - 22, y + 32, 4.2, 0, Math.PI * 2);
+          ctx.arc(22, y + 32, 3.8, 0, Math.PI * 2);
+          ctx.arc(s - 22, y + 32, 3.8, 0, Math.PI * 2);
           ctx.fill();
         }
       }
     } else if (terrain === 'gate') {
       // Golden victory chevron tile
-      ctx.strokeStyle = 'rgba(128, 76, 10, 0.62)';
-      ctx.lineWidth = 12;
+      ctx.strokeStyle = 'rgba(128, 78, 18, 0.56)';
+      ctx.lineWidth = 11;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
@@ -825,7 +817,7 @@ export class CraftTextureLibrary {
       ctx.lineTo(s * 0.72, s * 0.62);
       ctx.stroke();
       ctx.strokeStyle = 'rgba(255, 252, 232, 0.85)';
-      ctx.lineWidth = 5.5;
+      ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(s * 0.28, s * 0.62);
       ctx.lineTo(s * 0.5, s * 0.34);
@@ -833,75 +825,70 @@ export class CraftTextureLibrary {
       ctx.stroke();
     } else if (terrain === 'sunbeam') {
       const g = ctx.createRadialGradient(s / 2, s / 2, 12, s / 2, s / 2, s * 0.46);
-      g.addColorStop(0, 'rgba(255, 254, 218, 0.88)');
-      g.addColorStop(0.7, 'rgba(252, 214, 72, 0.28)');
-      g.addColorStop(1, 'rgba(252, 214, 72, 0)');
+      g.addColorStop(0, 'rgba(255, 254, 224, 0.85)');
+      g.addColorStop(0.7, 'rgba(248, 214, 96, 0.26)');
+      g.addColorStop(1, 'rgba(248, 214, 96, 0)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
     } else if (terrain === 'water') {
-      // Vivid storybook turquoise creek matching the redesigned cartoon boards!
+      // Tranquil muted cerulean-teal storybook watercolor brook matching the new seasonal boards!
       const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 10, s * 0.5, s * 0.5, s * 0.68);
-      g.addColorStop(0, 'rgba(122, 242, 255, 0.58)');
-      g.addColorStop(0.65, 'rgba(34, 178, 208, 0.28)');
-      g.addColorStop(1, 'rgba(14, 96, 134, 0.45)');
+      g.addColorStop(0, 'rgba(162, 228, 232, 0.52)');
+      g.addColorStop(0.65, 'rgba(82, 166, 178, 0.24)');
+      g.addColorStop(1, 'rgba(42, 106, 124, 0.38)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
 
-      // Chunky white foam ribbons & sunlit water glints
-      ctx.strokeStyle = 'rgba(240, 254, 255, 0.76)';
-      ctx.lineWidth = 5.5;
+      // Gentle delicate watercolor ripple ribbons & soft glints
+      ctx.strokeStyle = 'rgba(242, 252, 252, 0.65)';
+      ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       for (let row = 0; row < 4; row++) {
         const wy = 40 + row * 56;
         ctx.beginPath();
-        ctx.moveTo(20, wy);
-        ctx.quadraticCurveTo(s * 0.32, wy - 15, s * 0.52, wy);
-        ctx.quadraticCurveTo(s * 0.72, wy + 15, s - 20, wy - 4);
+        ctx.moveTo(22, wy);
+        ctx.quadraticCurveTo(s * 0.32, wy - 12, s * 0.52, wy);
+        ctx.quadraticCurveTo(s * 0.72, wy + 12, s - 22, wy - 4);
         ctx.stroke();
       }
-      // Sparkle diamond glints
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      for (let i = 0; i < 4; i++) {
-        const sx = 34 + rng() * 188;
-        const sy = 34 + rng() * 188;
+      ctx.fillStyle = 'rgba(255, 255, 250, 0.72)';
+      for (let i = 0; i < 3; i++) {
+        const sx = 38 + rng() * 180;
+        const sy = 38 + rng() * 180;
         ctx.beginPath();
-        ctx.moveTo(sx, sy - 7);
-        ctx.lineTo(sx + 4, sy);
-        ctx.lineTo(sx, sy + 7);
-        ctx.lineTo(sx - 4, sy);
+        ctx.moveTo(sx, sy - 6);
+        ctx.lineTo(sx + 3.2, sy);
+        ctx.lineTo(sx, sy + 6);
+        ctx.lineTo(sx - 3.2, sy);
         ctx.closePath();
         ctx.fill();
       }
     } else if (terrain === 'bridge') {
-      // Warm honey-oak cross-plank bridge decking with painted wood grain & iron rivets
+      // Weathered honey-oak cross-plank bridge decking with soft ink seams & iron rivets
       for (let i = 0; i < 5; i++) {
         const py = i * (s / 5);
-        ctx.fillStyle = i % 2 === 0 ? '#d69754' : '#c38343';
+        ctx.fillStyle = i % 2 === 0 ? '#cc9760' : '#bc8650';
         ctx.fillRect(6, py + 3, s - 12, s / 5 - 6);
-        // Grain stripe
-        ctx.strokeStyle = 'rgba(92, 48, 16, 0.2)';
-        ctx.lineWidth = 2.4;
+        ctx.strokeStyle = 'rgba(92, 52, 22, 0.18)';
+        ctx.lineWidth = 2.2;
         ctx.beginPath();
         ctx.moveTo(16, py + s / 10);
-        ctx.quadraticCurveTo(s * 0.5, py + s / 10 + (i % 2 === 0 ? 6 : -6), s - 16, py + s / 10);
+        ctx.quadraticCurveTo(s * 0.5, py + s / 10 + (i % 2 === 0 ? 5 : -5), s - 16, py + s / 10);
         ctx.stroke();
-        // Inked plank border
-        ctx.strokeStyle = '#472610';
-        ctx.lineWidth = 4.5;
+        ctx.strokeStyle = '#523018';
+        ctx.lineWidth = 3.5;
         ctx.strokeRect(6, py + 3, s - 12, s / 5 - 6);
-        // Iron rivets
-        ctx.fillStyle = '#3b210f';
+        ctx.fillStyle = '#472914';
         ctx.beginPath();
-        ctx.arc(24, py + s / 10, 5, 0, Math.PI * 2);
-        ctx.arc(s - 24, py + s / 10, 5, 0, Math.PI * 2);
+        ctx.arc(24, py + s / 10, 4.5, 0, Math.PI * 2);
+        ctx.arc(s - 24, py + s / 10, 4.5, 0, Math.PI * 2);
         ctx.fill();
       }
-      // Side stringer rails
-      ctx.fillStyle = '#874f22';
+      ctx.fillStyle = '#87572c';
       ctx.fillRect(0, 0, 15, s);
       ctx.fillRect(s - 15, 0, 15, s);
-      ctx.strokeStyle = '#42220d';
-      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = '#4a2a14';
+      ctx.lineWidth = 3;
       ctx.strokeRect(1.5, 1.5, 13, s - 3);
       ctx.strokeRect(s - 14.5, 1.5, 13, s - 3);
     } else if (terrain === 'lava') {
@@ -1044,16 +1031,16 @@ export class CraftTextureLibrary {
       ctx.beginPath();
       ctx.ellipse(rx - rw * 0.16, ry - rh * 0.25, rw * 0.55, rh * 0.35, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#472812';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(78, 48, 24, 0.72)';
+      ctx.lineWidth = 2.4;
       ctx.beginPath();
       ctx.ellipse(rx, ry, rw, rh, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
 
     // Dangling painted soil root tendrils tucked under the grassy overhang
-    ctx.strokeStyle = '#5e3617';
-    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = 'rgba(94, 56, 26, 0.78)';
+    ctx.lineWidth = 2.8;
     ctx.lineCap = 'round';
     for (let i = 0; i < 6; i++) {
       const rx = 22 + i * 42 + rng() * 10;
@@ -1063,9 +1050,9 @@ export class CraftTextureLibrary {
       ctx.stroke();
     }
 
-    // Vibrant chunky cartoon scalloped turf overhang lip along top edge!
-    const turfTop = isAutumn ? '#e2b549' : isGreenhouse ? '#7ac94d' : '#8ed147';
-    const turfBot = isAutumn ? '#c48d2b' : isGreenhouse ? '#589e34' : '#65a82e';
+    // Harmonized subtle storybook watercolor scalloped turf overhang lip along top edge
+    const turfTop = isAutumn ? '#cfa85c' : isGreenhouse ? '#86b064' : '#96bc62';
+    const turfBot = isAutumn ? '#ad823a' : isGreenhouse ? '#648f48' : '#729947';
     const turfGrad = ctx.createLinearGradient(0, 0, 0, 44);
     turfGrad.addColorStop(0, turfTop);
     turfGrad.addColorStop(1, turfBot);
@@ -1081,18 +1068,18 @@ export class CraftTextureLibrary {
     ctx.closePath();
     ctx.fill();
 
-    // Chocolate-ink scalloped turf outline!
-    ctx.strokeStyle = '#3f220e';
-    ctx.lineWidth = 4.5;
+    // Delicate warm-sepia ink scalloped turf edge
+    ctx.strokeStyle = 'rgba(72, 42, 20, 0.72)';
+    ctx.lineWidth = 3.4;
     ctx.beginPath();
     for (let x = 0; x < w; x += 32) {
       ctx.arc(x + 16, 26, 16, 0, Math.PI, false);
     }
     ctx.stroke();
 
-    paintPaperGrain(ctx, w, h, 8821, 0.08);
-    ctx.strokeStyle = 'rgba(66, 36, 16, 0.45)';
-    ctx.lineWidth = 6;
+    paintPaperGrain(ctx, w, h, 8821, 0.09);
+    ctx.strokeStyle = 'rgba(72, 42, 20, 0.36)';
+    ctx.lineWidth = 5;
     ctx.strokeRect(3, 3, w - 6, h - 6);
 
     return finalizeTexture(canvas);
@@ -1369,14 +1356,14 @@ export class CraftTextureLibrary {
       ctx.fill();
     }
 
-    // Velvety cartoon-inked emerald moss patches clinging to the boulder
+    // Velvety storybook-watercolor sage moss patches clinging to the boulder
     for (let i = 0; i < 6; i++) {
       const mx = 26 + rng() * 204;
       const my = 20 + rng() * 150;
       const mr = 14 + rng() * 18;
-      ctx.fillStyle = i % 2 === 0 ? '#72b53b' : '#58992d';
-      ctx.strokeStyle = '#385c1b';
-      ctx.lineWidth = 3;
+      ctx.fillStyle = i % 2 === 0 ? '#78a850' : '#608f42';
+      ctx.strokeStyle = 'rgba(62, 88, 38, 0.65)';
+      ctx.lineWidth = 2.2;
       ctx.beginPath();
       ctx.arc(mx, my, mr, 0, Math.PI * 2);
       ctx.arc(mx + mr * 0.65, my + 4, mr * 0.72, 0, Math.PI * 2);
@@ -1384,9 +1371,9 @@ export class CraftTextureLibrary {
       ctx.stroke();
     }
 
-    // Hand-inked storybook boulder fracture lines & mineral speckles
-    ctx.strokeStyle = 'rgba(54, 42, 32, 0.58)';
-    ctx.lineWidth = 3.5;
+    // Delicate hand-inked storybook boulder fracture lines & mineral speckles
+    ctx.strokeStyle = 'rgba(64, 50, 38, 0.46)';
+    ctx.lineWidth = 2.6;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     for (let i = 0; i < 6; i++) {
@@ -1402,13 +1389,13 @@ export class CraftTextureLibrary {
       ctx.stroke();
     }
     for (let i = 0; i < 40; i++) {
-      ctx.fillStyle = i % 2 === 0 ? 'rgba(52, 46, 40, 0.35)' : 'rgba(252, 248, 236, 0.42)';
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(52, 46, 40, 0.30)' : 'rgba(252, 248, 236, 0.40)';
       ctx.beginPath();
       ctx.arc(rng() * s, rng() * s, 2 + rng() * 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    paintPaperGrain(ctx, s, s, 8822, 0.1);
+    paintPaperGrain(ctx, s, s, 8822, 0.11);
     return finalizeTexture(canvas);
   }
 
@@ -1463,15 +1450,15 @@ export class CraftTextureLibrary {
     const rng = mulberry(4512);
     ctx.lineCap = 'round';
     for (let x = 14; x < s; x += 26) {
-      ctx.strokeStyle = '#42230f';
-      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(72, 40, 20, 0.72)';
+      ctx.lineWidth = 3.2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.bezierCurveTo(x + 8, s * 0.35, x - 9, s * 0.68, x + 3, s);
       ctx.stroke();
 
-      ctx.strokeStyle = 'rgba(230, 178, 120, 0.32)';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(232, 188, 136, 0.28)';
+      ctx.lineWidth = 2.6;
       ctx.beginPath();
       ctx.moveTo(x + 6, 0);
       ctx.bezierCurveTo(x + 14, s * 0.35, x - 3, s * 0.68, x + 9, s);
@@ -1482,9 +1469,9 @@ export class CraftTextureLibrary {
     for (let i = 0; i < 3; i++) {
       const kx = 40 + rng() * 176;
       const ky = 40 + rng() * 176;
-      ctx.fillStyle = '#522c14';
-      ctx.strokeStyle = '#361a0a';
-      ctx.lineWidth = 3.5;
+      ctx.fillStyle = '#5c341a';
+      ctx.strokeStyle = 'rgba(60, 30, 14, 0.72)';
+      ctx.lineWidth = 2.8;
       ctx.beginPath();
       ctx.ellipse(kx, ky, 14, 22, 0.08, 0, Math.PI * 2);
       ctx.fill();
@@ -1503,49 +1490,49 @@ export class CraftTextureLibrary {
       { bg: string; dark: string; mid: string; light: string; ink: string; accent: string; accent2: string }
     > = {
       spring_green: {
-        bg: '#5ca834',
-        dark: '#418224',
-        mid: '#6ec23e',
-        light: '#a4e058',
-        ink: '#2d4d16',
-        accent: '#eb4b4b',
-        accent2: '#fff5b8',
+        bg: '#74a652',
+        dark: '#56843d',
+        mid: '#84b45c',
+        light: '#aecf76',
+        ink: 'rgba(58, 86, 36, 0.62)',
+        accent: '#d65d54',
+        accent2: '#f7ebb8',
       },
       spring_blossom: {
-        bg: '#f29cb8',
-        dark: '#d46e91',
-        mid: '#f7b2c8',
-        light: '#ffdbe6',
-        ink: '#702d48',
-        accent: '#fff9fc',
-        accent2: '#ffe27a',
+        bg: '#e6a8bc',
+        dark: '#c98099',
+        mid: '#efb9ca',
+        light: '#fae0e8',
+        ink: 'rgba(122, 62, 84, 0.56)',
+        accent: '#fff9fb',
+        accent2: '#f5dc8c',
       },
       summer_citrus: {
-        bg: '#4b9e42',
-        dark: '#337530',
-        mid: '#65ba4c',
-        light: '#98db63',
-        ink: '#244d1e',
-        accent: '#ffa229',
-        accent2: '#ffe366',
+        bg: '#659c56',
+        dark: '#4a7a42',
+        mid: '#79b064',
+        light: '#a2cc7c',
+        ink: 'rgba(46, 80, 42, 0.62)',
+        accent: '#e69b45',
+        accent2: '#f5dc78',
       },
       autumn_crimson: {
-        bg: '#d94d26',
-        dark: '#a82f18',
-        mid: '#eb6c2d',
-        light: '#fa9c3e',
-        ink: '#571c0e',
-        accent: '#ffd04d',
-        accent2: '#ff7b47',
+        bg: '#c76042',
+        dark: '#9c402c',
+        mid: '#d6784e',
+        light: '#e8a264',
+        ink: 'rgba(98, 38, 22, 0.6)',
+        accent: '#f0c462',
+        accent2: '#e6845c',
       },
       autumn_gold: {
-        bg: '#eb9d26',
-        dark: '#bd6d16',
-        mid: '#f5b838',
-        light: '#ffe06b',
-        ink: '#63350d',
-        accent: '#d94524',
-        accent2: '#fff3a8',
+        bg: '#d99e44',
+        dark: '#b0782c',
+        mid: '#e6b458',
+        light: '#f5d682',
+        ink: 'rgba(104, 62, 22, 0.6)',
+        accent: '#c7563a',
+        accent2: '#f7ecc0',
       },
     };
     const p = palettes[variant];
@@ -1558,7 +1545,7 @@ export class CraftTextureLibrary {
 
     const rng = mulberry(variant.charCodeAt(7) * 317 + 41);
 
-    // Layered chunky cartoon scalloped leaf clusters with warm ink arcs!
+    // Layered storybook watercolor leaf puffs with delicate sepia-tinted ink arcs
     for (let row = 0; row < 6; row++) {
       const y = row * 44 + 14;
       for (let col = -1; col < 7; col++) {
@@ -1569,50 +1556,54 @@ export class CraftTextureLibrary {
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
 
-        // Chocolate-ink bottom scallop arc (signature cartoon tree look!)
-        ctx.strokeStyle = p.ink;
-        ctx.lineWidth = 3.6;
+        // Soft sunlit watercolor wash dab on upper crown
+        ctx.fillStyle = 'rgba(255, 250, 228, 0.14)';
         ctx.beginPath();
-        ctx.arc(x, y, r, 0.15 * Math.PI, 0.85 * Math.PI);
+        ctx.arc(x - r * 0.2, y - r * 0.22, r * 0.52, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Delicate storybook scallop ink arc
+        ctx.strokeStyle = p.ink;
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0.18 * Math.PI, 0.82 * Math.PI);
         ctx.stroke();
       }
     }
 
-    // Seasonal storybook fruit / blossom / leaf accents!
-    for (let i = 0; i < 12; i++) {
+    // Subtle seasonal storybook fruit / blossom / leaf accents
+    for (let i = 0; i < 11; i++) {
       const ax = 20 + rng() * 216;
       const ay = 20 + rng() * 216;
       if (variant === 'spring_blossom') {
         ctx.fillStyle = p.accent;
-        ctx.strokeStyle = p.ink;
-        ctx.lineWidth = 2;
         for (let k = 0; k < 5; k++) {
           const a = (k / 5) * Math.PI * 2;
           ctx.beginPath();
-          ctx.arc(ax + Math.cos(a) * 6, ay + Math.sin(a) * 6, 4.5, 0, Math.PI * 2);
+          ctx.arc(ax + Math.cos(a) * 5.5, ay + Math.sin(a) * 5.5, 4, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.fillStyle = p.accent2;
         ctx.beginPath();
-        ctx.arc(ax, ay, 3.8, 0, Math.PI * 2);
+        ctx.arc(ax, ay, 3.4, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        // Apples, oranges, or bright autumn leaves
+        // Painted apples, oranges, or warm autumn berries/leaves
         ctx.fillStyle = i % 3 === 0 ? p.accent2 : p.accent;
         ctx.strokeStyle = p.ink;
-        ctx.lineWidth = 2.6;
+        ctx.lineWidth = 1.9;
         ctx.beginPath();
-        ctx.arc(ax, ay, 7.5, 0, Math.PI * 2);
+        ctx.arc(ax, ay, 6.8, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-        ctx.fillStyle = 'rgba(255,255,255,0.65)';
+        ctx.fillStyle = 'rgba(255,252,240,0.55)';
         ctx.beginPath();
-        ctx.arc(ax - 2.4, ay - 2.4, 2.2, 0, Math.PI * 2);
+        ctx.arc(ax - 2.1, ay - 2.1, 2, 0, Math.PI * 2);
         ctx.fill();
       }
     }
 
-    paintPaperGrain(ctx, s, s, 9123, 0.08);
+    paintPaperGrain(ctx, s, s, 9123, 0.1);
     return finalizeTexture(canvas, { repeat: [2, 1] });
   }
 
@@ -1623,15 +1614,15 @@ export class CraftTextureLibrary {
     const isGreenhouse = theme === 'greenhouse';
 
     const topCol = isAutumn
-      ? ['#f0b443', '#df7e2c', '#c95328'][layerIdx % 3]
+      ? ['#deb062', '#cf8948', '#b86842'][layerIdx % 3]
       : isGreenhouse
-        ? ['#82c957', '#66b048', '#4d913c'][layerIdx % 3]
-        : ['#9fe053', '#7ec443', '#61a636'][layerIdx % 3];
+        ? ['#8db872', '#78a664', '#648f58'][layerIdx % 3]
+        : ['#a8c978', '#8eb668', '#78a05c'][layerIdx % 3];
     const botCol = isAutumn
-      ? ['#c97b24', '#a8471c', '#873218'][layerIdx % 3]
+      ? ['#bc843c', '#a35d32', '#87462c'][layerIdx % 3]
       : isGreenhouse
-        ? ['#528f39', '#3e732d', '#2e5925'][layerIdx % 3]
-        : ['#67a832', '#4f8c27', '#3c7021'][layerIdx % 3];
+        ? ['#659150', '#547c46', '#44683c'][layerIdx % 3]
+        : ['#7ca454', '#678e48', '#567a3e'][layerIdx % 3];
 
     const grad = ctx.createLinearGradient(0, 0, 0, s);
     grad.addColorStop(0, topCol);
@@ -1639,8 +1630,8 @@ export class CraftTextureLibrary {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, s, s);
 
-    // Sweeping sunlit contour stripes across the hillside!
-    ctx.fillStyle = 'rgba(255, 250, 198, 0.16)';
+    // Sweeping sunlit watercolor contour washes across the hillside
+    ctx.fillStyle = 'rgba(255, 250, 214, 0.14)';
     for (let i = 0; i < 4; i++) {
       const y = 32 + i * 58;
       ctx.beginPath();
@@ -1653,29 +1644,29 @@ export class CraftTextureLibrary {
     }
 
     const rng = mulberry(theme.charCodeAt(0) * 55 + layerIdx * 97);
-    // Tiny painted meadow wildflowers / autumn orchard dots
-    for (let i = 0; i < 24; i++) {
+    // Soft painted meadow wildflowers / autumn orchard specks
+    for (let i = 0; i < 20; i++) {
       const fx = 16 + rng() * 224;
       const fy = 20 + rng() * 216;
       ctx.fillStyle = isAutumn
         ? i % 2 === 0
-          ? '#ffd866'
-          : '#d94524'
+          ? 'rgba(245, 214, 128, 0.78)'
+          : 'rgba(198, 92, 62, 0.72)'
         : isGreenhouse
           ? i % 2 === 0
-            ? '#fff3a8'
-            : '#c4f291'
+            ? 'rgba(252, 244, 194, 0.75)'
+            : 'rgba(202, 232, 168, 0.72)'
           : i % 3 === 0
-            ? '#fffdf2'
+            ? 'rgba(255, 252, 240, 0.78)'
             : i % 3 === 1
-              ? '#ffd666'
-              : '#ffb3c8';
+              ? 'rgba(245, 216, 132, 0.75)'
+              : 'rgba(238, 186, 200, 0.75)';
       ctx.beginPath();
-      ctx.arc(fx, fy, 4.2 + rng() * 2.5, 0, Math.PI * 2);
+      ctx.arc(fx, fy, 3.6 + rng() * 2.2, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    paintPaperGrain(ctx, s, s, 3030 + layerIdx, 0.1);
+    paintPaperGrain(ctx, s, s, 3030 + layerIdx, 0.11);
     return finalizeTexture(canvas, { repeat: [1, 1] });
   }
 
