@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
+import {
+  flushQueuedScores,
+  loadPlayerName,
+  onlineConfig,
+  queueScore,
+  toRow,
+} from '../engine/onlineScores';
 import { computeRunScore, loadScores, rankOf, scoreEntryForRun } from '../engine/score';
 import { gameStore, playAgain, returnToTitle } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
@@ -12,6 +19,16 @@ const score = computed(() => computeRunScore(run.value));
 /** 1-based place on this device's board (the run was recorded when it ended), 0 if off the board. */
 const rank = computed(() => rankOf(loadScores(), scoreEntryForRun(run.value)));
 const fmt = (n: number) => n.toLocaleString('en-US');
+
+/** Upload to the shared board when one is configured; unsent scores stay queued for later. */
+const online = onlineConfig();
+const playerName = online ? loadPlayerName() : '';
+const uploadState = ref<'sending' | 'sent' | 'queued'>('sending');
+onMounted(async () => {
+  if (!online) return;
+  queueScore(toRow(scoreEntryForRun(run.value), playerName));
+  uploadState.value = (await flushQueuedScores(online)) === 0 ? 'sent' : 'queued';
+});
 </script>
 
 <template>
@@ -66,6 +83,15 @@ const fmt = (n: number) => n.toLocaleString('en-US');
           <span v-if="rank === 1" class="paper-pill rank-pill best">★ New best on this device!</span>
           <span v-else-if="rank > 0" class="paper-pill rank-pill">#{{ rank }} on this device</span>
         </div>
+        <small v-if="online" class="upload-note" aria-live="polite">
+          {{
+            uploadState === 'sent'
+              ? `Posted to the shared board as ${playerName}.`
+              : uploadState === 'queued'
+                ? "Couldn't reach the shared board. Your score is saved and will be sent next time."
+                : 'Posting to the shared board…'
+          }}
+        </small>
         <dl class="score-lines">
           <div v-for="line in score.lines" :key="line.label" class="score-line">
             <dt>{{ line.label }} <small>{{ line.detail }}</small></dt>
@@ -223,6 +249,12 @@ const fmt = (n: number) => n.toLocaleString('en-US');
 
 .rank-pill.best {
   background: #fde89b;
+}
+
+.upload-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink-soft);
 }
 
 .score-lines {
