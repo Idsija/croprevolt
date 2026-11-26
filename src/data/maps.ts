@@ -771,10 +771,10 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { x: 8, y: 11 },
     ],
     enemySpawns: [
-      { blueprintId: 'pitchfork', x: 1, y: 4 },
+      { blueprintId: 'digger', x: 1, y: 4 },
       { blueprintId: 'mower', x: 7, y: 4 },
       { blueprintId: 'beekeeper', x: 4, y: 2 },
-      { blueprintId: 'beekeeper', x: 5, y: 1 },
+      { blueprintId: 'trimmer', x: 5, y: 1 },
     ],
   },
 

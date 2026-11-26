@@ -3,13 +3,15 @@
  *
  *   npm run balance            200 runs per heat, Heat 0 to 5
  *   npm run balance -- 50 0 2  50 runs per heat, Heat 0 to 2
+ *   npm run balance -- 200 0 5 9000   same, with a different set of seeds (first seed 9000)
  *
  * The bot is far weaker than a person, so compare rows with each other; don't read the
  * win rates as what a player would get. See src/sim/simulateRun.ts.
  */
 import { buildBalanceReport, simulateRun, type RunLog } from '../src/sim/simulateRun';
 
-const [runsArg, fromArg, toArg] = process.argv.slice(2).map(Number);
+const [runsArg, fromArg, toArg, seedArg] = process.argv.slice(2).map(Number);
+const seedBase = Number.isFinite(seedArg) ? seedArg : 1000;
 const runs = Number.isFinite(runsArg) && runsArg > 0 ? Math.floor(runsArg) : 200;
 const fromHeat = Number.isFinite(fromArg) ? fromArg : 0;
 const toHeat = Number.isFinite(toArg) ? toArg : 5;
@@ -22,7 +24,7 @@ console.warn = () => {};
 
 for (let heat = fromHeat; heat <= toHeat; heat++) {
   const logs: RunLog[] = [];
-  for (let i = 0; i < runs; i++) logs.push(simulateRun(1000 + i, heat));
+  for (let i = 0; i < runs; i++) logs.push(simulateRun(seedBase + i, heat));
   const report = buildBalanceReport(logs, heat);
   print(`\n=== Heat ${heat}: ${runs} runs ===`);
   print(
