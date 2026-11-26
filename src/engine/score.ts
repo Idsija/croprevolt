@@ -75,6 +75,8 @@ export interface ScoreEntry {
   at: string;
   mode: 'standard' | 'daily';
   dailyKey?: string;
+  /** A repeat attempt at a daily: shown on this device, never ranked or uploaded. */
+  practice?: boolean;
   heat: number;
   victory: boolean;
   /** 1-based act the run ended in. */
@@ -95,6 +97,7 @@ export function scoreEntryForRun(run: RunState, now: Date = new Date()): ScoreEn
     at: now.toISOString(),
     mode: run.mode === 'daily' ? 'daily' : 'standard',
     dailyKey: run.mode === 'daily' ? run.dailyKey : undefined,
+    practice: run.mode === 'daily' && (run.dailyAttempt ?? 1) > 1 ? true : undefined,
     heat: Math.max(0, Math.floor(run.harvestHeat ?? 0)),
     victory: run.status === 'victory',
     act: run.act + 1,
@@ -127,7 +130,7 @@ export function topStandardScores(entries: readonly ScoreEntry[]): ScoreEntry[] 
 
 export function topDailyScores(entries: readonly ScoreEntry[], dailyKey: string): ScoreEntry[] {
   return entries
-    .filter((e) => e.mode === 'daily' && e.dailyKey === dailyKey)
+    .filter((e) => e.mode === 'daily' && e.dailyKey === dailyKey && !e.practice)
     .sort(byScore)
     .slice(0, BOARD_SIZE);
 }

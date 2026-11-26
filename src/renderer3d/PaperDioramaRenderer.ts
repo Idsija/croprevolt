@@ -1174,7 +1174,13 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       carrot: 0xf58a2c,
       lettuce: 0x8be05c,
       blackberry: 0x7b47b8,
+      strawberry: 0xe63956,
+      mushroom: 0xb968e6,
+      duck: 0x3ec6e8,
       sprayer: 0x99cc44,
+      beekeeper: 0xf5b324,
+      hound: 0xc97f3b,
+      pitchfork: 0xdba93b,
       scarecrow: 0x3a2e28,
     };
     const col = colorMap[attackerKind] ?? (arc === 'lobbed' ? 0xf5d742 : 0x8be05c);
@@ -1188,7 +1194,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     let core: THREE.Mesh;
     if (attackerKind === 'lettuce') {
       core = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.04, 10), mat);
-    } else if (attackerKind === 'carrot') {
+    } else if (attackerKind === 'carrot' || attackerKind === 'strawberry') {
       core = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.42, 7), mat);
       core.rotation.x = Math.PI / 2;
     } else {

@@ -10,7 +10,9 @@ import {
   buildScaledWeaponForHero,
   STARTER_UNLOCKED_WEAPONS,
 } from '../data/weapons';
-import { battleRng, getHeatSeedMultiplier, MAX_HARVEST_HEAT } from './difficulty';
+import { battleRng, getHeatSeedMultiplier, heatRunRules, MAX_HARVEST_HEAT } from './difficulty';
+import { loadDailyState, recordDailyFinish } from './daily';
+import { recordRunHistory } from './history';
 import { dailyKeyFor, dailySeedFor, recordRunScore } from './score';
 import {
   ACTS,
@@ -24,6 +26,7 @@ import {
   startNodeId,
 } from './mapgen';
 import type {
+  RunPerks,
   BattleState,
   HeroLevelUpSummary,
   MarketOffer,
@@ -51,6 +54,13 @@ export function defaultMetaProgress(): MetaProgress {
       extraItemSatchel: false,
       heirloomSoil: false,
       starterRelic: false,
+      seedPouch: false,
+      honeyReserve: false,
+      seasonedSeedlings: false,
+      restfulCamp: false,
+      marketCoupon: false,
+      patientBell: false,
+      graftReroll: false,
     },
   };
 }
@@ -128,6 +138,41 @@ export const META_UNLOCK_COSTS: Record<keyof MetaProgress['unlocks'], { cost: nu
     title: 'Compost Blessing',
     desc: 'Begin every run with the Rich Loam Soil Relic (+2 HP at battle start).',
   },
+  seedPouch: {
+    cost: 30,
+    title: 'Seed Pouch',
+    desc: 'Begin every run with 15 seeds to spend at the first market.',
+  },
+  honeyReserve: {
+    cost: 35,
+    title: 'Honey Reserve',
+    desc: 'Begin every run with +1 Honey Pot.',
+  },
+  seasonedSeedlings: {
+    cost: 60,
+    title: 'Seasoned Seedlings',
+    desc: 'Every starter hero begins with +1 skill point.',
+  },
+  restfulCamp: {
+    cost: 70,
+    title: 'Restful Camp',
+    desc: 'Surviving heroes heal +1 extra HP after every won battle.',
+  },
+  marketCoupon: {
+    cost: 80,
+    title: 'Market Coupon',
+    desc: 'Every market price is 15% lower.',
+  },
+  patientBell: {
+    cost: 100,
+    title: 'Patient Bell',
+    desc: 'The Harvest Bell rings 1 turn later in every act.',
+  },
+  graftReroll: {
+    cost: 120,
+    title: 'Second Opinion',
+    desc: 'Once per run, reroll the graft stickers a reward offers.',
+  },
 };
 
 export function purchaseMetaUnlock(
@@ -202,11 +247,20 @@ export function createNewRun(
   const hpBonus = meta.unlocks.heirloomSoil ? 2 : 0;
   // Starter squad: Stitch, Crisphead, Snap-Pea & Zestia active + Spudnik, Truffle Boar, Habanero on bench!
   const roster = STARTER_BLUEPRINT_IDS.map((id) => createHeroFromBlueprint(id, hpBonus));
+  if (meta.unlocks.seasonedSeedlings) {
+    for (const hero of roster) hero.skillPoints += 1;
+  }
+  const perks: RunPerks = {
+    breatherBonus: meta.unlocks.restfulCamp ? 1 : 0,
+    marketPriceMult: meta.unlocks.marketCoupon ? 0.85 : 1,
+    bellBonus: meta.unlocks.patientBell ? 1 : 0,
+    graftRerollsLeft: meta.unlocks.graftReroll ? 1 : 0,
+  };
   const relicIds = meta.unlocks.starterRelic ? ['rich_loam'] : [];
   const items: Record<string, number> = {
     watering_can: meta.unlocks.extraItemSatchel ? 2 : 1,
     fertilizer_bomb: meta.unlocks.extraItemSatchel ? 2 : 1,
-    honey_pot: 1,
+    honey_pot: meta.unlocks.honeyReserve ? 2 : 1,
   };
   const act = actIndexForSeason(seasonId);
   const resolvedHeat = Math.max(
@@ -234,13 +288,14 @@ export function createNewRun(
     completedNodeIds: [startId],
     travelHand: drawTravelHand(rng),
     boardTurn: 0,
-    harvestBellLimit: HARVEST_BELL_LIMIT,
+    harvestBellLimit: HARVEST_BELL_LIMIT - heatRunRules(resolvedHeat).bellTurnsLost + perks.bellBonus,
+    perks,
     nextBattleBuff: null,
     roster,
     activeSquadUids: roster.slice(0, 4).map((h) => h.uid),
     relicIds,
     items,
-    seeds: act > 0 ? 8 * act : 0,
+    seeds: (act > 0 ? 8 * act : 0) + (meta.unlocks.seedPouch ? 15 : 0),
     battlesWon: 0,
     enemiesDefeated: 0,
     pendingReward: null,
@@ -274,7 +329,8 @@ export function advanceToNextAct(run: RunState): void {
   run.currentNodeId = startId;
   run.travelHand = drawTravelHand(rng);
   run.boardTurn = 0;
-  run.harvestBellLimit = HARVEST_BELL_LIMIT;
+  run.harvestBellLimit =
+    HARVEST_BELL_LIMIT - heatRunRules(run.harvestHeat).bellTurnsLost + (run.perks?.bellBonus ?? 0);
   run.pendingShrine = null;
   // Breather between acts: patch up the surviving squad.
   for (const hero of run.roster) {
@@ -502,7 +558,27 @@ export function generateMarketOffers(run: RunState, rng = Math.random): MarketOf
     });
   }
 
+  const priceMult = heatRunRules(run.harvestHeat).marketPriceMult * (run.perks?.marketPriceMult ?? 1);
+  if (priceMult !== 1) {
+    for (const offer of offers) offer.cost = Math.ceil(offer.cost * priceMult);
+  }
   return offers;
+}
+
+/**
+ * Second Opinion perk: swap the graft stickers of the open reward for a fresh set, once per
+ * run. Seeded, so reloading can't fish for a better reroll.
+ */
+export function rerollGraftChoices(run: RunState): boolean {
+  const reward = run.pendingReward;
+  if (!reward || reward.claimedGraft || reward.graftChoices.length === 0) return false;
+  if (!run.perks || run.perks.graftRerollsLeft <= 0) return false;
+  const rng = battleRng(run.seed, `reroll:${run.currentNodeId}:${run.battlesWon}`);
+  const fresh = ALL_GRAFT_IDS.filter((id) => !reward.graftChoices.includes(id));
+  if (fresh.length < reward.graftChoices.length) return false;
+  reward.graftChoices = pickRandomDistinct(fresh, reward.graftChoices.length, rng);
+  run.perks.graftRerollsLeft -= 1;
+  return true;
 }
 
 export function generateRewardForNode(
@@ -737,6 +813,15 @@ export function awardBattleXpAndLevels(
   return { xpEarned, levelUps };
 }
 
+/** A run just ended: put it on the boards, the streak, the history, and pay out achievements. */
+function finishRunRecords(run: RunState, meta: MetaProgress): void {
+  recordRunScore(run);
+  recordDailyFinish(run);
+  const earned = recordRunHistory(run, loadDailyState().streak.best);
+  run.earnedAchievementIds = earned.map((a) => a.id);
+  meta.heirloomSeeds += earned.reduce((sum, a) => sum + a.seeds, 0);
+}
+
 export function applyBattleOutcomeToRun(
   run: RunState,
   battle: BattleState,
@@ -807,9 +892,9 @@ export function applyBattleOutcomeToRun(
     const consolationSeeds = Math.round(Math.max(10, run.seeds + defeatedEnemies * 2) * heatMult);
     meta.heirloomSeeds += consolationSeeds;
     meta.runsPlayed += 1;
+    finishRunRecords(run, meta);
     saveMetaProgress(meta);
     clearSavedRun();
-    recordRunScore(run);
     return;
   }
 
@@ -822,10 +907,11 @@ export function applyBattleOutcomeToRun(
     }
   }
 
-  // Light post-battle breather heal (+3 HP for surviving heroes)
+  // Light post-battle breather heal (+3 HP for surviving heroes, +1 from Heat 3)
+  const breatherHeal = heatRunRules(run.harvestHeat).breatherHeal + (run.perks?.breatherBonus ?? 0);
   for (const hero of run.roster) {
     if (!hero.harvested) {
-      hero.hp = Math.min(hero.maxHp, hero.hp + 3);
+      hero.hp = Math.min(hero.maxHp, hero.hp + breatherHeal);
     }
   }
 
@@ -857,9 +943,9 @@ export function applyBattleOutcomeToRun(
     meta.runsWon += 1;
     const nextHeat = Math.min(MAX_HARVEST_HEAT, (run.harvestHeat ?? 0) + 1);
     meta.maxHeatUnlocked = Math.max(meta.maxHeatUnlocked ?? 1, nextHeat);
+    finishRunRecords(run, meta);
     saveMetaProgress(meta);
     clearSavedRun();
-    recordRunScore(run);
     return;
   }
 

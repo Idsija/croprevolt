@@ -10,17 +10,23 @@ export const UNIT_WORLD_HEIGHTS: Record<string, number> = {
   blackberry: 1.04,
   corn: 1.18,
   lettuce: 1.04,
+  strawberry: 1.04,
+  mushroom: 1.06,
   cow: 1.14,
   pig: 1.04,
   rooster: 1.22,
   sheep: 1.14,
   goat: 1.2,
+  duck: 1.12,
   seed_cart: 0.98,
   digger: 1.4,
   digger_heavy: 1.34,
   trimmer: 1.44,
   sprayer: 1.34,
   mower: 1.08,
+  beekeeper: 1.42,
+  hound: 1.02,
+  pitchfork: 1.48,
   scarecrow: 1.78,
   harvester: 1.84,
   tractor: 1.56,
@@ -35,17 +41,23 @@ export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   blackberry: 'right',
   corn: 'right',
   lettuce: 'right',
+  strawberry: 'right',
+  mushroom: 'right',
   cow: 'right',
   pig: 'right',
   rooster: 'right',
   sheep: 'right',
   goat: 'right',
+  duck: 'right',
   seed_cart: 'right',
   digger: 'left',
   digger_heavy: 'left',
   trimmer: 'left',
   sprayer: 'left',
   mower: 'left',
+  beekeeper: 'left',
+  hound: 'left',
+  pitchfork: 'right',
   scarecrow: 'left',
   harvester: 'left',
   tractor: 'left',
@@ -54,7 +66,7 @@ export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
 export type SpriteVariantKind = 'base' | 'hit' | 'lowhp' | 'enraged';
 
 /**
- * Explicit registry of ALL 24 hand-crafted transparent variant PNGs in /sprites/.
+ * Explicit registry of ALL 30 hand-crafted transparent variant PNGs in /sprites/.
  * Prevents any 404 requests for units that rely on procedural 3D paper-craft overlays.
  */
 export const AVAILABLE_VARIANT_SPRITES = new Set<string>([
@@ -71,14 +83,20 @@ export const AVAILABLE_VARIANT_SPRITES = new Set<string>([
   'carrot_lowhp',
   'corn_lowhp',
   'blackberry_lowhp',
+  'strawberry_lowhp',
+  'mushroom_lowhp',
   'pig_lowhp',
   'rooster_lowhp',
   'sheep_lowhp',
   'goat_lowhp',
+  'duck_lowhp',
   'digger_hit',
   'trimmer_hit',
   'sprayer_hit',
   'mower_hit',
+  'beekeeper_hit',
+  'hound_hit',
+  'pitchfork_hit',
   'scarecrow_enraged',
   'tractor_enraged',
   'harvester_enraged',
@@ -175,6 +193,13 @@ function paintPaperGrain(ctx: CanvasRenderingContext2D, w: number, h: number, se
   }
 }
 
+export type TreeFoliageVariant =
+  | 'spring_green'
+  | 'spring_blossom'
+  | 'summer_citrus'
+  | 'autumn_crimson'
+  | 'autumn_gold';
+
 export class CraftTextureLibrary {
   private disposed = false;
   private textures: THREE.Texture[] = [];
@@ -183,6 +208,9 @@ export class CraftTextureLibrary {
   private spriteAspects = new Map<string, number>();
   private spriteListeners = new Map<string, Array<(aspect: number) => void>>();
   private terrainTextures = new Map<string, THREE.Texture>();
+  private foliageTextures = new Map<string, THREE.Texture>();
+  private hillTextures = new Map<string, THREE.Texture>();
+  private cliffTextures = new Map<string, THREE.Texture>();
   private loader = new THREE.TextureLoader();
 
   public readonly paperBump: THREE.Texture;
@@ -199,6 +227,14 @@ export class CraftTextureLibrary {
   public readonly shieldHalfMap: THREE.Texture;
   public readonly shieldFullMap: THREE.Texture;
   public readonly cliffSideMap: THREE.Texture;
+  public readonly treeBarkMap: THREE.Texture;
+  public readonly barnWallMap: THREE.Texture;
+  public readonly barnRoofMap: THREE.Texture;
+  public readonly fenceWoodMap: THREE.Texture;
+  public readonly cloudMap: THREE.Texture;
+  public readonly pumpkinSkinMap: THREE.Texture;
+  public readonly mushroomCapMap: THREE.Texture;
+  public readonly woodTokenMap: THREE.Texture;
 
   constructor() {
     this.paperBump = this.track(this.buildPaperBump());
@@ -214,7 +250,15 @@ export class CraftTextureLibrary {
     this.beehiveMap = this.track(this.buildBeehiveTexture());
     this.shieldHalfMap = this.track(this.buildShieldBadgeTexture('half'));
     this.shieldFullMap = this.track(this.buildShieldBadgeTexture('full'));
-    this.cliffSideMap = this.track(this.buildCliffSideTexture());
+    this.cliffSideMap = this.getCliffSideTexture('spring');
+    this.treeBarkMap = this.track(this.buildTreeBarkTexture());
+    this.barnWallMap = this.track(this.buildBarnWallTexture());
+    this.barnRoofMap = this.track(this.buildBarnRoofTexture());
+    this.fenceWoodMap = this.track(this.buildFenceWoodTexture());
+    this.cloudMap = this.track(this.buildCloudTexture());
+    this.pumpkinSkinMap = this.track(this.buildPumpkinSkinTexture());
+    this.mushroomCapMap = this.track(this.buildMushroomCapTexture());
+    this.woodTokenMap = this.track(this.buildWoodTokenTexture());
 
     this.woodDeskMap = this.track(
       this.loader.load('/ui/wood-desk.jpg', (tex) => {
@@ -392,6 +436,31 @@ export class CraftTextureLibrary {
     return tex;
   }
 
+  public getTreeFoliageTexture(variant: TreeFoliageVariant): THREE.Texture {
+    const cached = this.foliageTextures.get(variant);
+    if (cached) return cached;
+    const tex = this.track(this.buildTreeFoliageTexture(variant));
+    this.foliageTextures.set(variant, tex);
+    return tex;
+  }
+
+  public getHillBackdropTexture(theme: BoardTheme, layerIdx: number): THREE.Texture {
+    const key = `${theme}:${layerIdx}`;
+    const cached = this.hillTextures.get(key);
+    if (cached) return cached;
+    const tex = this.track(this.buildHillBackdropTexture(theme, layerIdx));
+    this.hillTextures.set(key, tex);
+    return tex;
+  }
+
+  public getCliffSideTexture(theme: BoardTheme): THREE.Texture {
+    const cached = this.cliffTextures.get(theme);
+    if (cached) return cached;
+    const tex = this.track(this.buildCliffSideTexture(theme));
+    this.cliffTextures.set(theme, tex);
+    return tex;
+  }
+
   private buildPaperBump(): THREE.CanvasTexture {
     const { canvas, ctx } = makeCanvas(256, 256);
     ctx.fillStyle = '#808080';
@@ -471,42 +540,43 @@ export class CraftTextureLibrary {
     const isAutumn = theme === 'autumn';
     const isGreenhouse = theme === 'greenhouse';
 
+    // Vibrant cartoon-watercolor palette aligned with redesigned boards & hero standees
     let base = isAutumn
       ? checker
-        ? '#c7a24a'
-        : '#bc953f'
+        ? '#d9ae4e'
+        : '#cca041'
       : isGreenhouse
         ? checker
-          ? '#82b858'
-          : '#77ac4d'
+          ? '#7ec752'
+          : '#71ba46'
         : checker
-          ? '#93bc4d'
-          : '#87b043';
+          ? '#92cd4c'
+          : '#84bf40';
 
-    if (terrain === 'soil') base = checker ? '#c2814a' : '#b77640';
-    else if (terrain === 'mud') base = checker ? '#6f5039' : '#654832';
-    else if (terrain === 'compost') base = checker ? '#61462e' : '#583f28';
-    else if (terrain === 'gate') base = checker ? '#f5cf5e' : '#e8bb42';
+    if (terrain === 'soil') base = checker ? '#cf884a' : '#c27b3f';
+    else if (terrain === 'mud') base = checker ? '#755238' : '#6a4930';
+    else if (terrain === 'compost') base = checker ? '#5e432b' : '#543b24';
+    else if (terrain === 'gate') base = checker ? '#fad562' : '#edc145';
     else if (terrain === 'barn_floor') {
       base = isGreenhouse
         ? checker
-          ? '#d29161'
-          : '#c68555'
+          ? '#db9763'
+          : '#ce8a56'
         : checker
-          ? '#c08b57'
-          : '#b5804d';
+          ? '#c99259'
+          : '#bc854d';
     } else if (terrain === 'sunbeam') {
-      base = checker ? '#f6de72' : '#efcf58';
+      base = checker ? '#fae47a' : '#f2d45c';
     } else if (terrain === 'water') {
-      base = checker ? '#2d93b8' : '#2687ab';
+      base = checker ? '#2ac0db' : '#22b1cc';
     } else if (terrain === 'bridge') {
-      base = checker ? '#b87d46' : '#ae743f';
+      base = checker ? '#c6874a' : '#b87a3f';
     } else if (terrain === 'lava') {
-      base = checker ? '#b83214' : '#a4280e';
+      base = checker ? '#c43614' : '#ae2c0e';
     } else if (terrain === 'ramp') {
-      base = checker ? '#bd8f56' : '#b2834b';
+      base = checker ? '#c89658' : '#ba884c';
     } else if (terrain === 'burrow') {
-      base = checker ? '#8a623c' : '#7f5834';
+      base = checker ? '#8f653d' : '#835a34';
     }
 
     ctx.fillStyle = base;
@@ -514,117 +584,239 @@ export class CraftTextureLibrary {
 
     const seed =
       theme.charCodeAt(0) * 101 + terrain.charCodeAt(0) * 37 + (checker ? 11 : 23);
-    paintPaperGrain(ctx, s, s, seed, 0.09);
+    paintPaperGrain(ctx, s, s, seed, 0.1);
 
     const rng = mulberry(seed + 99);
 
     if (terrain === 'grass') {
-      // Hand-painted grass wisps & tiny daisies / autumn leaves
-      ctx.strokeStyle = isAutumn ? 'rgba(128, 86, 22, 0.45)' : 'rgba(67, 107, 29, 0.42)';
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
+      // Soft dappled sunlit watercolor patches
       for (let i = 0; i < 6; i++) {
-        const bx = 34 + rng() * (s - 68);
-        const by = 34 + rng() * (s - 68);
+        const px = 28 + rng() * (s - 56);
+        const py = 28 + rng() * (s - 56);
+        const pr = 26 + rng() * 36;
+        const g = ctx.createRadialGradient(px, py, 2, px, py, pr);
+        g.addColorStop(
+          0,
+          isAutumn
+            ? i % 2 === 0
+              ? 'rgba(255, 232, 138, 0.28)'
+              : 'rgba(176, 98, 28, 0.16)'
+            : i % 2 === 0
+              ? 'rgba(218, 250, 128, 0.30)'
+              : 'rgba(58, 122, 28, 0.16)'
+        );
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.moveTo(bx - 5, by + 6);
-        ctx.lineTo(bx - 9, by - 6);
-        ctx.moveTo(bx, by + 6);
-        ctx.lineTo(bx + 1, by - 9);
-        ctx.moveTo(bx + 5, by + 6);
-        ctx.lineTo(bx + 9, by - 5);
+        ctx.arc(px, py, pr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Chunky hand-inked grass tufts & clover sprigs
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 8; i++) {
+        const bx = 26 + rng() * (s - 52);
+        const by = 26 + rng() * (s - 52);
+        ctx.strokeStyle = isAutumn ? '#7d4d16' : '#3a6e1c';
+        ctx.lineWidth = 4.2;
+        ctx.beginPath();
+        ctx.moveTo(bx - 6, by + 7);
+        ctx.quadraticCurveTo(bx - 10, by, bx - 12, by - 8);
+        ctx.moveTo(bx, by + 7);
+        ctx.quadraticCurveTo(bx + 1, by - 2, bx + 2, by - 11);
+        ctx.moveTo(bx + 6, by + 7);
+        ctx.quadraticCurveTo(bx + 10, by + 1, bx + 12, by - 7);
+        ctx.stroke();
+
+        // Sunlit highlight blade
+        ctx.strokeStyle = isAutumn ? 'rgba(255, 240, 168, 0.55)' : 'rgba(204, 247, 126, 0.55)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx, by + 4);
+        ctx.lineTo(bx + 2, by - 9);
         ctx.stroke();
       }
+
+      // Tiny storybook seasonal flora accents (daisies / clovers / inked maple leaves)
       if (isAutumn) {
-        for (let i = 0; i < 4; i++) {
-          ctx.fillStyle = i % 2 === 0 ? '#c8542a' : '#df892e';
+        for (let i = 0; i < 5; i++) {
+          const lx = 32 + rng() * 192;
+          const ly = 32 + rng() * 192;
+          const ang = rng() * Math.PI * 2;
+          ctx.save();
+          ctx.translate(lx, ly);
+          ctx.rotate(ang);
+          ctx.fillStyle = i % 3 === 0 ? '#d94826' : i % 3 === 1 ? '#f08c24' : '#f5c23b';
+          ctx.strokeStyle = '#4a2610';
+          ctx.lineWidth = 2.4;
           ctx.beginPath();
-          ctx.ellipse(36 + rng() * 184, 36 + rng() * 184, 9, 4.5, rng() * Math.PI, 0, Math.PI * 2);
+          ctx.ellipse(0, 0, 11, 5.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
+      } else {
+        // Tiny inked white/pink daisies or shamrock clovers
+        const flowerCount = checker ? 3 : 2;
+        for (let i = 0; i < flowerCount; i++) {
+          const fx = 34 + rng() * 188;
+          const fy = 34 + rng() * 188;
+          const petalCol = isGreenhouse
+            ? i % 2 === 0
+              ? '#fff6c2'
+              : '#ffd480'
+            : i % 2 === 0
+              ? '#fffdf2'
+              : '#ffb8cc';
+          ctx.fillStyle = petalCol;
+          ctx.strokeStyle = 'rgba(69, 42, 22, 0.65)';
+          ctx.lineWidth = 1.8;
+          for (let p = 0; p < 5; p++) {
+            const a = (p / 5) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.arc(fx + Math.cos(a) * 5.2, fy + Math.sin(a) * 5.2, 4.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          }
+          ctx.fillStyle = '#f5c63b';
+          ctx.beginPath();
+          ctx.arc(fx, fy, 3.6, 0, Math.PI * 2);
           ctx.fill();
         }
       }
     } else if (terrain === 'soil') {
-      // Tilled garden furrows
-      for (let y = 26; y < s; y += 44) {
-        ctx.fillStyle = 'rgba(72, 38, 15, 0.22)';
-        ctx.fillRect(14, y, s - 28, 12);
-        ctx.fillStyle = 'rgba(255, 226, 184, 0.16)';
-        ctx.fillRect(14, y + 12, s - 28, 5);
+      // Rich tilled cartoon garden furrows with sunlit crests & warm pebbles
+      for (let y = 24; y < s; y += 44) {
+        ctx.fillStyle = 'rgba(72, 36, 12, 0.28)';
+        ctx.beginPath();
+        ctx.roundRect(14, y, s - 28, 13, 6);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255, 228, 184, 0.24)';
+        ctx.beginPath();
+        ctx.roundRect(16, y + 13, s - 32, 6, 3);
+        ctx.fill();
       }
       for (let i = 0; i < 16; i++) {
-        ctx.fillStyle = 'rgba(74, 42, 18, 0.34)';
+        const px = 22 + rng() * 212;
+        const py = 22 + rng() * 212;
+        ctx.fillStyle = i % 4 === 0 ? '#dfc5a2' : 'rgba(74, 40, 16, 0.42)';
         ctx.beginPath();
-        ctx.ellipse(24 + rng() * 208, 24 + rng() * 208, 5, 3, rng(), 0, Math.PI * 2);
+        ctx.ellipse(px, py, 5.5, 3.4, rng(), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Cute tiny painted sprouting bud
+      if (checker) {
+        ctx.strokeStyle = '#3b6e1d';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.72, s * 0.34);
+        ctx.lineTo(s * 0.72, s * 0.26);
+        ctx.stroke();
+        ctx.fillStyle = '#8be054';
+        ctx.beginPath();
+        ctx.ellipse(s * 0.68, s * 0.25, 8, 4.5, -0.5, 0, Math.PI * 2);
+        ctx.ellipse(s * 0.76, s * 0.25, 8, 4.5, 0.5, 0, Math.PI * 2);
         ctx.fill();
       }
     } else if (terrain === 'mud') {
-      // Glossy mud puddle rings
-      const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 16, s * 0.5, s * 0.5, s * 0.44);
-      g.addColorStop(0, 'rgba(62, 41, 26, 0.65)');
-      g.addColorStop(0.75, 'rgba(92, 65, 44, 0.35)');
-      g.addColorStop(1, 'rgba(92, 65, 44, 0)');
+      // Glossy mud puddle rings + wet pebbles
+      const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 16, s * 0.5, s * 0.5, s * 0.45);
+      g.addColorStop(0, 'rgba(54, 34, 20, 0.72)');
+      g.addColorStop(0.75, 'rgba(88, 60, 38, 0.4)');
+      g.addColorStop(1, 'rgba(88, 60, 38, 0)');
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.ellipse(s * 0.5, s * 0.52, s * 0.41, s * 0.34, 0.12, 0, Math.PI * 2);
+      ctx.ellipse(s * 0.5, s * 0.52, s * 0.42, s * 0.35, 0.12, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.strokeStyle = 'rgba(255, 244, 224, 0.35)';
-      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(255, 246, 224, 0.45)';
+      ctx.lineWidth = 5;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.arc(s * 0.44, s * 0.46, 36, Math.PI * 1.15, Math.PI * 1.65);
+      ctx.arc(s * 0.44, s * 0.46, 38, Math.PI * 1.12, Math.PI * 1.68);
+      ctx.stroke();
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(s * 0.58, s * 0.58, 22, Math.PI * 0.1, Math.PI * 0.55);
       ctx.stroke();
     } else if (terrain === 'compost') {
-      // Rich dark soil + healing sprout emblems
+      // Rich dark soil + bright healing sprout emblem
       for (let i = 0; i < 24; i++) {
-        ctx.fillStyle = i % 3 === 0 ? 'rgba(130, 198, 76, 0.5)' : 'rgba(38, 24, 12, 0.38)';
+        ctx.fillStyle = i % 3 === 0 ? 'rgba(138, 214, 78, 0.55)' : 'rgba(38, 22, 10, 0.42)';
         ctx.beginPath();
         ctx.arc(24 + rng() * 208, 24 + rng() * 208, 3 + rng() * 5, 0, Math.PI * 2);
         ctx.fill();
       }
-      // Little painted green sprout icon in center
-      ctx.strokeStyle = '#6cc24a';
-      ctx.lineWidth = 5;
+      ctx.strokeStyle = '#36691b';
+      ctx.lineWidth = 7;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(s / 2, s * 0.64);
+      ctx.moveTo(s / 2, s * 0.66);
       ctx.lineTo(s / 2, s * 0.44);
       ctx.stroke();
-      ctx.fillStyle = '#89db5e';
-      ctx.beginPath();
-      ctx.ellipse(s * 0.43, s * 0.44, 18, 9, -0.45, 0, Math.PI * 2);
-      ctx.ellipse(s * 0.57, s * 0.44, 18, 9, 0.45, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (terrain === 'barn_floor') {
-      // Wooden planks / greenhouse tiles
-      ctx.strokeStyle = 'rgba(72, 40, 16, 0.38)';
+      ctx.fillStyle = '#8ee359';
+      ctx.strokeStyle = '#36691b';
       ctx.lineWidth = 3.5;
-      for (let y = 0; y < s; y += 64) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(s, y);
-        ctx.stroke();
-      }
+      ctx.beginPath();
+      ctx.ellipse(s * 0.42, s * 0.44, 20, 10, -0.45, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(s * 0.58, s * 0.44, 20, 10, 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else if (terrain === 'barn_floor') {
+      // Warm hand-inked greenhouse terracotta pavers OR golden barn planks with grain & knots
       if (isGreenhouse) {
-        for (let x = 0; x < s; x += 64) {
+        const cell = 64;
+        for (let gy = 0; gy < 4; gy++) {
+          for (let gx = 0; gx < 4; gx++) {
+            ctx.fillStyle = (gx + gy) % 2 === 0 ? 'rgba(255,232,198,0.12)' : 'rgba(92,46,20,0.09)';
+            ctx.fillRect(gx * cell + 3, gy * cell + 3, cell - 6, cell - 6);
+          }
+        }
+        ctx.strokeStyle = 'rgba(72, 38, 16, 0.48)';
+        ctx.lineWidth = 4;
+        for (let i = 0; i <= s; i += cell) {
           ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, s);
+          ctx.moveTo(0, i);
+          ctx.lineTo(s, i);
+          ctx.moveTo(i, 0);
+          ctx.lineTo(i, s);
           ctx.stroke();
         }
       } else {
-        // Nail heads
-        ctx.fillStyle = 'rgba(64, 38, 18, 0.48)';
-        for (let y = 32; y < s; y += 64) {
+        for (let y = 0; y < s; y += 64) {
+          ctx.fillStyle = (y / 64) % 2 === 0 ? 'rgba(255,238,200,0.1)' : 'rgba(74,40,14,0.08)';
+          ctx.fillRect(0, y, s, 64);
+          // Wood grain waves
+          ctx.strokeStyle = 'rgba(78, 44, 16, 0.16)';
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.arc(22, y, 4, 0, Math.PI * 2);
-          ctx.arc(s - 22, y, 4, 0, Math.PI * 2);
+          ctx.moveTo(0, y + 22);
+          ctx.bezierCurveTo(s * 0.3, y + 14, s * 0.7, y + 32, s, y + 20);
+          ctx.moveTo(0, y + 46);
+          ctx.bezierCurveTo(s * 0.4, y + 52, s * 0.7, y + 38, s, y + 48);
+          ctx.stroke();
+          // Plank seam
+          ctx.strokeStyle = 'rgba(66, 36, 14, 0.48)';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(s, y);
+          ctx.stroke();
+          // Iron nail heads
+          ctx.fillStyle = '#422510';
+          ctx.beginPath();
+          ctx.arc(22, y + 32, 4.2, 0, Math.PI * 2);
+          ctx.arc(s - 22, y + 32, 4.2, 0, Math.PI * 2);
           ctx.fill();
         }
       }
     } else if (terrain === 'gate') {
       // Golden victory chevron tile
-      ctx.strokeStyle = 'rgba(138, 86, 12, 0.55)';
-      ctx.lineWidth = 10;
+      ctx.strokeStyle = 'rgba(128, 76, 10, 0.62)';
+      ctx.lineWidth = 12;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
@@ -632,8 +824,8 @@ export class CraftTextureLibrary {
       ctx.lineTo(s * 0.5, s * 0.34);
       ctx.lineTo(s * 0.72, s * 0.62);
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(255, 252, 232, 0.72)';
-      ctx.lineWidth = 5;
+      ctx.strokeStyle = 'rgba(255, 252, 232, 0.85)';
+      ctx.lineWidth = 5.5;
       ctx.beginPath();
       ctx.moveTo(s * 0.28, s * 0.62);
       ctx.lineTo(s * 0.5, s * 0.34);
@@ -641,50 +833,77 @@ export class CraftTextureLibrary {
       ctx.stroke();
     } else if (terrain === 'sunbeam') {
       const g = ctx.createRadialGradient(s / 2, s / 2, 12, s / 2, s / 2, s * 0.46);
-      g.addColorStop(0, 'rgba(255, 252, 210, 0.8)');
-      g.addColorStop(0.7, 'rgba(252, 214, 72, 0.26)');
+      g.addColorStop(0, 'rgba(255, 254, 218, 0.88)');
+      g.addColorStop(0.7, 'rgba(252, 214, 72, 0.28)');
       g.addColorStop(1, 'rgba(252, 214, 72, 0)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
     } else if (terrain === 'water') {
-      // Sparkling Paper Mario azure creek with painted ripples & foam crescents
-      const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 8, s * 0.5, s * 0.5, s * 0.65);
-      g.addColorStop(0, 'rgba(92, 210, 238, 0.48)');
-      g.addColorStop(1, 'rgba(16, 78, 114, 0.45)');
+      // Vivid storybook turquoise creek matching the redesigned cartoon boards!
+      const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 10, s * 0.5, s * 0.5, s * 0.68);
+      g.addColorStop(0, 'rgba(122, 242, 255, 0.58)');
+      g.addColorStop(0.65, 'rgba(34, 178, 208, 0.28)');
+      g.addColorStop(1, 'rgba(14, 96, 134, 0.45)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
 
-      ctx.strokeStyle = 'rgba(224, 250, 255, 0.58)';
-      ctx.lineWidth = 4.5;
+      // Chunky white foam ribbons & sunlit water glints
+      ctx.strokeStyle = 'rgba(240, 254, 255, 0.76)';
+      ctx.lineWidth = 5.5;
       ctx.lineCap = 'round';
       for (let row = 0; row < 4; row++) {
-        const wy = 42 + row * 56;
+        const wy = 40 + row * 56;
         ctx.beginPath();
-        ctx.moveTo(22, wy);
-        ctx.quadraticCurveTo(s * 0.32, wy - 14, s * 0.52, wy);
-        ctx.quadraticCurveTo(s * 0.72, wy + 14, s - 22, wy - 4);
+        ctx.moveTo(20, wy);
+        ctx.quadraticCurveTo(s * 0.32, wy - 15, s * 0.52, wy);
+        ctx.quadraticCurveTo(s * 0.72, wy + 15, s - 20, wy - 4);
         ctx.stroke();
       }
+      // Sparkle diamond glints
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      for (let i = 0; i < 4; i++) {
+        const sx = 34 + rng() * 188;
+        const sy = 34 + rng() * 188;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 7);
+        ctx.lineTo(sx + 4, sy);
+        ctx.lineTo(sx, sy + 7);
+        ctx.lineTo(sx - 4, sy);
+        ctx.closePath();
+        ctx.fill();
+      }
     } else if (terrain === 'bridge') {
-      // Sturdy cross-plank wooden bridge decking with dark ink seams & bolt heads
+      // Warm honey-oak cross-plank bridge decking with painted wood grain & iron rivets
       for (let i = 0; i < 5; i++) {
         const py = i * (s / 5);
-        ctx.fillStyle = i % 2 === 0 ? '#c98e52' : '#b77b40';
+        ctx.fillStyle = i % 2 === 0 ? '#d69754' : '#c38343';
         ctx.fillRect(6, py + 3, s - 12, s / 5 - 6);
-        ctx.strokeStyle = '#4a2a14';
-        ctx.lineWidth = 4;
+        // Grain stripe
+        ctx.strokeStyle = 'rgba(92, 48, 16, 0.2)';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.moveTo(16, py + s / 10);
+        ctx.quadraticCurveTo(s * 0.5, py + s / 10 + (i % 2 === 0 ? 6 : -6), s - 16, py + s / 10);
+        ctx.stroke();
+        // Inked plank border
+        ctx.strokeStyle = '#472610';
+        ctx.lineWidth = 4.5;
         ctx.strokeRect(6, py + 3, s - 12, s / 5 - 6);
         // Iron rivets
-        ctx.fillStyle = '#3d2412';
+        ctx.fillStyle = '#3b210f';
         ctx.beginPath();
-        ctx.arc(24, py + s / 10, 4.5, 0, Math.PI * 2);
-        ctx.arc(s - 24, py + s / 10, 4.5, 0, Math.PI * 2);
+        ctx.arc(24, py + s / 10, 5, 0, Math.PI * 2);
+        ctx.arc(s - 24, py + s / 10, 5, 0, Math.PI * 2);
         ctx.fill();
       }
       // Side stringer rails
-      ctx.fillStyle = '#824d23';
-      ctx.fillRect(0, 0, 14, s);
-      ctx.fillRect(s - 14, 0, 14, s);
+      ctx.fillStyle = '#874f22';
+      ctx.fillRect(0, 0, 15, s);
+      ctx.fillRect(s - 15, 0, 15, s);
+      ctx.strokeStyle = '#42220d';
+      ctx.lineWidth = 3.5;
+      ctx.strokeRect(1.5, 1.5, 13, s - 3);
+      ctx.strokeRect(s - 14.5, 1.5, 13, s - 3);
     } else if (terrain === 'lava') {
       // Glowing molten magma rivers threading through dark basalt crusts
       const lg = ctx.createRadialGradient(s * 0.5, s * 0.5, 10, s * 0.5, s * 0.5, s * 0.55);
@@ -788,50 +1007,87 @@ export class CraftTextureLibrary {
     return finalizeTexture(canvas);
   }
 
-  private buildCliffSideTexture(): THREE.CanvasTexture {
+  private buildCliffSideTexture(theme: BoardTheme = 'spring'): THREE.CanvasTexture {
     const w = 256;
     const h = 256;
     const { canvas, ctx } = makeCanvas(w, h);
+    const isAutumn = theme === 'autumn';
+    const isGreenhouse = theme === 'greenhouse';
 
     // Rich layered earth-and-stone Paper Mario terrace cliff face
     const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, '#9c6c3f');
-    grad.addColorStop(0.45, '#865730');
-    grad.addColorStop(1, '#684020');
+    grad.addColorStop(0, isAutumn ? '#a86f38' : '#a87442');
+    grad.addColorStop(0.5, '#8c5a30');
+    grad.addColorStop(1, '#683f1d');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
 
-    // Layered cardboard/strata bands
+    // Warm hand-painted geological strata bands
     ctx.fillStyle = 'rgba(54, 28, 12, 0.22)';
-    ctx.fillRect(0, 68, w, 16);
-    ctx.fillRect(0, 146, w, 20);
-    ctx.fillRect(0, 212, w, 14);
+    ctx.fillRect(0, 74, w, 16);
+    ctx.fillRect(0, 152, w, 20);
+    ctx.fillRect(0, 214, w, 14);
 
-    // Embedded cobblestones
-    const rng = mulberry(7741);
-    for (let i = 0; i < 14; i++) {
-      ctx.fillStyle = i % 2 === 0 ? 'rgba(182, 152, 118, 0.42)' : 'rgba(92, 64, 42, 0.42)';
+    // Chunky hand-inked embedded river boulders & cobblestones
+    const rng = mulberry(isAutumn ? 7743 : isGreenhouse ? 7742 : 7741);
+    for (let i = 0; i < 16; i++) {
+      const rx = 20 + rng() * 216;
+      const ry = 54 + rng() * 176;
+      const rw = 14 + rng() * 16;
+      const rh = 9 + rng() * 9;
+      ctx.fillStyle = i % 3 === 0 ? '#c4b89c' : i % 3 === 1 ? '#998870' : '#7d5b3e';
       ctx.beginPath();
-      ctx.ellipse(24 + rng() * 208, 46 + rng() * 185, 14 + rng() * 14, 9 + rng() * 8, 0, 0, Math.PI * 2);
+      ctx.ellipse(rx, ry, rw, rh, (rng() - 0.5) * 0.4, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(56, 32, 16, 0.38)';
-      ctx.lineWidth = 2.5;
+      // Top highlight crescent
+      ctx.fillStyle = 'rgba(255, 248, 224, 0.28)';
+      ctx.beginPath();
+      ctx.ellipse(rx - rw * 0.16, ry - rh * 0.25, rw * 0.55, rh * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#472812';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(rx, ry, rw, rh, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    // Scalloped grassy turf overhang lip along top edge!
-    ctx.fillStyle = '#6f9c37';
-    ctx.fillRect(0, 0, w, 24);
-    for (let x = 0; x < w; x += 32) {
+    // Dangling painted soil root tendrils tucked under the grassy overhang
+    ctx.strokeStyle = '#5e3617';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 6; i++) {
+      const rx = 22 + i * 42 + rng() * 10;
       ctx.beginPath();
-      ctx.arc(x + 16, 24, 16, 0, Math.PI);
-      ctx.fill();
+      ctx.moveTo(rx, 32);
+      ctx.quadraticCurveTo(rx + (i % 2 === 0 ? 8 : -8), 54, rx + (i % 2 === 0 ? -4 : 6), 72 + rng() * 22);
+      ctx.stroke();
     }
-    ctx.strokeStyle = '#3f2412';
-    ctx.lineWidth = 4;
+
+    // Vibrant chunky cartoon scalloped turf overhang lip along top edge!
+    const turfTop = isAutumn ? '#e2b549' : isGreenhouse ? '#7ac94d' : '#8ed147';
+    const turfBot = isAutumn ? '#c48d2b' : isGreenhouse ? '#589e34' : '#65a82e';
+    const turfGrad = ctx.createLinearGradient(0, 0, 0, 44);
+    turfGrad.addColorStop(0, turfTop);
+    turfGrad.addColorStop(1, turfBot);
+
+    ctx.fillStyle = turfGrad;
     ctx.beginPath();
-    ctx.moveTo(0, 26);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(w, 0);
     ctx.lineTo(w, 26);
+    for (let x = w; x > 0; x -= 32) {
+      ctx.arc(x - 16, 26, 16, 0, Math.PI, false);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // Chocolate-ink scalloped turf outline!
+    ctx.strokeStyle = '#3f220e';
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    for (let x = 0; x < w; x += 32) {
+      ctx.arc(x + 16, 26, 16, 0, Math.PI, false);
+    }
     ctx.stroke();
 
     paintPaperGrain(ctx, w, h, 8821, 0.08);
@@ -848,18 +1104,24 @@ export class CraftTextureLibrary {
     ctx.fillStyle = '#cf9149';
     ctx.fillRect(0, 0, s, s);
 
-    // Horizontal inner slats
+    // Horizontal inner slats with warm wood grain streaks
     for (let i = 0; i < 4; i++) {
       const y = 32 + i * 48;
-      ctx.fillStyle = i % 2 === 0 ? '#d89b52' : '#c68740';
+      ctx.fillStyle = i % 2 === 0 ? '#dea258' : '#cc8d43';
       ctx.fillRect(28, y, s - 56, 46);
+      ctx.strokeStyle = 'rgba(92, 50, 18, 0.16)';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(32, y + 18);
+      ctx.bezierCurveTo(s * 0.35, y + 12, s * 0.65, y + 26, s - 32, y + 16);
+      ctx.stroke();
       ctx.fillStyle = '#5d3416';
-      ctx.fillRect(28, y + 44, s - 56, 3);
+      ctx.fillRect(28, y + 44, s - 56, 3.5);
     }
 
     // Outer mitered wooden frame
     const frame = 30;
-    ctx.fillStyle = '#e0a55a';
+    ctx.fillStyle = '#e6ac5f';
     ctx.fillRect(0, 0, s, frame);
     ctx.fillRect(0, s - frame, s, frame);
     ctx.fillRect(0, 0, frame, s);
@@ -867,14 +1129,14 @@ export class CraftTextureLibrary {
 
     // Diagonal brace
     ctx.save();
-    ctx.strokeStyle = '#d39348';
+    ctx.strokeStyle = '#d9984c';
     ctx.lineWidth = 24;
     ctx.beginPath();
     ctx.moveTo(26, s - 26);
     ctx.lineTo(s - 26, 26);
     ctx.stroke();
     ctx.strokeStyle = '#4a2a14';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 4.5;
     ctx.beginPath();
     ctx.moveTo(30, s - 42);
     ctx.lineTo(s - 42, 30);
@@ -883,16 +1145,30 @@ export class CraftTextureLibrary {
     ctx.stroke();
     ctx.restore();
 
-    paintPaperGrain(ctx, s, s, damaged ? 999 : 501, 0.1);
+    // Cute faded farm-crate leaf stencil stamp in center
+    ctx.save();
+    ctx.translate(s / 2, s / 2);
+    ctx.fillStyle = 'rgba(94, 52, 20, 0.24)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(122, 178, 64, 0.55)';
+    ctx.beginPath();
+    ctx.ellipse(-7, -2, 11, 6, -0.5, 0, Math.PI * 2);
+    ctx.ellipse(7, -2, 11, 6, 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
 
-    // Inked frame borders & corner nails
-    ctx.strokeStyle = '#4a2a14';
-    ctx.lineWidth = 7;
+    paintPaperGrain(ctx, s, s, damaged ? 999 : 501, 0.09);
+
+    // Inked frame borders & iron corner rivets
+    ctx.strokeStyle = '#452611';
+    ctx.lineWidth = 7.5;
     ctx.strokeRect(3.5, 3.5, s - 7, s - 7);
     ctx.lineWidth = 4;
     ctx.strokeRect(frame, frame, s - frame * 2, s - frame * 2);
 
-    ctx.fillStyle = '#4a2a14';
+    ctx.fillStyle = '#452611';
     for (const [nx, ny] of [
       [15, 15],
       [s - 15, 15],
@@ -900,14 +1176,14 @@ export class CraftTextureLibrary {
       [s - 15, s - 15],
     ]) {
       ctx.beginPath();
-      ctx.arc(nx, ny, 4.5, 0, Math.PI * 2);
+      ctx.arc(nx, ny, 5, 0, Math.PI * 2);
       ctx.fill();
     }
 
     if (damaged) {
       // Hand-inked splinter cracks!
-      ctx.strokeStyle = '#361a0a';
-      ctx.lineWidth = 6;
+      ctx.strokeStyle = '#321708';
+      ctx.lineWidth = 6.5;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(56, 44);
@@ -1008,27 +1284,50 @@ export class CraftTextureLibrary {
     const s = 256;
     const { canvas, ctx } = makeCanvas(s, s);
     const grad = ctx.createLinearGradient(0, 0, 0, s);
-    grad.addColorStop(0, '#f5d76e');
-    grad.addColorStop(0.55, '#e2b243');
-    grad.addColorStop(1, '#c48d2b');
+    grad.addColorStop(0, '#fae078');
+    grad.addColorStop(0.55, '#e6b843');
+    grad.addColorStop(1, '#c48a24');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, s, s);
 
     const rng = mulberry(3141);
     ctx.lineCap = 'round';
-    for (let i = 0; i < 240; i++) {
+    for (let i = 0; i < 280; i++) {
       const x = rng() * s;
       const y = rng() * s;
-      const len = 14 + rng() * 26;
-      const tilt = (rng() - 0.5) * 0.6;
+      const len = 14 + rng() * 28;
+      const tilt = (rng() - 0.5) * 0.65;
       ctx.strokeStyle =
-        i % 3 === 0 ? '#7d4d16' : i % 3 === 1 ? '#fff0a8' : '#b77e20';
-      ctx.lineWidth = i % 3 === 0 ? 2.6 : 3.2;
+        i % 4 === 0 ? '#6e3f10' : i % 4 === 1 ? '#fff4b8' : i % 4 === 2 ? '#c4871e' : '#e6a82e';
+      ctx.lineWidth = i % 4 === 0 ? 2.8 : 3.6;
       ctx.beginPath();
       ctx.moveTo(x, y);
       ctx.lineTo(x + Math.sin(tilt) * len, y + Math.cos(tilt) * len);
       ctx.stroke();
     }
+
+    // Braided rustic twine binding band cinched across the bundle!
+    for (const ty of [78, 178]) {
+      ctx.fillStyle = '#8f5524';
+      ctx.fillRect(0, ty, s, 14);
+      ctx.strokeStyle = '#42220d';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(0, ty);
+      ctx.lineTo(s, ty);
+      ctx.moveTo(0, ty + 14);
+      ctx.lineTo(s, ty + 14);
+      ctx.stroke();
+      ctx.strokeStyle = '#c48646';
+      ctx.lineWidth = 2.5;
+      for (let x = 0; x < s; x += 16) {
+        ctx.beginPath();
+        ctx.moveTo(x, ty + 12);
+        ctx.lineTo(x + 12, ty + 2);
+        ctx.stroke();
+      }
+    }
+
     paintPaperGrain(ctx, s, s, 3142, 0.08);
     return finalizeTexture(canvas, { repeat: [2, 1] });
   }
@@ -1036,23 +1335,79 @@ export class CraftTextureLibrary {
   private buildStoneTexture(): THREE.CanvasTexture {
     const s = 256;
     const { canvas, ctx } = makeCanvas(s, s);
-    ctx.fillStyle = '#9aa19e';
+    // Warm sunlit granite cartoon watercolor stone base
+    const grad = ctx.createLinearGradient(0, 0, s, s);
+    grad.addColorStop(0, '#c4c8be');
+    grad.addColorStop(0.55, '#9ea59d');
+    grad.addColorStop(1, '#757e7a');
+    ctx.fillStyle = grad;
     ctx.fillRect(0, 0, s, s);
+
     const rng = mulberry(8821);
-    for (let i = 0; i < 60; i++) {
-      const x = rng() * s;
-      const y = rng() * s;
-      const r = 8 + rng() * 28;
+    // Painted watercolor rock facets (warm highlights & cool slate shadows)
+    for (let i = 0; i < 28; i++) {
+      const cx = rng() * s;
+      const cy = rng() * s;
+      const r = 18 + rng() * 34;
       ctx.fillStyle =
-        i % 4 === 0
-          ? 'rgba(104, 146, 68, 0.25)'
-          : i % 2 === 0
-            ? 'rgba(235, 240, 232, 0.2)'
-            : 'rgba(60, 66, 64, 0.22)';
+        i % 3 === 0
+          ? 'rgba(246, 244, 232, 0.30)'
+          : i % 3 === 1
+            ? 'rgba(62, 74, 76, 0.24)'
+            : 'rgba(130, 140, 126, 0.25)';
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
+      const sides = 5 + (i % 3);
+      for (let k = 0; k < sides; k++) {
+        const a = (k / sides) * Math.PI * 2 + rng() * 0.4;
+        const rad = r * (0.7 + rng() * 0.4);
+        const px = cx + Math.cos(a) * rad;
+        const py = cy + Math.sin(a) * rad;
+        if (k === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
       ctx.fill();
     }
+
+    // Velvety cartoon-inked emerald moss patches clinging to the boulder
+    for (let i = 0; i < 6; i++) {
+      const mx = 26 + rng() * 204;
+      const my = 20 + rng() * 150;
+      const mr = 14 + rng() * 18;
+      ctx.fillStyle = i % 2 === 0 ? '#72b53b' : '#58992d';
+      ctx.strokeStyle = '#385c1b';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(mx, my, mr, 0, Math.PI * 2);
+      ctx.arc(mx + mr * 0.65, my + 4, mr * 0.72, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Hand-inked storybook boulder fracture lines & mineral speckles
+    ctx.strokeStyle = 'rgba(54, 42, 32, 0.58)';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < 6; i++) {
+      let cx = 24 + rng() * 200;
+      let cy = 24 + rng() * 200;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      for (let seg = 0; seg < 3; seg++) {
+        cx += (rng() - 0.5) * 48;
+        cy += 12 + rng() * 26;
+        ctx.lineTo(cx, cy);
+      }
+      ctx.stroke();
+    }
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(52, 46, 40, 0.35)' : 'rgba(252, 248, 236, 0.42)';
+      ctx.beginPath();
+      ctx.arc(rng() * s, rng() * s, 2 + rng() * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     paintPaperGrain(ctx, s, s, 8822, 0.1);
     return finalizeTexture(canvas);
   }
@@ -1064,16 +1419,450 @@ export class CraftTextureLibrary {
     ctx.fillRect(0, 0, s, s);
     for (let y = 0; y < s; y += 36) {
       const g = ctx.createLinearGradient(0, y, 0, y + 36);
-      g.addColorStop(0, '#f9dc7a');
-      g.addColorStop(0.55, '#e2a936');
-      g.addColorStop(1, '#9c6318');
+      g.addColorStop(0, '#ffe385');
+      g.addColorStop(0.55, '#e8ad32');
+      g.addColorStop(1, '#9c6014');
       ctx.fillStyle = g;
       ctx.fillRect(0, y, s, 36);
       ctx.fillStyle = '#4a2a14';
-      ctx.fillRect(0, y + 33, s, 3.5);
+      ctx.fillRect(0, y + 32.5, s, 4);
+    }
+    // Glistening golden honey drips trickling down coils!
+    ctx.fillStyle = '#f5a81c';
+    ctx.strokeStyle = '#5c330c';
+    ctx.lineWidth = 2.5;
+    for (const [dx, dh] of [
+      [54, 48],
+      [142, 62],
+      [212, 38],
+    ]) {
+      ctx.beginPath();
+      ctx.moveTo(dx - 8, 70);
+      ctx.lineTo(dx - 6, 70 + dh);
+      ctx.arc(dx, 70 + dh, 6, Math.PI, 0, true);
+      ctx.lineTo(dx + 8, 70);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
     }
     paintPaperGrain(ctx, s, s, 6060, 0.07);
     return finalizeTexture(canvas, { repeat: [2, 1] });
+  }
+
+  private buildTreeBarkTexture(): THREE.CanvasTexture {
+    const s = 256;
+    const { canvas, ctx } = makeCanvas(s, s);
+    const grad = ctx.createLinearGradient(0, 0, s, 0);
+    grad.addColorStop(0, '#784724');
+    grad.addColorStop(0.45, '#965c32');
+    grad.addColorStop(1, '#6e401f');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, s, s);
+
+    // Chunky hand-inked vertical bark ridges
+    const rng = mulberry(4512);
+    ctx.lineCap = 'round';
+    for (let x = 14; x < s; x += 26) {
+      ctx.strokeStyle = '#42230f';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.bezierCurveTo(x + 8, s * 0.35, x - 9, s * 0.68, x + 3, s);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(230, 178, 120, 0.32)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x + 6, 0);
+      ctx.bezierCurveTo(x + 14, s * 0.35, x - 3, s * 0.68, x + 9, s);
+      ctx.stroke();
+    }
+
+    // Storybook wood knot oval
+    for (let i = 0; i < 3; i++) {
+      const kx = 40 + rng() * 176;
+      const ky = 40 + rng() * 176;
+      ctx.fillStyle = '#522c14';
+      ctx.strokeStyle = '#361a0a';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.ellipse(kx, ky, 14, 22, 0.08, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    paintPaperGrain(ctx, s, s, 4513, 0.09);
+    return finalizeTexture(canvas, { repeat: [2, 1] });
+  }
+
+  private buildTreeFoliageTexture(variant: TreeFoliageVariant): THREE.CanvasTexture {
+    const s = 256;
+    const { canvas, ctx } = makeCanvas(s, s);
+    const palettes: Record<
+      TreeFoliageVariant,
+      { bg: string; dark: string; mid: string; light: string; ink: string; accent: string; accent2: string }
+    > = {
+      spring_green: {
+        bg: '#5ca834',
+        dark: '#418224',
+        mid: '#6ec23e',
+        light: '#a4e058',
+        ink: '#2d4d16',
+        accent: '#eb4b4b',
+        accent2: '#fff5b8',
+      },
+      spring_blossom: {
+        bg: '#f29cb8',
+        dark: '#d46e91',
+        mid: '#f7b2c8',
+        light: '#ffdbe6',
+        ink: '#702d48',
+        accent: '#fff9fc',
+        accent2: '#ffe27a',
+      },
+      summer_citrus: {
+        bg: '#4b9e42',
+        dark: '#337530',
+        mid: '#65ba4c',
+        light: '#98db63',
+        ink: '#244d1e',
+        accent: '#ffa229',
+        accent2: '#ffe366',
+      },
+      autumn_crimson: {
+        bg: '#d94d26',
+        dark: '#a82f18',
+        mid: '#eb6c2d',
+        light: '#fa9c3e',
+        ink: '#571c0e',
+        accent: '#ffd04d',
+        accent2: '#ff7b47',
+      },
+      autumn_gold: {
+        bg: '#eb9d26',
+        dark: '#bd6d16',
+        mid: '#f5b838',
+        light: '#ffe06b',
+        ink: '#63350d',
+        accent: '#d94524',
+        accent2: '#fff3a8',
+      },
+    };
+    const p = palettes[variant];
+    const grad = ctx.createLinearGradient(0, 0, 0, s);
+    grad.addColorStop(0, p.light);
+    grad.addColorStop(0.5, p.mid);
+    grad.addColorStop(1, p.dark);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, s, s);
+
+    const rng = mulberry(variant.charCodeAt(7) * 317 + 41);
+
+    // Layered chunky cartoon scalloped leaf clusters with warm ink arcs!
+    for (let row = 0; row < 6; row++) {
+      const y = row * 44 + 14;
+      for (let col = -1; col < 7; col++) {
+        const x = col * 42 + (row % 2 === 0 ? 0 : 21);
+        const r = 24 + rng() * 6;
+        ctx.fillStyle = row < 2 ? p.light : row < 4 ? p.mid : p.dark;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Chocolate-ink bottom scallop arc (signature cartoon tree look!)
+        ctx.strokeStyle = p.ink;
+        ctx.lineWidth = 3.6;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0.15 * Math.PI, 0.85 * Math.PI);
+        ctx.stroke();
+      }
+    }
+
+    // Seasonal storybook fruit / blossom / leaf accents!
+    for (let i = 0; i < 12; i++) {
+      const ax = 20 + rng() * 216;
+      const ay = 20 + rng() * 216;
+      if (variant === 'spring_blossom') {
+        ctx.fillStyle = p.accent;
+        ctx.strokeStyle = p.ink;
+        ctx.lineWidth = 2;
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.arc(ax + Math.cos(a) * 6, ay + Math.sin(a) * 6, 4.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = p.accent2;
+        ctx.beginPath();
+        ctx.arc(ax, ay, 3.8, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Apples, oranges, or bright autumn leaves
+        ctx.fillStyle = i % 3 === 0 ? p.accent2 : p.accent;
+        ctx.strokeStyle = p.ink;
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.arc(ax, ay, 7.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.65)';
+        ctx.beginPath();
+        ctx.arc(ax - 2.4, ay - 2.4, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    paintPaperGrain(ctx, s, s, 9123, 0.08);
+    return finalizeTexture(canvas, { repeat: [2, 1] });
+  }
+
+  private buildHillBackdropTexture(theme: BoardTheme, layerIdx: number): THREE.CanvasTexture {
+    const s = 256;
+    const { canvas, ctx } = makeCanvas(s, s);
+    const isAutumn = theme === 'autumn';
+    const isGreenhouse = theme === 'greenhouse';
+
+    const topCol = isAutumn
+      ? ['#f0b443', '#df7e2c', '#c95328'][layerIdx % 3]
+      : isGreenhouse
+        ? ['#82c957', '#66b048', '#4d913c'][layerIdx % 3]
+        : ['#9fe053', '#7ec443', '#61a636'][layerIdx % 3];
+    const botCol = isAutumn
+      ? ['#c97b24', '#a8471c', '#873218'][layerIdx % 3]
+      : isGreenhouse
+        ? ['#528f39', '#3e732d', '#2e5925'][layerIdx % 3]
+        : ['#67a832', '#4f8c27', '#3c7021'][layerIdx % 3];
+
+    const grad = ctx.createLinearGradient(0, 0, 0, s);
+    grad.addColorStop(0, topCol);
+    grad.addColorStop(1, botCol);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, s, s);
+
+    // Sweeping sunlit contour stripes across the hillside!
+    ctx.fillStyle = 'rgba(255, 250, 198, 0.16)';
+    for (let i = 0; i < 4; i++) {
+      const y = 32 + i * 58;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.quadraticCurveTo(s * 0.5, y - 24, s, y + 6);
+      ctx.lineTo(s, y + 26);
+      ctx.quadraticCurveTo(s * 0.5, y - 4, 0, y + 20);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    const rng = mulberry(theme.charCodeAt(0) * 55 + layerIdx * 97);
+    // Tiny painted meadow wildflowers / autumn orchard dots
+    for (let i = 0; i < 24; i++) {
+      const fx = 16 + rng() * 224;
+      const fy = 20 + rng() * 216;
+      ctx.fillStyle = isAutumn
+        ? i % 2 === 0
+          ? '#ffd866'
+          : '#d94524'
+        : isGreenhouse
+          ? i % 2 === 0
+            ? '#fff3a8'
+            : '#c4f291'
+          : i % 3 === 0
+            ? '#fffdf2'
+            : i % 3 === 1
+              ? '#ffd666'
+              : '#ffb3c8';
+      ctx.beginPath();
+      ctx.arc(fx, fy, 4.2 + rng() * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    paintPaperGrain(ctx, s, s, 3030 + layerIdx, 0.1);
+    return finalizeTexture(canvas, { repeat: [1, 1] });
+  }
+
+  private buildBarnWallTexture(): THREE.CanvasTexture {
+    const s = 256;
+    const { canvas, ctx } = makeCanvas(s, s);
+    ctx.fillStyle = '#cf4434';
+    ctx.fillRect(0, 0, s, s);
+
+    // Vertical storybook painted red barn planks with chocolate-ink seams
+    for (let x = 0; x < s; x += 32) {
+      ctx.fillStyle = (x / 32) % 2 === 0 ? '#d94b38' : '#c43d2d';
+      ctx.fillRect(x, 0, 32, s);
+      ctx.strokeStyle = 'rgba(255, 210, 180, 0.14)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x + 6, 0);
+      ctx.lineTo(x + 6, s);
+      ctx.stroke();
+      ctx.strokeStyle = '#521d15';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, s);
+      ctx.stroke();
+    }
+
+    // Cream corner trim border
+    ctx.fillStyle = '#fff5dc';
+    ctx.fillRect(0, 0, 14, s);
+    ctx.fillRect(s - 14, 0, 14, s);
+    ctx.fillRect(0, 0, s, 12);
+    ctx.strokeStyle = '#472213';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, s - 4, s - 4);
+
+    paintPaperGrain(ctx, s, s, 5511, 0.08);
+    return finalizeTexture(canvas);
+  }
+
+  private buildBarnRoofTexture(): THREE.CanvasTexture {
+    const s = 256;
+    const { canvas, ctx } = makeCanvas(s, s);
+    ctx.fillStyle = '#75462a';
+    ctx.fillRect(0, 0, s, s);
+
+    // Scalloped overlapping storybook cedar roof shingles!
+    for (let row = 0; row < 8; row++) {
+      const y = row * 32;
+      for (let col = -1; col < 8; col++) {
+        const x = col * 36 + (row % 2 === 0 ? 0 : 18);
+        ctx.fillStyle = (row + col) % 2 === 0 ? '#8a5534' : '#734427';
+        ctx.beginPath();
+        ctx.roundRect(x, y, 36, 34, [0, 0, 14, 14]);
+        ctx.fill();
+        ctx.strokeStyle = '#3d2010';
+        ctx.lineWidth = 3.5;
+        ctx.stroke();
+      }
+    }
+    paintPaperGrain(ctx, s, s, 5512, 0.08);
+    return finalizeTexture(canvas, { repeat: [2, 2] });
+  }
+
+  private buildFenceWoodTexture(): THREE.CanvasTexture {
+    const s = 128;
+    const { canvas, ctx } = makeCanvas(s, s);
+    ctx.fillStyle = '#f5ead2';
+    ctx.fillRect(0, 0, s, s);
+    ctx.strokeStyle = 'rgba(138, 102, 62, 0.24)';
+    ctx.lineWidth = 2.5;
+    for (let x = 14; x < s; x += 22) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.bezierCurveTo(x + 4, s * 0.4, x - 4, s * 0.7, x, s);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = '#5c3b1e';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(2.5, 2.5, s - 5, s - 5);
+    paintPaperGrain(ctx, s, s, 5513, 0.08);
+    return finalizeTexture(canvas);
+  }
+
+  private buildCloudTexture(): THREE.CanvasTexture {
+    const s = 128;
+    const { canvas, ctx } = makeCanvas(s, s);
+    const grad = ctx.createLinearGradient(0, 0, 0, s);
+    grad.addColorStop(0, '#fffdf7');
+    grad.addColorStop(0.68, '#f7f2e4');
+    grad.addColorStop(1, '#cfe4f2');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, s, s);
+    paintPaperGrain(ctx, s, s, 5514, 0.07);
+    return finalizeTexture(canvas);
+  }
+
+  private buildPumpkinSkinTexture(): THREE.CanvasTexture {
+    const s = 256;
+    const { canvas, ctx } = makeCanvas(s, s);
+    const grad = ctx.createLinearGradient(0, 0, 0, s);
+    grad.addColorStop(0, '#ff9c33');
+    grad.addColorStop(0.55, '#eb6f14');
+    grad.addColorStop(1, '#b5450b');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, s, s);
+
+    // Bold storybook vertical pumpkin ribs + sunlit highlight bands
+    for (let x = 0; x < s; x += 32) {
+      const rg = ctx.createLinearGradient(x, 0, x + 32, 0);
+      rg.addColorStop(0, 'rgba(92, 32, 6, 0.45)');
+      rg.addColorStop(0.3, 'rgba(255, 210, 120, 0.28)');
+      rg.addColorStop(0.75, 'rgba(235, 110, 20, 0.05)');
+      rg.addColorStop(1, 'rgba(92, 32, 6, 0.45)');
+      ctx.fillStyle = rg;
+      ctx.fillRect(x, 0, 32, s);
+
+      ctx.strokeStyle = '#5e2408';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, s);
+      ctx.stroke();
+    }
+    paintPaperGrain(ctx, s, s, 5515, 0.07);
+    return finalizeTexture(canvas, { repeat: [2, 1] });
+  }
+
+  private buildMushroomCapTexture(): THREE.CanvasTexture {
+    const s = 256;
+    const { canvas, ctx } = makeCanvas(s, s);
+    const grad = ctx.createRadialGradient(s * 0.5, s * 0.25, 16, s * 0.5, s * 0.5, s * 0.65);
+    grad.addColorStop(0, '#ff596c');
+    grad.addColorStop(0.65, '#db2a42');
+    grad.addColorStop(1, '#99182c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, s, s);
+
+    // Crisp chocolate-inked cream toadstool spots!
+    const spots: Array<[number, number, number]> = [
+      [42, 64, 24],
+      [126, 48, 28],
+      [210, 74, 22],
+      [78, 148, 26],
+      [174, 142, 24],
+      [34, 204, 18],
+      [130, 212, 20],
+      [224, 202, 18],
+    ];
+    for (const [sx, sy, sr] of spots) {
+      ctx.fillStyle = '#fff8e2';
+      ctx.strokeStyle = '#5c1820';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    paintPaperGrain(ctx, s, s, 5516, 0.07);
+    return finalizeTexture(canvas);
+  }
+
+  private buildWoodTokenTexture(): THREE.CanvasTexture {
+    const s = 256;
+    const { canvas, ctx } = makeCanvas(s, s);
+    ctx.fillStyle = '#f5ead0';
+    ctx.fillRect(0, 0, s, s);
+    // Warm concentric lathe-turned wood rings + soft grain lines
+    const cx = s / 2;
+    const cy = s / 2;
+    ctx.strokeStyle = 'rgba(130, 86, 42, 0.18)';
+    ctx.lineWidth = 3;
+    for (let r = 18; r < s * 0.62; r += 18) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(110, 68, 28, 0.12)';
+    ctx.lineWidth = 2;
+    for (let y = 12; y < s; y += 20) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.bezierCurveTo(s * 0.35, y - 6, s * 0.65, y + 6, s, y);
+      ctx.stroke();
+    }
+    paintPaperGrain(ctx, s, s, 5517, 0.08);
+    return finalizeTexture(canvas);
   }
 
   private buildShieldBadgeTexture(level: 'half' | 'full'): THREE.CanvasTexture {
@@ -1153,6 +1942,9 @@ export class CraftTextureLibrary {
     this.spriteTextures.clear();
     this.spriteBackTextures.clear();
     this.terrainTextures.clear();
+    this.foliageTextures.clear();
+    this.hillTextures.clear();
+    this.cliffTextures.clear();
   }
 }
 
@@ -1212,14 +2004,15 @@ export function createPaperStandeeRig(
   const height = UNIT_WORLD_HEIGHTS[visualKind] ?? 1.12;
   const { front, back, aspect } = textures.getSpriteTexturePair(visualKind);
 
-  // Slotted wooden cardboard standee base disc
+  // Slotted wooden cardboard standee base disc with turned wood grain!
   const baseRadius = isBoss ? 0.54 : 0.4;
   const baseHeight = 0.085;
   const baseGeo = new THREE.CylinderGeometry(baseRadius * 0.94, baseRadius, baseHeight, 24);
-  const baseColor = isBoss ? '#d99a26' : team === 'player' ? '#63a844' : '#c94c3d';
+  const baseColor = isBoss ? '#e0a22b' : team === 'player' ? '#6cb548' : '#d14f3f';
   const baseMat = new THREE.MeshStandardMaterial({
+    map: textures.woodTokenMap,
     color: new THREE.Color(baseColor),
-    roughness: 0.82,
+    roughness: 0.78,
     metalness: 0.04,
     bumpMap: textures.paperBump,
     bumpScale: 0.015,
@@ -1245,11 +2038,12 @@ export function createPaperStandeeRig(
   promoTrimMesh.visible = false;
   root.add(promoTrimMesh);
 
-  // Inner cream craft-paper disc top
+  // Inner cream craft-wood disc top
   const innerDiscGeo = new THREE.CylinderGeometry(baseRadius * 0.8, baseRadius * 0.8, 0.018, 24);
   const innerDiscMat = new THREE.MeshStandardMaterial({
-    color: '#e8cfa6',
-    roughness: 0.9,
+    map: textures.woodTokenMap,
+    color: '#f2dfb8',
+    roughness: 0.86,
   });
   const innerDisc = new THREE.Mesh(innerDiscGeo, innerDiscMat);
   innerDisc.position.y = baseHeight + 0.004;

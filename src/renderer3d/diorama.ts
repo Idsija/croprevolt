@@ -204,7 +204,7 @@ export class PaperDioramaWorld {
       roughness: 0.92,
     });
     const cliffSideMat = new THREE.MeshStandardMaterial({
-      map: this.textures.cliffSideMap,
+      map: this.textures.getCliffSideTexture(theme),
       bumpMap: this.textures.paperBump,
       bumpScale: 0.025,
       roughness: 0.9,
@@ -284,7 +284,7 @@ export class PaperDioramaWorld {
           this.addCompostSprout(wp.x, surfaceY, wp.z, x * 7 + y * 13);
         } else if (tile.terrain === 'sunbeam') {
           this.addSunbeamShaft(wp.x, surfaceY, wp.z);
-        } else if (tile.terrain === 'grass' && (x * 13 + y * 29) % 5 === 0) {
+        } else if (tile.terrain === 'grass' && (x * 13 + y * 29) % 3 === 0) {
           this.addTinyGrassTuft(wp.x, surfaceY, wp.z, theme, x * 17 + y * 31);
         }
       }
@@ -577,14 +577,19 @@ export class PaperDioramaWorld {
       bumpScale: 0.02,
     });
     const beamMat = new THREE.MeshStandardMaterial({
-      color: overLava ? '#5c4b42' : '#7b4922',
-      roughness: 0.88,
+      map: this.textures.treeBarkMap,
+      color: overLava ? '#6e5c52' : '#9c6230',
+      roughness: 0.86,
     });
 
-    const deck = new THREE.Mesh(
-      new THREE.BoxGeometry(deckW * 0.94, deckH, deckW),
-      [beamMat, beamMat, deckTopMat, beamMat, beamMat, beamMat]
-    );
+    const deck = compactMultiMaterialMesh(new THREE.BoxGeometry(deckW * 0.94, deckH, deckW), [
+      beamMat,
+      beamMat,
+      deckTopMat,
+      beamMat,
+      beamMat,
+      beamMat,
+    ]);
     deck.position.y = -deckH / 2;
     deck.castShadow = true;
     deck.receiveShadow = true;
@@ -664,7 +669,7 @@ export class PaperDioramaWorld {
     // Cute miniature wooden signpost at corner so warp pipe reads cleanly from far away
     const post = new THREE.Mesh(
       new THREE.BoxGeometry(0.06, 0.36, 0.06),
-      new THREE.MeshStandardMaterial({ color: '#8f592c', roughness: 0.88 })
+      new THREE.MeshStandardMaterial({ map: this.textures.treeBarkMap, color: '#9e6634', roughness: 0.88 })
     );
     post.position.set(0.42, 0.18, -0.38);
     post.castShadow = true;
@@ -684,48 +689,45 @@ export class PaperDioramaWorld {
     const g = new THREE.Group();
     g.position.set(x, y, z);
 
-    // Cream mushroom stem
+    // Cream mushroom stem with warm wood/paper texture
     const stem = new THREE.Mesh(
       new THREE.CylinderGeometry(0.18, 0.24, 0.24, 12),
-      new THREE.MeshStandardMaterial({ color: '#f7ebd2', roughness: 0.85 })
+      new THREE.MeshStandardMaterial({
+        map: this.textures.woodTokenMap,
+        color: '#fbf0d9',
+        roughness: 0.85,
+      })
     );
     stem.position.y = 0.12;
     stem.castShadow = true;
     g.add(stem);
 
-    // Vibrant red bouncy toadstool cap
+    // Vibrant storybook polka-dot toadstool cap with painted texture + cream under-gills!
     const capGroup = new THREE.Group();
     capGroup.position.y = 0.24;
     const cap = new THREE.Mesh(
-      new THREE.SphereGeometry(0.46, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+      new THREE.SphereGeometry(0.46, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.56),
       new THREE.MeshStandardMaterial({
-        color: '#e53953',
-        emissive: '#6e1021',
-        emissiveIntensity: 0.18,
-        roughness: 0.55,
+        map: this.textures.mushroomCapMap,
+        emissive: '#540c18',
+        emissiveIntensity: 0.14,
+        roughness: 0.52,
+        bumpMap: this.textures.paperBump,
+        bumpScale: 0.015,
       })
     );
-    cap.scale.set(1.04, 0.58, 1.04);
+    cap.scale.set(1.06, 0.6, 1.06);
     cap.castShadow = true;
     cap.receiveShadow = true;
     capGroup.add(cap);
 
-    // Cute cream polka-dot spots on top of the mushroom cap!
-    const spotMat = new THREE.MeshBasicMaterial({ color: '#fff8e2' });
-    const spotGeo = new THREE.SphereGeometry(0.085, 8, 6);
-    const spotOffsets: Array<[number, number, number]> = [
-      [0, 0.25, 0],
-      [0.24, 0.17, 0.12],
-      [-0.22, 0.17, 0.16],
-      [0.14, 0.16, -0.24],
-      [-0.18, 0.16, -0.18],
-    ];
-    for (const [sx, sy, sz] of spotOffsets) {
-      const spot = new THREE.Mesh(spotGeo, spotMat);
-      spot.scale.set(1, 0.45, 1);
-      spot.position.set(sx, sy, sz);
-      capGroup.add(spot);
-    }
+    // Cream ruffled gills disc under cap rim
+    const gills = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.44, 0.44, 0.03, 16),
+      new THREE.MeshStandardMaterial({ color: '#f5e4c2', roughness: 0.9 })
+    );
+    gills.position.y = 0.02;
+    capGroup.add(gills);
 
     g.add(capGroup);
 
@@ -951,28 +953,57 @@ export class PaperDioramaWorld {
   }
 
   private addTinyGrassTuft(x: number, y: number, z: number, theme: BoardTheme, seed: number): void {
-    const ox = ((seed % 5) - 2) * 0.17;
-    const oz = (((seed * 3) % 5) - 2) * 0.17;
-    const color = theme === 'autumn' ? '#b8832c' : '#5f9430';
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.88, side: THREE.DoubleSide });
+    // Keep micro-props near tile corners so standees & tactical rings stay crystal clear
+    const cornerX = (seed % 2 === 0 ? 1 : -1) * (0.31 + ((seed >> 2) % 3) * 0.05);
+    const cornerZ = (((seed >> 1) % 2 === 0) ? 1 : -1) * (0.31 + ((seed >> 3) % 3) * 0.05);
+    const color = theme === 'autumn' ? '#c98e2b' : theme === 'greenhouse' ? '#58a836' : '#58a62d';
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide });
     const tuft = new THREE.Group();
-    tuft.position.set(x + ox, y, z + oz);
-    const bladeGeo = new THREE.ConeGeometry(0.024, 0.13, 3);
+    tuft.position.set(x + cornerX, y, z + cornerZ);
+    const bladeGeo = new THREE.ConeGeometry(0.028, 0.16, 4);
     for (let i = -1; i <= 1; i++) {
       const b = new THREE.Mesh(bladeGeo, mat);
-      b.position.set(i * 0.032, 0.055, 0);
-      b.rotation.z = -i * 0.28;
+      b.position.set(i * 0.036, 0.07, (i === 0 ? 0.02 : -0.015));
+      b.rotation.z = -i * 0.3;
       tuft.add(b);
     }
-    // Tiny spring wildflower dot
-    if (theme === 'spring' && seed % 2 === 0) {
-      const flw = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.038, 0.038, 0.012, 6),
-        new THREE.MeshStandardMaterial({ color: seed % 4 === 0 ? '#fff6cc' : '#f7a6b9', roughness: 0.75 })
+
+    // Seasonal micro-detail: bright spring/greenhouse wildflower, mossy pebble, or autumn leaf!
+    if (seed % 5 === 0) {
+      // Cute smooth miniature garden pebble beside grass blades
+      const pebble = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(0.055, 0),
+        new THREE.MeshStandardMaterial({ map: this.textures.stoneMap, roughness: 0.9, flatShading: true })
       );
-      flw.position.set(0.05, 0.11, 0.02);
+      pebble.scale.set(1.2, 0.65, 1.0);
+      pebble.position.set(-0.07, 0.028, 0.04);
+      tuft.add(pebble);
+    } else if (theme !== 'autumn' && seed % 2 === 0) {
+      const flowerColors = theme === 'greenhouse' ? ['#fff6c4', '#ffd86b'] : ['#fffdf2', '#ffacc4', '#ffe169'];
+      const flw = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.048, 0.048, 0.014, 7),
+        new THREE.MeshStandardMaterial({ color: flowerColors[seed % flowerColors.length], roughness: 0.72 })
+      );
+      flw.position.set(0.055, 0.13, 0.02);
       flw.rotation.x = 0.35;
-      tuft.add(flw);
+      const center = new THREE.Mesh(
+        new THREE.SphereGeometry(0.018, 6, 5),
+        new THREE.MeshBasicMaterial({ color: '#f5b82e' })
+      );
+      center.position.set(0.055, 0.142, 0.024);
+      tuft.add(flw, center);
+    } else if (theme === 'autumn' && seed % 2 === 0) {
+      const leaf = new THREE.Mesh(
+        new THREE.CircleGeometry(0.058, 5),
+        new THREE.MeshStandardMaterial({
+          color: seed % 4 === 0 ? '#d94826' : '#eb9226',
+          roughness: 0.8,
+          side: THREE.DoubleSide,
+        })
+      );
+      leaf.rotation.x = -Math.PI / 2 + 0.12;
+      leaf.position.set(0.06, 0.015, 0.04);
+      tuft.add(leaf);
     }
     this.sceneryGroup.add(tuft);
   }
@@ -1036,7 +1067,11 @@ export class PaperDioramaWorld {
     const arch = new THREE.Group();
     arch.position.set(cx, 0, zEdge);
 
-    const postMat = new THREE.MeshStandardMaterial({ color: '#9c6230', roughness: 0.88 });
+    const postMat = new THREE.MeshStandardMaterial({
+      map: this.textures.treeBarkMap,
+      color: '#b0713a',
+      roughness: 0.86,
+    });
     const postGeo = new THREE.BoxGeometry(0.18, 1.55, 0.18);
     for (const side of [-1, 1]) {
       const post = new THREE.Mesh(postGeo, postMat);
@@ -1082,13 +1117,15 @@ export class PaperDioramaWorld {
 
   private buildPerimeterFences(boardW: number, boardH: number, theme: BoardTheme): void {
     const woodMat = new THREE.MeshStandardMaterial({
-      color: theme === 'greenhouse' ? '#c8d6c4' : '#f2e4c7',
-      roughness: 0.85,
+      map: this.textures.fenceWoodMap,
+      color: theme === 'greenhouse' ? '#d4e8cf' : theme === 'autumn' ? '#ebd2ab' : '#fff6e0',
+      roughness: 0.84,
       bumpMap: this.textures.paperBump,
       bumpScale: 0.015,
     });
     const railMat = new THREE.MeshStandardMaterial({
-      color: theme === 'greenhouse' ? '#9cb398' : '#d8c096',
+      map: this.textures.fenceWoodMap,
+      color: theme === 'greenhouse' ? '#aac7a4' : '#e0c496',
       roughness: 0.88,
     });
 
@@ -1137,34 +1174,37 @@ export class PaperDioramaWorld {
   private buildStageBackdrop(boardW: number, boardH: number, theme: BoardTheme): void {
     const northZ = -boardH / 2 - 1.15;
 
-    // Staggered Paper Mario Cardboard Hills behind the garden!
-    const hillColors =
-      theme === 'autumn'
-        ? ['#d68e38', '#b85a2c', '#9c4324']
-        : theme === 'greenhouse'
-          ? ['#6fa652', '#528741', '#427038']
-          : ['#85b84b', '#6ba03c', '#578734'];
-
+    // Staggered Hand-Painted Watercolor Cardboard Hills behind the garden!
     const hillSpecs = [
-      { x: -boardW * 0.45, z: northZ - 1.1, r: 2.5, h: 1.5, col: hillColors[0] },
-      { x: boardW * 0.38, z: northZ - 1.4, r: 2.8, h: 1.7, col: hillColors[1] },
-      { x: 0.1, z: northZ - 2.3, r: 3.6, h: 2.2, col: hillColors[2] },
+      { x: -boardW * 0.45, z: northZ - 1.1, r: 2.5, h: 1.55 },
+      { x: boardW * 0.38, z: northZ - 1.4, r: 2.8, h: 1.75 },
+      { x: 0.1, z: northZ - 2.3, r: 3.7, h: 2.3 },
     ];
 
-    for (const hs of hillSpecs) {
+    hillSpecs.forEach((hs, idx) => {
       const hillShape = new THREE.Shape();
       hillShape.absarc(0, 0, hs.r, 0, Math.PI, false);
       hillShape.lineTo(-hs.r, 0);
       const extrude = new THREE.ExtrudeGeometry(hillShape, {
-        depth: 0.14,
+        depth: 0.16,
         bevelEnabled: true,
-        bevelThickness: 0.03,
-        bevelSize: 0.03,
+        bevelThickness: 0.035,
+        bevelSize: 0.035,
         bevelSegments: 2,
       });
+      // Normalize UVs across [0..1] so the painted hill meadow & wildflowers map cleanly!
+      const posAttr = extrude.attributes.position;
+      const uvAttr = extrude.attributes.uv;
+      for (let i = 0; i < posAttr.count; i++) {
+        const vx = posAttr.getX(i);
+        const vy = posAttr.getY(i);
+        uvAttr.setXY(i, (vx + hs.r) / (hs.r * 2), 1 - Math.max(0, Math.min(1, vy / hs.r)));
+      }
+      uvAttr.needsUpdate = true;
+
       const hillMat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(hs.col),
-        roughness: 0.9,
+        map: this.textures.getHillBackdropTexture(theme, idx),
+        roughness: 0.88,
         bumpMap: this.textures.paperBump,
         bumpScale: 0.02,
       });
@@ -1173,16 +1213,16 @@ export class PaperDioramaWorld {
       hill.scale.set(1, hs.h / hs.r, 1);
       hill.castShadow = true;
       hill.receiveShadow = true;
-      addInkEdges(hill, 0x3b2410, 0.42, 32);
+      addInkEdges(hill, 0x3b2410, 0.5, 32);
       this.sceneryGroup.add(hill);
-    }
+    });
 
-    // Layered Folded-Paper Trees flanking the diorama for deep parallax!
+    // Layered Cartoon-Watercolor Trees flanking the diorama (mixed cherry blossom / orchard / maple crowns!)
     const treePositions = [
-      { x: -boardW / 2 - 1.35, z: -boardH * 0.36, s: 1.08 },
-      { x: boardW / 2 + 1.35, z: -boardH * 0.3, s: 0.98 },
-      { x: -boardW / 2 - 1.5, z: boardH * 0.14, s: 0.88 },
-      { x: boardW / 2 + 1.48, z: boardH * 0.22, s: 0.94 },
+      { x: -boardW / 2 - 1.4, z: -boardH * 0.36, s: 1.12 },
+      { x: boardW / 2 + 1.42, z: -boardH * 0.3, s: 1.04 },
+      { x: -boardW / 2 - 1.52, z: boardH * 0.14, s: 0.94 },
+      { x: boardW / 2 + 1.5, z: boardH * 0.22, s: 1.0 },
     ];
     for (let i = 0; i < treePositions.length; i++) {
       const tp = treePositions[i];
@@ -1192,17 +1232,62 @@ export class PaperDioramaWorld {
     // Theme-specific Centerpiece Stage Prop behind row 0
     if (theme === 'greenhouse') {
       this.addGreenhouseArches(boardW, northZ + 0.55);
+      this.addMiniPumpkins(-boardW / 2 - 0.95, -0.68, -boardH * 0.06);
     } else if (theme === 'autumn') {
-      this.addMiniatureBarn(boardW * 0.36, -0.68, northZ - 0.15, '#9f3b26');
-      this.addMiniPumpkins(-boardW / 2 - 0.9, -0.68, -boardH * 0.08);
+      this.addMiniatureBarn(boardW * 0.36, -0.68, northZ - 0.15, true);
+      this.addMiniPumpkins(-boardW / 2 - 0.95, -0.68, -boardH * 0.08);
     } else {
-      this.addMiniatureBarn(-boardW * 0.32, -0.68, northZ - 0.2, '#c84635');
+      this.addMiniatureBarn(-boardW * 0.32, -0.68, northZ - 0.2, false);
     }
 
-    // Floating Paper Mario Clouds mounted on thin brass wire rods!
+    // Cheerful Hanging Cut-Paper Sun Medallion suspended on brass wire behind the hills!
+    const sunGroup = new THREE.Group();
+    const sunX = theme === 'autumn' ? -boardW * 0.38 : boardW * 0.42;
+    const sunY = 3.55;
+    const sunZ = northZ - 2.65;
+    sunGroup.position.set(sunX, sunY, sunZ);
+    const sunCoreMat = new THREE.MeshStandardMaterial({
+      color: theme === 'autumn' ? '#ff9933' : '#ffe159',
+      emissive: theme === 'autumn' ? '#b34b00' : '#d48d00',
+      emissiveIntensity: 0.32,
+      roughness: 0.55,
+    });
+    const sunDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.1, 18), sunCoreMat);
+    sunDisc.rotation.x = Math.PI / 2;
+    addInkEdges(sunDisc, 0x6b3a10, 0.5);
+    sunGroup.add(sunDisc);
+    const rayGeo = new THREE.ConeGeometry(0.11, 0.28, 3);
+    const rayMat = new THREE.MeshStandardMaterial({
+      color: theme === 'autumn' ? '#ffba42' : '#fff08a',
+      emissive: '#b36b00',
+      emissiveIntensity: 0.25,
+      roughness: 0.6,
+    });
+    for (let r = 0; r < 10; r++) {
+      const a = (r / 10) * Math.PI * 2;
+      const ray = new THREE.Mesh(rayGeo, rayMat);
+      ray.position.set(Math.cos(a) * 0.62, Math.sin(a) * 0.62, 0);
+      ray.rotation.z = a - Math.PI / 2;
+      sunGroup.add(ray);
+    }
+    this.sceneryGroup.add(sunGroup);
+    const sunWire = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.015, 0.015, sunY + 0.68, 6),
+      new THREE.MeshStandardMaterial({ color: '#c4a158', metalness: 0.6, roughness: 0.4 })
+    );
+    sunWire.position.set(sunX, (sunY - 0.68) / 2, sunZ - 0.05);
+    this.sceneryGroup.add(sunWire);
+    this.animatedParts.push({
+      update: (time) => {
+        sunGroup.rotation.z = time * 0.22;
+        sunGroup.position.y = sunY + Math.sin(time * 0.9) * 0.08;
+      },
+    });
+
+    // Floating Watercolor Paper Mario Clouds mounted on thin brass wire rods!
     const cloudConfigs = [
-      { x: -boardW * 0.32, y: 2.9, z: northZ - 1.9, s: 1.0 },
-      { x: boardW * 0.36, y: 3.3, z: northZ - 2.3, s: 1.15 },
+      { x: -boardW * 0.28, y: 2.95, z: northZ - 1.9, s: 1.04 },
+      { x: boardW * 0.16, y: 3.35, z: northZ - 2.35, s: 1.18 },
     ];
     for (let i = 0; i < cloudConfigs.length; i++) {
       const c = cloudConfigs[i];
@@ -1233,42 +1318,81 @@ export class PaperDioramaWorld {
     tree.position.set(x, y, z);
     tree.scale.setScalar(scale);
 
-    const trunkMat = new THREE.MeshStandardMaterial({ color: '#7a4b26', roughness: 0.9 });
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, 1.35, 8), trunkMat);
-    trunk.position.y = 0.68;
+    // Grassy soil root mound + tiny pebble anchoring the tree to the desk!
+    const moundMat = new THREE.MeshStandardMaterial({
+      color: theme === 'autumn' ? '#c99338' : '#76b53c',
+      roughness: 0.9,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.015,
+    });
+    const mound = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.56, 0.14, 10), moundMat);
+    mound.position.y = 0.07;
+    mound.receiveShadow = true;
+    tree.add(mound);
+
+    const trunkMat = new THREE.MeshStandardMaterial({
+      map: this.textures.treeBarkMap,
+      roughness: 0.9,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.02,
+    });
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.18, 1.35, 9), trunkMat);
+    trunk.position.y = 0.72;
     trunk.castShadow = true;
     addInkEdges(trunk, 0x3b2210, 0.5);
     tree.add(trunk);
 
-    const palette =
+    const foliageVariant =
       theme === 'autumn'
-        ? ['#d95f2b', '#e8962e', '#b83c24']
+        ? idx % 2 === 0
+          ? 'autumn_crimson'
+          : 'autumn_gold'
         : theme === 'greenhouse'
-          ? ['#4f9a49', '#6eb854', '#3f7f3c']
-          : ['#5da13d', '#7cc24e', '#4c8832'];
+          ? 'summer_citrus'
+          : idx % 2 === 1
+            ? 'spring_blossom'
+            : 'spring_green';
 
-    const tiers = [
-      { y: 1.32, r: 0.76, h: 0.55 },
-      { y: 1.78, r: 0.6, h: 0.5 },
-      { y: 2.18, r: 0.4, h: 0.42 },
-    ];
-    tiers.forEach((tier, ti) => {
-      const cone = new THREE.Mesh(
-        new THREE.ConeGeometry(tier.r, tier.h, 7),
-        new THREE.MeshStandardMaterial({
-          color: new THREE.Color(palette[(ti + idx) % palette.length]),
-          roughness: 0.88,
-          bumpMap: this.textures.paperBump,
-          bumpScale: 0.015,
-        })
-      );
-      cone.position.y = tier.y;
-      cone.rotation.y = ti * 0.5;
-      cone.castShadow = true;
-      cone.receiveShadow = true;
-      addInkEdges(cone, 0x3a2410, 0.45);
-      tree.add(cone);
+    const foliageMat = new THREE.MeshStandardMaterial({
+      map: this.textures.getTreeFoliageTexture(foliageVariant),
+      roughness: 0.84,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.018,
     });
+
+    if (idx % 2 === 1 || theme === 'autumn') {
+      // Plump cartoon storybook round-crown tree (cherry blossom / golden maple / citrus!)
+      const crownSpecs: Array<[number, number, number, number]> = [
+        [0, 1.65, 0, 0.66],
+        [-0.42, 1.42, 0.16, 0.48],
+        [0.44, 1.45, -0.1, 0.46],
+        [0.04, 2.02, 0.06, 0.44],
+      ];
+      for (const [ox, oy, oz, r] of crownSpecs) {
+        const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), foliageMat);
+        puff.position.set(ox, oy, oz);
+        puff.rotation.set(ox, idx * 0.7, oz);
+        puff.castShadow = true;
+        puff.receiveShadow = true;
+        tree.add(puff);
+      }
+    } else {
+      // Layered scalloped orchard pine with textured painted foliage tiers!
+      const tiers = [
+        { y: 1.32, r: 0.82, h: 0.6 },
+        { y: 1.8, r: 0.64, h: 0.54 },
+        { y: 2.22, r: 0.43, h: 0.45 },
+      ];
+      tiers.forEach((tier, ti) => {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(tier.r, tier.h, 9), foliageMat);
+        cone.position.y = tier.y;
+        cone.rotation.y = ti * 0.6;
+        cone.castShadow = true;
+        cone.receiveShadow = true;
+        addInkEdges(cone, 0x3a2410, 0.35);
+        tree.add(cone);
+      });
+    }
 
     this.sceneryGroup.add(tree);
 
@@ -1279,59 +1403,136 @@ export class PaperDioramaWorld {
     });
   }
 
-  private addMiniatureBarn(x: number, y: number, z: number, wallColor: string): void {
+  private addMiniatureBarn(x: number, y: number, z: number, isAutumn = false): void {
     const barn = new THREE.Group();
     barn.position.set(x, y, z);
-    barn.rotation.y = 0.22;
+    barn.rotation.y = isAutumn ? -0.2 : 0.22;
 
     const wallMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(wallColor),
+      map: this.textures.barnWallMap,
+      color: isAutumn ? '#d99888' : '#ffffff',
+      roughness: 0.86,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.018,
+    });
+    const trimMat = new THREE.MeshStandardMaterial({
+      map: this.textures.fenceWoodMap,
+      color: '#fff8e6',
+      roughness: 0.84,
+    });
+    const roofMat = new THREE.MeshStandardMaterial({
+      map: this.textures.barnRoofMap,
       roughness: 0.88,
       bumpMap: this.textures.paperBump,
-      bumpScale: 0.015,
+      bumpScale: 0.02,
     });
-    const trimMat = new THREE.MeshStandardMaterial({ color: '#fbf2dc', roughness: 0.85 });
-    const roofMat = new THREE.MeshStandardMaterial({ color: '#61412b', roughness: 0.9 });
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.35, 1.25), wallMat);
-    body.position.y = 0.675;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.78, 1.4, 1.3), wallMat);
+    body.position.y = 0.7;
     body.castShadow = true;
     body.receiveShadow = true;
     addInkEdges(body);
     barn.add(body);
 
-    // Pitched paper roof
-    const roofGeo = new THREE.ConeGeometry(1.42, 0.85, 4);
+    // Shingled pitched storybook roof
+    const roofGeo = new THREE.ConeGeometry(1.48, 0.9, 4);
     roofGeo.rotateY(Math.PI / 4);
     const roof = new THREE.Mesh(roofGeo, roofMat);
-    roof.position.y = 1.72;
-    roof.scale.set(1.08, 1, 0.82);
+    roof.position.y = 1.82;
+    roof.scale.set(1.1, 1, 0.84);
     roof.castShadow = true;
     addInkEdges(roof);
     barn.add(roof);
 
-    // Barn X-doors
-    const door = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.06), trimMat);
-    door.position.set(0, 0.36, 0.63);
+    // Framed white barn X-doors + dark hayloft window with golden hay peeking out!
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.74, 0.07), trimMat);
+    door.position.set(0, 0.37, 0.66);
     addInkEdges(door);
     barn.add(door);
 
+    const loftFrame = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.32, 0.07), trimMat);
+    loftFrame.position.set(0, 1.06, 0.66);
+    const loftInner = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.22, 0.08),
+      new THREE.MeshStandardMaterial({ color: '#3b2010', roughness: 0.9 })
+    );
+    loftInner.position.set(0, 1.06, 0.67);
+    const hayPeek = new THREE.Mesh(
+      new THREE.BoxGeometry(0.24, 0.1, 0.12),
+      new THREE.MeshStandardMaterial({ map: this.textures.haystackMap, roughness: 0.9 })
+    );
+    hayPeek.position.set(0, 1.0, 0.69);
+    barn.add(loftFrame, loftInner, hayPeek);
+
+    // Cute Cylindrical Storybook Silo beside the Barn!
+    const siloSide = isAutumn ? 1 : -1;
+    const silo = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.38, 1.72, 14), wallMat);
+    silo.position.set(siloSide * 1.16, 0.86, -0.14);
+    silo.castShadow = true;
+    silo.receiveShadow = true;
+    const siloDome = new THREE.Mesh(
+      new THREE.SphereGeometry(0.37, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      roofMat
+    );
+    siloDome.position.set(siloSide * 1.16, 1.72, -0.14);
+    siloDome.castShadow = true;
+    barn.add(silo, siloDome);
+
+    // Gently spinning Wooden Farm Windmill Tower on the opposite side of the Barn!
+    const millTower = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.32, 1.65, 8),
+      new THREE.MeshStandardMaterial({ map: this.textures.fenceWoodMap, color: '#e6c99c', roughness: 0.88 })
+    );
+    millTower.position.set(-siloSide * 1.24, 0.82, -0.18);
+    millTower.castShadow = true;
+    addInkEdges(millTower, 0x452a16, 0.45);
+    barn.add(millTower);
+
+    const blades = new THREE.Group();
+    blades.position.set(-siloSide * 1.24, 1.56, 0.06);
+    const bladeMat = new THREE.MeshStandardMaterial({
+      map: this.textures.fenceWoodMap,
+      color: '#fff8e2',
+      roughness: 0.82,
+    });
+    for (let b = 0; b < 4; b++) {
+      const sail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.62, 0.03), bladeMat);
+      const ang = (b / 4) * Math.PI * 2;
+      sail.position.set(Math.cos(ang) * 0.34, Math.sin(ang) * 0.34, 0);
+      sail.rotation.z = ang - Math.PI / 2;
+      sail.castShadow = true;
+      addInkEdges(sail, 0x452a16, 0.55);
+      blades.add(sail);
+    }
+    const hub = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.08, 0.08, 10),
+      new THREE.MeshStandardMaterial({ color: '#c44536', roughness: 0.7 })
+    );
+    hub.rotation.x = Math.PI / 2;
+    blades.add(hub);
+    barn.add(blades);
+
     this.sceneryGroup.add(barn);
+    this.animatedParts.push({
+      update: (time) => {
+        blades.rotation.z = -time * 0.85;
+      },
+    });
   }
 
   private addGreenhouseArches(boardW: number, zPos: number): void {
-    const brassMat = new THREE.MeshStandardMaterial({ color: '#b59247', metalness: 0.35, roughness: 0.55 });
+    const brassMat = new THREE.MeshStandardMaterial({ color: '#c7a048', metalness: 0.42, roughness: 0.45 });
     const glassMat = new THREE.MeshStandardMaterial({
-      color: '#d9f2e6',
+      color: '#ccf7e6',
       transparent: true,
-      opacity: 0.24,
-      roughness: 0.2,
+      opacity: 0.28,
+      roughness: 0.16,
       side: THREE.DoubleSide,
     });
     const archGroup = new THREE.Group();
     archGroup.position.set(0, -0.1, zPos);
     const radius = Math.min(4.2, boardW * 0.44);
-    const ribGeo = new THREE.TorusGeometry(radius, 0.075, 8, 24, Math.PI);
+    const ribGeo = new THREE.TorusGeometry(radius, 0.08, 8, 24, Math.PI);
     for (const dz of [0, -0.9]) {
       const rib = new THREE.Mesh(ribGeo, brassMat);
       rib.position.z = dz;
@@ -1350,19 +1551,27 @@ export class PaperDioramaWorld {
   }
 
   private addMiniPumpkins(x: number, y: number, z: number): void {
-    const mat = new THREE.MeshStandardMaterial({ color: '#e67824', roughness: 0.82 });
-    const stemMat = new THREE.MeshStandardMaterial({ color: '#4d6e26', roughness: 0.9 });
+    const mat = new THREE.MeshStandardMaterial({
+      map: this.textures.pumpkinSkinMap,
+      roughness: 0.65,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.015,
+    });
+    const stemMat = new THREE.MeshStandardMaterial({ color: '#4d7a26', roughness: 0.88 });
     for (const [ox, oz, s] of [
-      [0, 0, 0.34],
-      [0.42, 0.32, 0.24],
+      [0, 0, 0.36],
+      [0.44, 0.34, 0.26],
+      [-0.3, 0.42, 0.22],
     ]) {
       const p = new THREE.Group();
       p.position.set(x + ox, y + s * 0.72, z + oz);
-      const body = new THREE.Mesh(new THREE.SphereGeometry(s, 10, 8), mat);
-      body.scale.set(1.15, 0.78, 1.15);
+      const body = new THREE.Mesh(new THREE.SphereGeometry(s, 14, 10), mat);
+      body.scale.set(1.16, 0.78, 1.16);
       body.castShadow = true;
-      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.16, 5), stemMat);
+      body.receiveShadow = true;
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.055, 0.18, 6), stemMat);
       stem.position.y = s * 0.82;
+      stem.rotation.z = -0.2;
       p.add(body, stem);
       this.sceneryGroup.add(p);
     }
@@ -1371,18 +1580,24 @@ export class PaperDioramaWorld {
   private createPaperCloud(scale: number): THREE.Group {
     const g = new THREE.Group();
     const mat = new THREE.MeshStandardMaterial({
-      color: '#fffbf0',
-      roughness: 0.92,
+      map: this.textures.cloudMap,
+      roughness: 0.88,
       bumpMap: this.textures.paperBump,
       bumpScale: 0.01,
     });
+    const rimMat = new THREE.MeshBasicMaterial({ color: '#5c422c' });
     const puffs = [
-      { x: 0, y: 0.12, r: 0.48 },
-      { x: -0.42, y: 0, r: 0.36 },
-      { x: 0.44, y: -0.02, r: 0.34 },
+      { x: 0, y: 0.14, r: 0.5 },
+      { x: -0.44, y: 0, r: 0.37 },
+      { x: 0.45, y: -0.02, r: 0.35 },
     ];
     for (const pf of puffs) {
-      const disc = new THREE.Mesh(new THREE.CylinderGeometry(pf.r, pf.r, 0.12, 14), mat);
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(pf.r + 0.035, pf.r + 0.035, 0.08, 16), rimMat);
+      rim.rotation.x = Math.PI / 2;
+      rim.position.set(pf.x, pf.y, -0.03);
+      g.add(rim);
+
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(pf.r, pf.r, 0.12, 16), mat);
       disc.rotation.x = Math.PI / 2;
       disc.position.set(pf.x, pf.y, 0);
       disc.castShadow = true;
@@ -1502,7 +1717,7 @@ export class PaperDioramaWorld {
       addInkEdges(box, 0x3b2110, 0.78);
       group.add(box);
     } else if (cover.kind === 'haystack') {
-      // Tall Full Cover: unmistakably higher than crates so direct LoS reads instantly in 3D!
+      // Tall Full Cover: golden straw tiers with braided twine belts & top straw crown!
       height = 1.24;
       const hayMat = new THREE.MeshStandardMaterial({
         map: this.textures.haystackMap,
@@ -1523,47 +1738,91 @@ export class PaperDioramaWorld {
       tier3.position.y = 1.06;
       markPickable(tier3);
 
-      group.add(tier1, tier2, tier3);
+      // 3D rustic twine rope belt cinched around the waist
+      const rope = new THREE.Mesh(
+        new THREE.TorusGeometry(0.43, 0.032, 6, 16),
+        new THREE.MeshStandardMaterial({ color: '#7a451c', roughness: 0.95 })
+      );
+      rope.rotation.x = Math.PI / 2;
+      rope.position.y = 0.46;
+
+      group.add(tier1, tier2, tier3, rope);
     } else if (cover.kind === 'stone') {
-      // Tall Indestructible Full Cover boulder
+      // Tall Indestructible Full Cover Sculpted Mossy Boulder Cairn!
       height = 1.18;
       const stoneMat = new THREE.MeshStandardMaterial({
         map: this.textures.stoneMap,
-        roughness: 0.94,
+        roughness: 0.92,
+        bumpMap: this.textures.paperBump,
+        bumpScale: 0.025,
         flatShading: true,
       });
-      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.56, 0), stoneMat);
-      rock.scale.set(0.95, 1.14, 0.92);
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.54, 0), stoneMat);
+      rock.scale.set(0.96, 1.14, 0.92);
       rock.position.y = 0.56;
       rock.rotation.set(0.25, (pos.x * 1.1 + pos.y * 0.7) % 3, 0.15);
       markPickable(rock);
-      addInkEdges(rock, 0x3a3f3d, 0.6, 20);
+      addInkEdges(rock, 0x353b39, 0.62, 20);
       group.add(rock);
 
-      // Paper-cutout moss cap
-      const moss = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.28, 0.34, 0.08, 7),
-        new THREE.MeshStandardMaterial({ color: '#6ca342', roughness: 0.9 })
+      // Nestled companion river cobblestone at base
+      const sideRock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.26, 0), stoneMat);
+      sideRock.scale.set(1.1, 0.78, 0.95);
+      sideRock.position.set(-0.34, 0.2, 0.24);
+      sideRock.rotation.set(0.3, pos.y * 0.9, -0.2);
+      markPickable(sideRock);
+      addInkEdges(sideRock, 0x353b39, 0.52, 22);
+      group.add(sideRock);
+
+      // Velvety multi-tuft emerald moss blanket perched on top
+      const mossMat = new THREE.MeshStandardMaterial({
+        color: '#6fb838',
+        roughness: 0.88,
+        bumpMap: this.textures.paperBump,
+        bumpScale: 0.02,
+      });
+      const moss1 = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.34, 0.09, 8), mossMat);
+      moss1.position.set(0.06, 1.1, 0.02);
+      moss1.rotation.z = -0.18;
+      const moss2 = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.07, 7), mossMat);
+      moss2.position.set(-0.2, 0.94, 0.2);
+      moss2.rotation.set(0.3, 0, 0.25);
+      group.add(moss1, moss2);
+
+      // Cute tiny spotted toadstool sprouting beside the mossy boulder base!
+      const miniStem = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.032, 0.042, 0.12, 6),
+        new THREE.MeshStandardMaterial({ color: '#f7ebd2', roughness: 0.88 })
       );
-      moss.position.set(0.06, 1.12, 0.02);
-      moss.rotation.z = -0.18;
-      group.add(moss);
+      miniStem.position.set(0.36, 0.06, 0.28);
+      const miniCap = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, 10, 7, 0, Math.PI * 2, 0, Math.PI * 0.56),
+        new THREE.MeshStandardMaterial({ map: this.textures.mushroomCapMap, roughness: 0.6 })
+      );
+      miniCap.position.set(0.36, 0.11, 0.28);
+      miniCap.scale.set(1, 0.72, 1);
+      group.add(miniStem, miniCap);
     } else if (cover.kind === 'beehive') {
       height = 0.88;
-      // Tree stump
+      // Bark-textured Tree Stump!
       const stump = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.34, 0.42, 0.26, 9),
-        new THREE.MeshStandardMaterial({ color: '#8f5a30', roughness: 0.92 })
+        new THREE.CylinderGeometry(0.34, 0.42, 0.26, 10),
+        new THREE.MeshStandardMaterial({
+          map: this.textures.treeBarkMap,
+          roughness: 0.9,
+          bumpMap: this.textures.paperBump,
+          bumpScale: 0.02,
+        })
       );
       stump.position.y = 0.13;
       markPickable(stump);
       addInkEdges(stump, 0x452a16, 0.55);
       group.add(stump);
 
-      // Woven golden skep hive
+      // Woven golden honey-dripping skep hive
       const hiveMat = new THREE.MeshStandardMaterial({
         map: this.textures.beehiveMap,
-        roughness: 0.86,
+        roughness: 0.84,
         bumpMap: this.textures.paperBump,
         bumpScale: 0.02,
       });
@@ -1638,17 +1897,18 @@ export class PaperDioramaWorld {
       spinner = armGroup;
       group.add(armGroup);
     } else if (cover.kind === 'pumpkin') {
-      // Giant Carved Storybook Rolling Pumpkin Boulder!
+      // Giant Carved Storybook Rolling Pumpkin Boulder with painted ribbed skin & curly vine!
       height = 0.84;
       const orangeMat = new THREE.MeshStandardMaterial({
-        color: '#eb7516',
-        roughness: 0.62,
+        map: this.textures.pumpkinSkinMap,
+        roughness: 0.58,
         bumpMap: this.textures.paperBump,
         bumpScale: 0.02,
       });
       const ribMat = new THREE.MeshStandardMaterial({
-        color: '#d4600e',
-        roughness: 0.68,
+        map: this.textures.pumpkinSkinMap,
+        color: '#f2c8a2',
+        roughness: 0.64,
       });
       // Ribbed pumpkin segments
       for (let i = 0; i < 6; i++) {
@@ -1660,15 +1920,16 @@ export class PaperDioramaWorld {
         markPickable(lobe);
         group.add(lobe);
       }
-      // Curly green pumpkin stem on top
-      const stem = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.05, 0.09, 0.24, 7),
-        new THREE.MeshStandardMaterial({ color: '#4c8029', roughness: 0.85 })
-      );
+      // Curly green pumpkin stem & vine tendril on top
+      const vineMat = new THREE.MeshStandardMaterial({ color: '#4c8a29', roughness: 0.82 });
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, 0.24, 7), vineMat);
       stem.position.set(0.02, 0.72, 0);
       stem.rotation.z = -0.22;
       markPickable(stem);
-      group.add(stem);
+      const curl = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.025, 6, 12, Math.PI * 1.5), vineMat);
+      curl.position.set(0.16, 0.68, 0.04);
+      curl.rotation.x = Math.PI / 2.6;
+      group.add(stem, curl);
 
       // Playful painted jack-o-lantern eyes on front so it reads instantly as a Rolling Pumpkin!
       const eyeMat = new THREE.MeshBasicMaterial({ color: '#ffe66d' });

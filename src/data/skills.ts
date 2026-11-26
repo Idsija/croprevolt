@@ -956,9 +956,201 @@ export const HERO_SKILL_TREES: Record<HeroSpecies, HeroSkillTreeDef> = {
       ],
     },
   },
+
+  strawberry: {
+    species: 'strawberry',
+    pathA: {
+      key: 'pathA',
+      name: 'Crimson Duelist',
+      icon: '🗡️',
+      color: '#c92a42',
+      accent: '#ffd9df',
+      tagline: 'Lightning multi-dash flanker who resets dashes on every KO',
+      perks: [
+        makePerk(
+          'strawberry', 'pathA', 1, 'str_fencing_step', 'Fencing Step', '⚡',
+          '+1 Move · Dash 2 Foes (+1 DMG)',
+          'Gain +1 Move and Dash up to 2 different farmhands per turn with +1 Dash damage!',
+          { bonusMove: 1, extraDashes: 1, bonusDashDmg: 1 }
+        ),
+        makePerk(
+          'strawberry', 'pathA', 2, 'str_en_garde', 'En Garde Flank', '🎯',
+          '+2 Flank Crit · Ignore ½ Cover',
+          'Flanking shots deal +2 Critical damage and slice clean through enemy Half Cover!',
+          { bonusFlankCrit: 2, ignoreHalfCoverOnFlank: true, bonusAttack: 1 },
+          'str_fencing_step'
+        ),
+        makePerk(
+          'strawberry', 'pathA', 3, 'str_berry_blitz', 'Swashbuckler Blitz', '👑',
+          'Kills Reset Dash & CD · Start Boost',
+          'Begin every battle Boosted (+2 ATK), and routing any enemy refreshes Dash & Sweet Riposte!',
+          { startBoostTurns: 2, killRefreshesDash: true, killRefundsCd: true, bonusDashDmg: 1 },
+          'str_en_garde'
+        ),
+      ],
+    },
+    pathB: {
+      key: 'pathB',
+      name: 'Sweet Riposte',
+      icon: '🍓',
+      color: '#3f8c35',
+      accent: '#dcf5d8',
+      tagline: 'Root-snare specialist & long-reach Partner Assist duelist',
+      perks: [
+        makePerk(
+          'strawberry', 'pathB', 1, 'str_thorn_feint', 'Briar Pin', '🌿',
+          'Sweet Riposte -1 CD · +2 DMG',
+          'Sweet Riposte recharges every turn, deals +2 extra damage, and heals Strawbina +2 HP on cast!',
+          { skillCdDelta: -1, skillDmgDelta: 2, healOnSkillCast: 2 }
+        ),
+        makePerk(
+          'strawberry', 'pathB', 2, 'str_pinned_prey', 'Pinned Prey', '💥',
+          '+3 DMG vs Rooted · Range-2 Assist',
+          'Deal +3 bonus damage to Rooted foes and trigger Partner Assists from up to 2 tiles away!',
+          { rootedTargetBonus: 3, assistRange: 2, bonusAssistDmg: 1 },
+          'str_thorn_feint'
+        ),
+        makePerk(
+          'strawberry', 'pathB', 3, 'str_grand_flourish', 'Grand Flourish', '✨',
+          'Riposte Free Move · +1 Range & ATK',
+          'Casting Sweet Riposte grants a free Move and cleanses debuffs; gain +1 Range and +1 Attack!',
+          { skillGrantsFreeMove: true, cleanseOnSkillCast: true, bonusRange: 1, bonusAttack: 1 },
+          'str_pinned_prey'
+        ),
+      ],
+    },
+  },
+
+  mushroom: {
+    species: 'mushroom',
+    pathA: {
+      key: 'pathA',
+      name: 'Springboard Sage',
+      icon: '🍄',
+      color: '#c43b3b',
+      accent: '#ffe0dc',
+      tagline: 'Living jump-pad trampoline & airborne stomp trickster',
+      perks: [
+        makePerk(
+          'mushroom', 'pathA', 1, 'mus_trampoline', 'Bouncy Canopy', '💨',
+          '+2 Jump · Ally Jumps Heal +3 & Boost',
+          'Gain +2 Jump range & +3 Max HP; allies Team-Jumping off Shroom heal +3 HP and gain Boosted!',
+          { bonusJump: 2, bonusHp: 3, allyJumpHeal: 3, allyJumpBoost: true }
+        ),
+        makePerk(
+          'mushroom', 'pathA', 2, 'mus_cap_stomp', 'Toadstool Stomp', '☄️',
+          'Jump Stomp 3 AoE · Start Shielded',
+          'Landing from a Team-Jump slams adjacent foes for 3 AoE DMG + Boost; start Shielded (2t)!',
+          { jumpStompDmg: 3, jumpStompBoost: true, startShieldTurns: 2 },
+          'mus_trampoline'
+        ),
+        makePerk(
+          'mushroom', 'pathA', 3, 'mus_bouncy_fort', 'Mycelium Sanctuary', '🛡️',
+          '+4 HP · 2 Thorns · Free Move',
+          'Gain +4 Max HP, reflect 2 Thorns damage, and Springy Puff cleanses & grants Shroom a Free Move!',
+          { bonusHp: 4, thornsDmg: 2, cleanseOnSkillCast: true, skillGrantsFreeMove: true },
+          'mus_cap_stomp'
+        ),
+      ],
+    },
+    pathB: {
+      key: 'pathB',
+      name: 'Spore Alchemist',
+      icon: '🧪',
+      color: '#7c45a8',
+      accent: '#eedcff',
+      tagline: 'Corrosive spore clouds, knockback chains & chain explosions',
+      perks: [
+        makePerk(
+          'mushroom', 'pathB', 1, 'mus_toxic_spores', 'Acidic Spores', '🧪',
+          'Attacks Apply Acid · +1 Cover DMG',
+          'Spore shots coat farmhands in Acid (+2 incoming DMG) and gain +1 Weapon Range!',
+          { attackStatus: 'acid', bonusRange: 1, bonusCoverDmg: 2 }
+        ),
+        makePerk(
+          'mushroom', 'pathB', 2, 'mus_mega_puff', 'Mega Puff Cloud', '💥',
+          'Springy Puff +1 Radius · -1 CD · Push',
+          'Springy Puff expands +1 wider, deals +2 extra damage, pushes foes away, and recharges faster!',
+          { skillRadiusDelta: 1, skillDmgDelta: 2, skillCdDelta: -1, skillPushes: true },
+          'mus_toxic_spores'
+        ),
+        makePerk(
+          'mushroom', 'pathB', 3, 'mus_spore_bloom', 'Fungal Meltdown', '☢️',
+          'Acid Kills Explode 3×3 · +1 ATK',
+          'Defeating an Acid-soaked farmer erupts in a 3×3 corrosive spore burst; gain +1 Attack & +2 Bump DMG!',
+          { acidExplosionOnKill: true, bonusAttack: 1, bonusBumpDmg: 2 },
+          'mus_mega_puff'
+        ),
+      ],
+    },
+  },
+
+  duck: {
+    species: 'duck',
+    pathA: {
+      key: 'pathA',
+      name: 'Pond Watchdog',
+      icon: '👁️',
+      color: '#257da3',
+      accent: '#d4f2ff',
+      tagline: 'High-ground Overwatch ace who pins approaching farmhands',
+      perks: [
+        makePerk(
+          'duck', 'pathA', 1, 'duc_goggle_sight', 'Aviator Goggles', '▲',
+          '+1 Range · +2 High Ground DMG',
+          'Hose Blaster reaches +1 tile farther and deals +2 bonus damage from elevated terrain!',
+          { bonusRange: 1, bonusHighGroundDmg: 2 }
+        ),
+        makePerk(
+          'duck', 'pathA', 2, 'duc_double_watch', 'Duck Patrol Watch', '👁️',
+          '2× Overwatch · Shots Root Foes',
+          'Hero Sight Overwatch triggers twice per enemy turn with +2 DMG and Roots caught farmhands!',
+          { bonusOverwatchShots: 1, bonusOverwatchDmg: 2, overwatchRoots: true },
+          'duc_goggle_sight'
+        ),
+        makePerk(
+          'duck', 'pathA', 3, 'duc_wingman_ace', 'Wingman Ace', '★',
+          'Range-2 Assist (+2) · +2 Flank Crit',
+          'Trigger Partner Assists from 2 tiles away (+2 DMG), +2 Flank Crit, and +1 Weapon Attack!',
+          { assistRange: 2, bonusAssistDmg: 1, bonusFlankCrit: 2, bonusAttack: 1 },
+          'duc_double_watch'
+        ),
+      ],
+    },
+    pathB: {
+      key: 'pathB',
+      name: 'Hydro Cannon',
+      icon: '🌊',
+      color: '#1e9c8c',
+      accent: '#d4faf3',
+      tagline: 'Extreme pressure knockback & creek-dunking demolition',
+      perks: [
+        makePerk(
+          'duck', 'pathB', 1, 'duc_turbo_jet', 'High-Pressure Nozzle', '💨',
+          '+1 Knockback · +2 Bump DMG',
+          'Water blasts launch farmhands +1 tile farther and deal +2 extra Bump damage into hazards!',
+          { extraKnockback: 1, bonusBumpDmg: 2, bonusCoverDmg: 3 }
+        ),
+        makePerk(
+          'duck', 'pathB', 2, 'duc_tidal_dash', 'Belly-Slide Splash', '⚡',
+          'Dash 2 Foes · Push + Acid · +1 Move',
+          'Gain +1 Move and Dash 2 enemies per turn, knocking each back 1 tile and dousing them in Acid!',
+          { bonusMove: 1, extraDashes: 1, dashKnockback: true, dashStatus: 'acid' },
+          'duc_turbo_jet'
+        ),
+        makePerk(
+          'duck', 'pathB', 3, 'duc_monsoon', 'Monsoon Barrage', '🌊',
+          'Splashdown -1 CD · 1-Shot Cover',
+          'Pond Splashdown recharges faster with +1 Radius & +2 DMG; attacks shatter cover in 1 blast!',
+          { skillCdDelta: -1, skillRadiusDelta: 1, skillDmgDelta: 2, oneShotCover: true, coverBreakSplash: 2 },
+          'duc_tidal_dash'
+        ),
+      ],
+    },
+  },
 };
 
-/** Flat registry of all 78 bespoke character perks by ID. */
+/** Flat registry of all 96 bespoke character perks by ID. */
 export const SKILL_PERKS: Record<string, SkillPerkDef> = {};
 for (const tree of Object.values(HERO_SKILL_TREES)) {
   for (const perk of [...tree.pathA.perks, ...tree.pathB.perks]) {

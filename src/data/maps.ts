@@ -171,9 +171,9 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { x: 7, y: 10 },
     ],
     enemySpawns: [
-      { blueprintId: 'digger', x: 4, y: 5 },
-      { blueprintId: 'trimmer', x: 1, y: 2 },
-      { blueprintId: 'sprayer', x: 7, y: 2 },
+      { blueprintId: 'pitchfork', x: 4, y: 5 },
+      { blueprintId: 'hound', x: 1, y: 2 },
+      { blueprintId: 'beekeeper', x: 7, y: 2 },
       { blueprintId: 'digger', x: 2, y: 4 },
     ],
   },
@@ -771,9 +771,9 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { x: 8, y: 11 },
     ],
     enemySpawns: [
-      { blueprintId: 'mower', x: 1, y: 4 },
+      { blueprintId: 'digger', x: 1, y: 4 },
       { blueprintId: 'mower', x: 7, y: 4 },
-      { blueprintId: 'sprayer', x: 4, y: 2 },
+      { blueprintId: 'beekeeper', x: 4, y: 2 },
       { blueprintId: 'trimmer', x: 5, y: 1 },
     ],
   },
@@ -993,9 +993,9 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { x: 7, y: 10 },
     ],
     enemySpawns: [
-      { blueprintId: 'digger', x: 3, y: 2 },
-      { blueprintId: 'trimmer', x: 5, y: 2 },
-      { blueprintId: 'sprayer', x: 4, y: 1 },
+      { blueprintId: 'pitchfork', x: 3, y: 2 },
+      { blueprintId: 'hound', x: 5, y: 2 },
+      { blueprintId: 'beekeeper', x: 4, y: 1 },
     ],
   },
 
@@ -1059,10 +1059,10 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { x: 6, y: 11 },
     ],
     enemySpawns: [
-      { blueprintId: 'digger', x: 3, y: 5 },
-      { blueprintId: 'trimmer', x: 6, y: 5 },
+      { blueprintId: 'pitchfork', x: 3, y: 5 },
+      { blueprintId: 'hound', x: 6, y: 5 },
       { blueprintId: 'mower', x: 2, y: 2 },
-      { blueprintId: 'sprayer', x: 6, y: 1 },
+      { blueprintId: 'beekeeper', x: 6, y: 1 },
     ],
     gateTiles: [
       { x: 3, y: 0 },

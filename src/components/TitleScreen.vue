@@ -1,7 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { HARVEST_HEAT_LEVELS, MAX_HARVEST_HEAT } from '../engine/difficulty';
+import {
+  fetchTopScores,
+  flushQueuedScores,
+  loadPlayerName,
+  MAX_NAME_LENGTH,
+  onlineConfig,
+  savePlayerName,
+  type OnlineScoreRow,
+} from '../engine/onlineScores';
 import { META_UNLOCK_COSTS } from '../engine/run';
+import { activeStreak, loadDailyState } from '../engine/daily';
 import { dailyKeyFor, loadScores, topDailyScores, topStandardScores } from '../engine/score';
 import type { MetaProgress } from '../engine/types';
 import { TitleBackdropRenderer } from '../renderer3d/TitleBackdropRenderer';
@@ -22,14 +32,75 @@ import CropRevoltLogo from './CropRevoltLogo.vue';
 const activeModal = ref<'none' | 'shed' | 'guide' | 'almanac' | 'scores'>('none');
 
 const todayKey = dailyKeyFor();
+const fmt = (n: number) => n.toLocaleString('en-US');
 const scoreTab = ref<'daily' | 'standard'>('daily');
 // Read once per visit to the title: scores only change when a run ends, which remounts this screen.
 const allScores = loadScores();
 const dailyBoard = topDailyScores(allScores, todayKey);
 const standardBoard = topStandardScores(allScores);
-const shownBoard = computed(() => (scoreTab.value === 'daily' ? dailyBoard : standardBoard));
+interface BoardRow {
+  id: string;
+  score: number;
+  victory: boolean;
+  act: number;
+  battlesWon: number;
+  heat: number;
+  at: string;
+  name?: string;
+}
+
+/** The shared board is offered only when the build has Supabase settings. */
+const online = onlineConfig();
+const scoreScope = ref<'device' | 'everyone'>(online ? 'everyone' : 'device');
+const playerName = ref(online ? loadPlayerName() : '');
+const onlineRows = ref<OnlineScoreRow[] | null>(null);
+const onlineState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle');
+let onlineRequest = 0;
+
+async function refreshOnlineBoard(): Promise<void> {
+  if (!online || activeModal.value !== 'scores' || scoreScope.value !== 'everyone') return;
+  const request = ++onlineRequest;
+  onlineState.value = 'loading';
+  const rows = await fetchTopScores(
+    online,
+    scoreTab.value === 'daily' ? { mode: 'daily', dailyKey: todayKey } : { mode: 'standard' }
+  );
+  if (request !== onlineRequest) return; // a newer tab or scope was picked meanwhile
+  onlineRows.value = rows;
+  onlineState.value = rows ? 'ready' : 'error';
+}
+
+function commitPlayerName(): void {
+  playerName.value = savePlayerName(playerName.value);
+}
+
+const shownBoard = computed<BoardRow[]>(() => {
+  if (scoreScope.value === 'everyone') {
+    return (onlineRows.value ?? []).map((r) => ({
+      id: r.run_id,
+      score: r.score,
+      victory: r.victory,
+      act: r.act,
+      battlesWon: r.battles_won,
+      heat: r.heat,
+      at: r.created_at ?? '',
+      name: r.player_name,
+    }));
+  }
+  return scoreTab.value === 'daily' ? dailyBoard : standardBoard;
+});
+const boardLoading = computed(() => scoreScope.value === 'everyone' && onlineState.value === 'loading');
+const boardError = computed(() => scoreScope.value === 'everyone' && onlineState.value === 'error');
 const dailyBest = dailyBoard[0]?.score ?? null;
-const fmt = (n: number) => n.toLocaleString('en-US');
+const dailyState = loadDailyState();
+const dailyAttemptsToday = dailyState.attempts[todayKey] ?? 0;
+const dailyStreak = activeStreak(dailyState.streak, todayKey);
+const dailyHint =
+  dailyBest !== null
+    ? `Today's score: ${fmt(dailyBest)} · replay for practice`
+    : dailyAttemptsToday > 0
+      ? 'Scored attempt in progress or abandoned · practice only'
+      : 'One scored attempt · same garden for everyone';
 const shortDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const backdropCanvasRef = ref<HTMLCanvasElement | null>(null);
@@ -44,13 +115,13 @@ const currentHeat = computed(() =>
 );
 const currentHeatInfo = computed(() => HARVEST_HEAT_LEVELS[currentHeat.value] ?? HARVEST_HEAT_LEVELS[0]);
 
-const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
-  'extraItemSatchel',
-  'heirloomSoil',
-  'starterRelic',
-];
+const unlockKeys = Object.keys(META_UNLOCK_COSTS) as Array<keyof MetaProgress['unlocks']>;
+
+watch([activeModal, scoreTab, scoreScope], refreshOnlineBoard);
 
 onMounted(() => {
+  // Send any scores that could not be uploaded when their run ended.
+  if (online) void flushQueuedScores(online);
   if (!backdropCanvasRef.value) return;
   try {
     backdropRenderer = new TitleBackdropRenderer(backdropCanvasRef.value);
@@ -200,7 +271,10 @@ onBeforeUnmount(() => {
           <button class="paper-btn sky diecut daily-btn" @click="startDailyRun()">
             <span class="daily-copy">
               <strong>Daily Run</strong>
-              <small>{{ dailyBest !== null ? `Your best today: ${fmt(dailyBest)}` : 'Same garden for everyone today' }}</small>
+              <small>{{ dailyHint }}</small>
+            </span>
+            <span v-if="dailyStreak > 0" class="streak-chip" :title="`${dailyStreak}-day streak`">
+              {{ dailyStreak }}🔥
             </span>
           </button>
           <button class="paper-btn sec-btn scores-btn" @click="activeModal = 'scores'">
@@ -238,12 +312,46 @@ onBeforeUnmount(() => {
         <div class="modal-head">
           <div>
             <h2>Harvest Scores</h2>
-            <small>Best runs played on this device</small>
+            <small>{{ scoreScope === 'everyone' ? 'Best runs from all players' : 'Best runs played on this device' }}</small>
           </div>
           <button class="paper-btn icon-only" aria-label="Close" @click="activeModal = 'none'">
             <CraftIcon name="close" :size="17" />
           </button>
         </div>
+
+        <template v-if="online">
+          <div class="score-tabs scope-tabs" role="tablist" aria-label="Whose scores">
+            <button
+              class="paper-btn score-tab"
+              :class="{ sky: scoreScope === 'everyone' }"
+              role="tab"
+              :aria-selected="scoreScope === 'everyone'"
+              @click="scoreScope = 'everyone'"
+            >
+              Everyone
+            </button>
+            <button
+              class="paper-btn score-tab"
+              :class="{ sky: scoreScope === 'device' }"
+              role="tab"
+              :aria-selected="scoreScope === 'device'"
+              @click="scoreScope = 'device'"
+            >
+              This Device
+            </button>
+          </div>
+          <label class="name-field">
+            <span>Your name on the board</span>
+            <input
+              v-model="playerName"
+              type="text"
+              :maxlength="MAX_NAME_LENGTH"
+              autocomplete="nickname"
+              spellcheck="false"
+              @change="commitPlayerName"
+            />
+          </label>
+        </template>
 
         <div class="score-tabs" role="tablist">
           <button
@@ -266,21 +374,27 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <ol v-if="shownBoard.length > 0" class="score-board">
+        <p v-if="boardLoading" class="score-empty">Fetching the shared board…</p>
+        <p v-else-if="boardError" class="score-empty">
+          Couldn't reach the shared board. Check your connection, or switch to This Device.
+        </p>
+        <ol v-else-if="shownBoard.length > 0" class="score-board">
           <li v-for="(entry, i) in shownBoard" :key="entry.id" class="seed-packet score-row">
             <span class="score-rank">{{ i + 1 }}</span>
             <span class="score-meta">
-              <strong>{{ fmt(entry.score) }}</strong>
+              <strong>{{ fmt(entry.score) }}<span v-if="entry.name" class="score-name"> · {{ entry.name }}</span></strong>
               <small>
                 {{ entry.victory ? 'Garden freed' : `Fell in Act ${entry.act}` }} ·
                 {{ entry.battlesWon }} battles<template v-if="entry.heat > 0"> · Heat {{ entry.heat }}</template>
               </small>
             </span>
-            <small class="score-date">{{ shortDate(entry.at) }}</small>
+            <small v-if="entry.at" class="score-date">{{ shortDate(entry.at) }}</small>
           </li>
         </ol>
         <p v-else class="score-empty">
-          {{ scoreTab === 'daily'
+          {{ scoreScope === 'everyone'
+            ? 'No scores here yet. Finish a run to be the first on the board.'
+            : scoreTab === 'daily'
             ? "No daily run finished yet today. The daily garden is the same for everyone and changes at midnight UTC."
             : 'Finish a run to put your first score on the board.' }}
         </p>
@@ -730,6 +844,13 @@ onBeforeUnmount(() => {
   line-height: 1.15;
 }
 
+.streak-chip {
+  margin-left: auto;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .daily-copy small {
   font-weight: 500;
   opacity: 0.9;
@@ -740,6 +861,36 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin: 12px 0;
+}
+
+.scope-tabs {
+  margin-bottom: 8px;
+}
+
+.name-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+}
+
+.name-field input {
+  flex: 0 1 11.5em;
+  min-width: 0;
+  font: inherit;
+  font-family: 'Fredoka', sans-serif;
+  color: var(--ink);
+  background: #fffaf0;
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+.score-name {
+  font-weight: 500;
+  font-size: 0.92rem;
 }
 
 .score-tab {

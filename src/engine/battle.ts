@@ -283,7 +283,7 @@ export function createBattleUnitFromEnemy(blueprintId: string, index: number, po
     moveRange: bp.moveRange,
     jumpRange: 0,
     dashDamage: bp.dashDamage,
-    dashKnockback: bp.isBoss && bp.archetype === 'tractor' ? 1 : undefined,
+    dashKnockback: bp.dashKnockback ?? (bp.isBoss && bp.archetype === 'tractor' ? 1 : undefined),
     weapon: { ...bp.weapon, appliesStatus: bp.weapon.appliesStatus ? { ...bp.weapon.appliesStatus } : undefined },
     ability: bp.ability
       ? { ...bp.ability, appliesStatus: bp.ability.appliesStatus ? { ...bp.ability.appliesStatus } : undefined }
@@ -300,6 +300,9 @@ export function createBattleUnitFromEnemy(blueprintId: string, index: number, po
   };
   if (bp.isBoss) {
     applyStatusToUnit(enemyUnit, 'shield', 1);
+  }
+  if (bp.startsShielded) {
+    applyStatusToUnit(enemyUnit, 'shield', 2);
   }
   return enemyUnit;
 }
@@ -424,6 +427,7 @@ export function createBattleFromMap(
     const rng = setup.rng ?? Math.random;
     for (const unit of shuffle(regulars, rng).slice(0, setup.difficulty.veterans)) {
       promoteToVeteran(unit);
+      unit.weapon.damage += setup.difficulty.veteranDamageBonus ?? 0;
     }
   }
 
