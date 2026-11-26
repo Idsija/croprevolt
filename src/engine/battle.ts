@@ -10,6 +10,7 @@ import {
   type BattleDifficulty,
 } from './difficulty';
 import type { Rng } from './mapgen';
+import { computeParTurns } from './par';
 import {
   chebyshev,
   createCover,
@@ -433,7 +434,7 @@ export function createBattleFromMap(
 
   const prepPhase = Boolean(setup?.enablePrepPhase);
 
-  return {
+  const state: BattleState = {
     mapId: map.id,
     mapName: map.name,
     theme: setup?.theme ?? map.theme ?? 'spring',
@@ -470,6 +471,8 @@ export function createBattleFromMap(
     ],
     undoSnapshot: null,
   };
+  state.parTurns = computeParTurns(state);
+  return state;
 }
 
 /**

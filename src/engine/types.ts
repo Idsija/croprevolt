@@ -460,6 +460,8 @@ export interface BattleState {
   playerSpawnPositions?: GridPos[];
   /** Number of turns to hold on 'survive' objective maps. */
   surviveTurns?: number;
+  /** Turn par for this battle: win in this many turns or fewer for a Great or Perfect Harvest. */
+  parTurns?: number;
   /** Harvest Heat ascension level (0-5) active in this battle. */
   harvestHeat?: number;
   relicIds: string[];
@@ -558,6 +560,8 @@ export interface RewardBundle {
   weaponChoices?: string[];
   itemGrant?: { itemId: string; count: number };
   freeHealAmount?: number;
+  /** Grade earned in the battle this reward is for (seeds bonus already included in seedsEarned). */
+  battleGrade?: { grade: 'perfect' | 'great' | 'cleared'; par: number; turns: number; bonusSeeds: number };
   marketOffers?: MarketOffer[];
   claimedGraft: boolean;
   claimedRelic: boolean;
@@ -594,6 +598,10 @@ export interface RunState {
   dailyAttempt?: number;
   /** Battle turns spent across all won and lost battles; feeds the score's speed bonus. */
   battleTurns?: number;
+  /** Sum over won battles of turns finished under that battle's par. */
+  turnsUnderPar?: number;
+  /** Won battles with a Perfect Harvest grade (under par, no hero bagged). */
+  perfectHarvests?: number;
   /** Unlocked alternate weapon IDs swappable anytime in the Hero Build Armory. */
   unlockedWeaponIds?: string[];
   nodes: SeasonNode[];

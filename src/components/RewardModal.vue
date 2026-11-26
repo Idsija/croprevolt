@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { GRADE_LABELS } from '../engine/par';
 import { computed, nextTick, ref, watch } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
@@ -125,6 +126,14 @@ function nextTierLabel(graftCount: number): string {
           <div class="spoils-strip">
             <span class="paper-pill seed-pill">
               <CraftIcon name="seed" :size="14" /> {{ run.seeds }} Run Seeds (+{{ reward.seedsEarned }})
+            </span>
+            <span
+              v-if="reward.battleGrade && reward.battleGrade.grade !== 'cleared'"
+              class="paper-pill grade-pill"
+              :class="reward.battleGrade.grade"
+              :title="`Won in ${reward.battleGrade.turns} turns (par ${reward.battleGrade.par})`"
+            >
+              {{ GRADE_LABELS[reward.battleGrade.grade] }} +{{ reward.battleGrade.bonusSeeds }}
             </span>
             <span v-if="reward.xpEarned" class="paper-pill xp-pill">
               ★ +{{ reward.xpEarned }} XP
@@ -755,6 +764,16 @@ function nextTierLabel(graftCount: number): string {
 .lu-copy small {
   font-size: 0.7rem;
   color: var(--ink-soft);
+}
+.grade-pill.perfect {
+  background: #f6d66b;
+  color: #5a3d00;
+  font-weight: 800;
+}
+.grade-pill.great {
+  background: #cfe8b5;
+  color: #2f4f1a;
+  font-weight: 700;
 }
 .reroll-btn {
   align-self: center;
