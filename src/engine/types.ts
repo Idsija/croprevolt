@@ -553,6 +553,12 @@ export interface RunState {
   seed: number;
   /** Harvest Heat Ascension Level (0-5). */
   harvestHeat?: number;
+  /** 'daily' runs share one seed per UTC day and start from the standard loadout. */
+  mode?: 'standard' | 'daily';
+  /** UTC date (YYYY-MM-DD) of the daily run this is. */
+  dailyKey?: string;
+  /** Battle turns spent across all won and lost battles; feeds the score's speed bonus. */
+  battleTurns?: number;
   /** Unlocked alternate weapon IDs swappable anytime in the Hero Build Armory. */
   unlockedWeaponIds?: string[];
   nodes: SeasonNode[];

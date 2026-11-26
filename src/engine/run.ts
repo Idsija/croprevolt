@@ -10,7 +10,8 @@ import {
   buildScaledWeaponForHero,
   STARTER_UNLOCKED_WEAPONS,
 } from '../data/weapons';
-import { getHeatSeedMultiplier, MAX_HARVEST_HEAT } from './difficulty';
+import { battleRng, getHeatSeedMultiplier, MAX_HARVEST_HEAT } from './difficulty';
+import { dailyKeyFor, dailySeedFor, recordRunScore } from './score';
 import {
   ACTS,
   actIndexForSeason,
@@ -178,6 +179,18 @@ export function createHeroFromBlueprint(blueprintId: string, bonusMaxHp = 0): Ro
     color: bp.color,
     accentColor: bp.accentColor,
   };
+}
+
+/**
+ * Today's daily run: one shared seed per UTC day, Heat 0 and the standard loadout
+ * (no Seed Shed perks), so every player starts the same garden on equal footing.
+ */
+export function createDailyRun(now: Date = new Date()): RunState {
+  const dailyKey = dailyKeyFor(now);
+  const run = createNewRun(defaultMetaProgress(), 'spring', dailySeedFor(dailyKey), 0);
+  run.mode = 'daily';
+  run.dailyKey = dailyKey;
+  return run;
 }
 
 export function createNewRun(
@@ -364,7 +377,8 @@ export function applyTravelCardMove(
   run: RunState,
   cardId: string,
   destNodeId: string,
-  rng: () => number = Math.random
+  // Seeded per board turn, so a daily run deals everyone the same travel hands.
+  rng: () => number = battleRng(run.seed, `hand:${run.act}:${run.boardTurn ?? 0}`)
 ): string[] | null {
   const hand = run.travelHand ?? [];
   const card = hand.find((c) => c.id === cardId);
@@ -491,7 +505,12 @@ export function generateMarketOffers(run: RunState, rng = Math.random): MarketOf
   return offers;
 }
 
-export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Math.random): RewardBundle {
+export function generateRewardForNode(
+  run: RunState,
+  node: SeasonNode,
+  // Seeded per node, so the same seed (e.g. a daily run) offers everyone the same rewards.
+  rng: () => number = battleRng(run.seed, `reward:${node.id}`)
+): RewardBundle {
   const ownedRelics = new Set(run.relicIds);
   const availableRelics = ALL_RELIC_IDS.filter((id) => !ownedRelics.has(id));
   const ownedBlueprints = new Set(run.roster.map((h) => h.blueprintId));
@@ -563,7 +582,7 @@ export function openVaultNode(run: RunState, nodeId: string): boolean {
   if (node.type === 'armory') {
     // Armory Wagon stocks up to 2 extra unlocked Alternate Weapons + gives a free weapon choice if locked weapons remain!
     const locked = getLockedWeaponPool(run);
-    const armoryChoices = pickRandomDistinct(locked, 2);
+    const armoryChoices = pickRandomDistinct(locked, 2, battleRng(run.seed, `armory:${node.id}`));
     bundle.weaponChoices = armoryChoices;
     bundle.claimedWeapon = armoryChoices.length === 0;
     bundle.graftChoices = [];
@@ -726,6 +745,8 @@ export function applyBattleOutcomeToRun(
   // Sync remaining garden items
   run.items = { ...battle.items };
 
+  run.battleTurns = (run.battleTurns ?? 0) + Math.max(1, battle.turn);
+
   // Count defeated enemies
   const defeatedEnemies = battle.units.filter((u) => u.team === 'enemy' && !u.alive).length;
   run.enemiesDefeated += defeatedEnemies;
@@ -788,6 +809,7 @@ export function applyBattleOutcomeToRun(
     meta.runsPlayed += 1;
     saveMetaProgress(meta);
     clearSavedRun();
+    recordRunScore(run);
     return;
   }
 
@@ -837,6 +859,7 @@ export function applyBattleOutcomeToRun(
     meta.maxHeatUnlocked = Math.max(meta.maxHeatUnlocked ?? 1, nextHeat);
     saveMetaProgress(meta);
     clearSavedRun();
+    recordRunScore(run);
     return;
   }
 

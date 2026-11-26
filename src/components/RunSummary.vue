@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
-import { gameStore, returnToTitle, startNewSeasonRun } from '../stores/gameStore';
+import { computeRunScore, loadScores, rankOf, scoreEntryForRun } from '../engine/score';
+import { gameStore, playAgain, returnToTitle } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
 
 const run = computed(() => gameStore.run!);
 const isVictory = computed(() => run.value.status === 'victory');
+const isDaily = computed(() => run.value.mode === 'daily');
+const score = computed(() => computeRunScore(run.value));
+/** 1-based place on this device's board (the run was recorded when it ended), 0 if off the board. */
+const rank = computed(() => rankOf(loadScores(), scoreEntryForRun(run.value)));
+const fmt = (n: number) => n.toLocaleString('en-US');
 </script>
 
 <template>
@@ -53,6 +59,25 @@ const isVictory = computed(() => run.value.status === 'victory');
         </span>
       </div>
 
+      <div class="seed-packet score-card" aria-label="Run score">
+        <div class="score-head">
+          <span class="score-kicker">{{ isDaily ? `Daily Run · ${run.dailyKey}` : 'Run Score' }}</span>
+          <strong class="score-total">{{ fmt(score.total) }}</strong>
+          <span v-if="rank === 1" class="paper-pill rank-pill best">★ New best on this device!</span>
+          <span v-else-if="rank > 0" class="paper-pill rank-pill">#{{ rank }} on this device</span>
+        </div>
+        <dl class="score-lines">
+          <div v-for="line in score.lines" :key="line.label" class="score-line">
+            <dt>{{ line.label }} <small>{{ line.detail }}</small></dt>
+            <dd>{{ fmt(line.points) }}</dd>
+          </div>
+          <div v-if="score.heat > 0" class="score-line heat">
+            <dt>Harvest Heat {{ score.heat }} <small>× {{ score.heatMult.toFixed(1) }}</small></dt>
+            <dd>+{{ fmt(score.total - score.subtotal) }}</dd>
+          </div>
+        </dl>
+      </div>
+
       <div class="final-squad">
         <h3>Final Produce Roster</h3>
         <div class="squad-chips">
@@ -73,8 +98,8 @@ const isVictory = computed(() => run.value.status === 'victory');
       </div>
 
       <div class="actions">
-        <button class="paper-btn primary diecut act-btn" @click="startNewSeasonRun()">
-          <CraftIcon name="play" :size="18" /> Play Another Run
+        <button class="paper-btn primary diecut act-btn" @click="playAgain()">
+          <CraftIcon name="play" :size="18" /> {{ isDaily ? 'Retry Daily Run' : 'Play Another Run' }}
         </button>
         <button class="paper-btn gold diecut act-btn" @click="returnToTitle">
           <CraftIcon name="shed" :size="18" /> Seed Shed
@@ -159,6 +184,76 @@ const isVictory = computed(() => run.value.status === 'victory');
 
 .seed-pill {
   background: #fde89b;
+}
+
+.score-card {
+  width: 100%;
+  padding: 14px 16px 12px;
+  color: var(--ink);
+  text-align: left;
+}
+
+.score-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.score-kicker {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  flex-basis: 100%;
+}
+
+.score-total {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 2.3rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-pill {
+  align-self: center;
+}
+
+.rank-pill.best {
+  background: #fde89b;
+}
+
+.score-lines {
+  margin: 10px 0 0;
+  border-top: 2px dashed rgba(69, 42, 22, 0.22);
+  padding-top: 8px;
+  display: grid;
+  gap: 3px;
+}
+
+.score-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.score-line dt small {
+  color: var(--ink-soft);
+  margin-left: 4px;
+}
+
+.score-line dd {
+  margin: 0;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-line.heat dd {
+  color: #b4441a;
 }
 
 .final-squad {
