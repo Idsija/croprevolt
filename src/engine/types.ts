@@ -122,7 +122,7 @@ export interface ProduceBlueprint {
 export interface EnemyBlueprint {
   id: string;
   name: string;
-  archetype: 'digger' | 'trimmer' | 'sprayer' | 'mower' | 'scarecrow' | 'tractor';
+  archetype: 'digger' | 'trimmer' | 'sprayer' | 'mower' | 'scarecrow' | 'tractor' | 'harvester';
   title: string;
   family: ToolFamily;
   isBoss?: boolean;
@@ -321,7 +321,7 @@ export type BattleEvent =
   | { type: 'unit_ko'; unitId: string; pos: GridPos; team: Team; unitName: string }
   | { type: 'banner'; text: string; tone: 'player' | 'enemy' | 'victory' | 'defeat' };
 
-export type BoardTheme = 'spring' | 'greenhouse';
+export type BoardTheme = 'spring' | 'greenhouse' | 'autumn';
 
 export interface MapTemplate {
   id: string;
@@ -373,7 +373,7 @@ export interface BattleState {
   undoSnapshot: string | null;
 }
 
-export type SeasonId = 'spring' | 'summer';
+export type SeasonId = 'spring' | 'summer' | 'autumn';
 
 export type NodeType = 'skirmish' | 'escape' | 'vault' | 'shop' | 'barn_rescue' | 'elite' | 'boss' | 'event';
 

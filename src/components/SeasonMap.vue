@@ -163,7 +163,11 @@ function nodeSprite(type: SeasonNode['type']): string {
     case 'elite':
       return act.value.id === 'summer' ? '/sprites/beehive.png' : '/sprites/sprayer.png';
     case 'boss':
-      return act.value.id === 'summer' ? '/sprites/tractor.png' : '/sprites/scarecrow.png';
+      return act.value.id === 'autumn'
+        ? '/sprites/harvester.png'
+        : act.value.id === 'summer'
+          ? '/sprites/tractor.png'
+          : '/sprites/scarecrow.png';
   }
 }
 

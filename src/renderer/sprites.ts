@@ -28,6 +28,7 @@ const PNG_SPRITE_KEYS = [
   'sprayer',
   'mower',
   'scarecrow',
+  'harvester',
   'tractor',
   'crate',
   'haystack',
@@ -131,6 +132,7 @@ const UNIT_HEIGHTS: Record<string, number> = {
   sprayer: 88,
   mower: 72,
   scarecrow: 118,
+  harvester: 122,
   tractor: 102,
 };
 
@@ -154,6 +156,7 @@ const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   sprayer: 'left',
   mower: 'left',
   scarecrow: 'left',
+  harvester: 'left',
   tractor: 'left',
 };
 

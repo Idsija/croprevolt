@@ -1,4 +1,4 @@
-import type { NodeType, SeasonId, SeasonNode } from './types';
+import type { BoardTheme, NodeType, SeasonId, SeasonNode } from './types';
 
 /**
  * Procedural run map generation (Slay the Spire style).
@@ -32,6 +32,8 @@ type BattleNodeType = Extract<NodeType, 'skirmish' | 'escape' | 'barn_rescue' | 
 
 export interface ActDef {
   id: SeasonId;
+  /** Overrides the battlefield palette (lets an act reuse earlier layouts in its own colours). */
+  theme?: BoardTheme;
   /** Shown in the map header, e.g. "Act 1 · Spring Patch" */
   name: string;
   trailTitle: string;
@@ -96,6 +98,38 @@ export const ACTS: ActDef[] = [
       mapId: 'combine_throne',
       name: "Baron Combine's Conservatory",
       subtitle: 'Summer Boss — Topple the vintage red harvester tractor!',
+    },
+    shop: {
+      name: "Farmer's Compost Market",
+      subtitle: 'Safe Market — Spend run Seeds on Grafts, Items, Healing & Recruits!',
+    },
+    vault: {
+      name: 'Seed Vault & Compost',
+      subtitle: 'Safe Stop — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
+    },
+  },
+  {
+    id: 'autumn',
+    theme: 'autumn',
+    name: 'Autumn Orchard',
+    trailTitle: 'Autumn Orchard Trail',
+    trailHint: 'Pick a path. Lord Bramblecoat waits in the moonlit orchard.',
+    mapPools: {
+      skirmish: ['vegetable_patch', 'greenhouse_entry'],
+      escape: ['patch_breakout', 'irrigation_run'],
+      barn_rescue: ['barn_raid'],
+      elite: ['tool_shed_ambush', 'apiary_ambush'],
+    },
+    subtitles: {
+      skirmish: 'Defeat All — Clear the harvest crew from the fallen leaves',
+      escape: 'Reach the Gate — Slip through the orchard fence for a Graft + Relic',
+      barn_rescue: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
+      elite: 'Elite Fight — The harvest veterans guard a rare Graft + Soil Relic',
+    },
+    boss: {
+      mapId: 'orchard_clearing',
+      name: "Lord Bramblecoat's Orchard",
+      subtitle: 'Autumn Boss — Cut down the crimson harvest warden!',
     },
     shop: {
       name: "Farmer's Compost Market",

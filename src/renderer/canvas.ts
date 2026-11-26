@@ -152,6 +152,7 @@ const STANDEE_HIT_HEIGHTS: Record<string, number> = {
   sprayer: 88,
   mower: 72,
   scarecrow: 118,
+  harvester: 122,
   tractor: 102,
 };
 
@@ -2257,14 +2258,19 @@ export class PaperCraftRenderer {
     const gridH = battle.height;
 
     const isGreenhouse = battle.theme === 'greenhouse';
-    let fill = isGreenhouse
+    const isAutumn = battle.theme === 'autumn';
+    let fill = isAutumn
       ? checker
-        ? '#7eb353'
-        : '#73a849'
-      : checker
-        ? '#8fb649'
-        : '#85ac41';
-    let topEdgeCol = isGreenhouse ? '#5c8c38' : '#6f9333';
+        ? '#c4a046'
+        : '#b9943d'
+      : isGreenhouse
+        ? checker
+          ? '#7eb353'
+          : '#73a849'
+        : checker
+          ? '#8fb649'
+          : '#85ac41';
+    let topEdgeCol = isAutumn ? '#94702a' : isGreenhouse ? '#5c8c38' : '#6f9333';
     if (tile.terrain === 'soil') {
       fill = checker ? '#bf7d46' : '#b5743f';
       topEdgeCol = '#8a552a';
@@ -2330,7 +2336,7 @@ export class PaperCraftRenderer {
     if (tile.terrain === 'grass' && !tile.cover) {
       const seed = (tile.x * 19 + tile.y * 31) % 7;
       if (seed < 3) {
-        ctx.strokeStyle = '#5c7e29';
+        ctx.strokeStyle = battle.theme === 'autumn' ? '#8a5f1c' : '#5c7e29';
         ctx.lineWidth = 1.2 * s;
         ctx.lineCap = 'round';
         const ox = (seed - 1) * 9 * s;
@@ -2343,6 +2349,13 @@ export class PaperCraftRenderer {
         ctx.moveTo(c.x + ox + 3 * s, c.y + oy + 2 * s);
         ctx.lineTo(c.x + ox + 5 * s, c.y + oy - 2 * s);
         ctx.stroke();
+      }
+      if (battle.theme === 'autumn' && seed >= 4) {
+        // A fallen paper leaf or two on dry autumn grass.
+        ctx.fillStyle = seed === 4 ? '#c4532a' : seed === 5 ? '#d9822b' : '#9e3a22';
+        ctx.beginPath();
+        ctx.ellipse(c.x + (seed - 5) * 8 * s, c.y + (seed % 2 ? 2 : -3) * s, 3.4 * s, 1.7 * s, seed * 0.7, 0, Math.PI * 2);
+        ctx.fill();
       }
     } else if (tile.terrain === 'soil' && !tile.cover) {
       ctx.fillStyle = 'rgba(84, 48, 22, 0.3)';

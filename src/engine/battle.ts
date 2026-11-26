@@ -35,6 +35,7 @@ import {
 } from './pathfinding';
 import type {
   BattleState,
+  BoardTheme,
   BattleUnit,
   GridPos,
   MapTemplate,
@@ -49,6 +50,8 @@ import type {
 export interface BattleSetup {
   rng: Rng;
   difficulty: BattleDifficulty;
+  /** Palette override, e.g. Autumn reusing Spring layouts. */
+  theme?: BoardTheme;
 }
 
 function mirrorTemplate(map: MapTemplate): MapTemplate {
@@ -299,7 +302,7 @@ export function createBattleFromMap(
   return {
     mapId: map.id,
     mapName: map.name,
-    theme: map.theme ?? 'spring',
+    theme: setup?.theme ?? map.theme ?? 'spring',
     objective: map.objective,
     objectiveLabel: map.objectiveLabel,
     width: map.width,

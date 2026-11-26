@@ -4,6 +4,7 @@ import { RECRUITABLE_BLUEPRINT_IDS } from '../data/produce';
 import { runEnemyUnitTurn } from '../engine/ai';
 import { battleRng, difficultyFor } from '../engine/difficulty';
 import { leaveEvent, openEventNode, resolveEventChoice } from '../engine/events';
+import { ACTS } from '../engine/mapgen';
 import {
   createBattleFromMap,
   executeAbility,
@@ -378,6 +379,7 @@ export function enterSeasonNode(nodeId: string): void {
       // Seeded per node: the same run seed always produces the same battles (daily runs).
       rng: battleRng(run.seed, node.id),
       difficulty: difficultyFor(run.act, node.stage, node.type),
+      theme: ACTS[run.act]?.theme,
     }
   );
 

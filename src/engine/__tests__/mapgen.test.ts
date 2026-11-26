@@ -112,7 +112,7 @@ describe('multi-act runs', () => {
     expect(starts.every((id) => run.nodes.find((n) => n.id === id)!.stage === 0)).toBe(true);
   });
 
-  it('carries the squad into Summer after beating the Spring boss, and ends the run after the final boss', () => {
+  it('carries the squad from Spring to Summer to Autumn, and ends the run after the Autumn boss', () => {
     const meta = defaultMetaProgress();
     const run = createNewRun(meta, 'spring', 7);
     const heroes = run.roster.slice(0, 4);
@@ -133,6 +133,18 @@ describe('multi-act runs', () => {
     const summerBoss = createBattleFromMap('combine_throne', heroes, [], run.items);
     summerBoss.status = 'victory';
     applyBattleOutcomeToRun(run, summerBoss, meta);
+    expect(run.status).toBe('reward');
+    expect(run.act).toBe(2);
+    expect(run.seasonId).toBe('autumn');
+    expect(run.nodes.find((n) => n.type === 'boss')!.mapId).toBe('orchard_clearing');
+    expect(meta.runsWon).toBe(0);
+
+    run.currentNodeId = bossNodeId(2);
+    const autumnBoss = createBattleFromMap('orchard_clearing', heroes, [], run.items);
+    expect(autumnBoss.theme).toBe('autumn');
+    expect(autumnBoss.units.find((u) => u.isBoss)?.visualKind).toBe('harvester');
+    autumnBoss.status = 'victory';
+    applyBattleOutcomeToRun(run, autumnBoss, meta);
     expect(run.status).toBe('victory');
     expect(meta.runsWon).toBe(1);
   });
