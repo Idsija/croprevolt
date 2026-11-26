@@ -10,8 +10,9 @@ import {
   SKILL_PERKS,
   type SkillBranch,
 } from '../data/skills';
+import { buildScaledWeaponForHero, getSpeciesWeapons } from '../data/weapons';
 import { getFamilyLabel } from '../engine/hooks';
-import { gameStore, toggleSquadMember, unlockPerk } from '../stores/gameStore';
+import { equipWeapon, gameStore, toggleSquadMember, unlockPerk } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
 
 const props = defineProps<{
@@ -46,6 +47,27 @@ const selectedHero = computed(
 const isSelectedActive = computed(() =>
   selectedHero.value ? run.value.activeSquadUids.includes(selectedHero.value.uid) : false
 );
+
+const selectedHeroArmory = computed(() => {
+  const h = selectedHero.value;
+  if (!h) return null;
+  const pair = getSpeciesWeapons(h.species);
+  const unlocked = new Set(run.value.unlockedWeaponIds ?? []);
+  const altUnlocked = unlocked.has(pair.alt.weapon.id);
+  const equippedId = h.equippedWeaponId ?? h.weapon.id;
+  return {
+    base: buildScaledWeaponForHero(h, pair.base),
+    alt: buildScaledWeaponForHero(h, pair.alt.weapon),
+    altTagline: pair.alt.tagline,
+    altUnlocked,
+    equippedId,
+  };
+});
+
+function handleEquipWeapon(weaponId: string): void {
+  if (!selectedHero.value || selectedHero.value.harvested) return;
+  equipWeapon(selectedHero.value.uid, weaponId);
+}
 
 const xpNeeded = computed(() =>
   selectedHero.value ? getXpToNextLevel(selectedHero.value.level) : 50
@@ -86,13 +108,13 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
       <!-- Header -->
       <header class="build-head">
         <div>
-          <h2>Squad Builds &amp; Skill Trees</h2>
+          <h2>Squad Builds, Armory &amp; Skill Trees</h2>
           <small>
             Active Squad: {{ run.activeSquadUids.length }}/4 ·
             <strong v-if="totalUnspentSp > 0" class="sp-highlight">
               ★ {{ totalUnspentSp }} Skill Point{{ totalUnspentSp > 1 ? 's' : '' }} ready to spend!
             </strong>
-            <span v-else>Win battles to earn XP &amp; Skill Points</span>
+            <span v-else>Win battles to earn XP, Skill Points &amp; Armory Weapons</span>
           </small>
         </div>
         <button class="paper-btn icon-only" aria-label="Close" @click="emit('close')">
@@ -131,7 +153,7 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
           </button>
         </aside>
 
-        <!-- Right Hero Build Sheet & 3-Branch Skill Tree -->
+        <!-- Right Hero Build Sheet, Armory & 3-Branch Skill Tree -->
         <div v-if="selectedHero" class="hero-pane scroll-soft">
           <div class="hero-summary paper-card">
             <div class="hs-left">
@@ -196,6 +218,55 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
             >
               {{ GRAFT_REGISTRY[gid]?.badgeIcon }} {{ GRAFT_REGISTRY[gid]?.name }}
             </span>
+          </div>
+
+          <!-- Armory Weapon Switcher (Base vs Unlocked Alternate Weapon!) -->
+          <div v-if="selectedHeroArmory" class="armory-bar">
+            <button
+              class="weapon-opt"
+              :class="{ equipped: selectedHeroArmory.equippedId === selectedHeroArmory.base.id }"
+              :disabled="selectedHero.harvested"
+              @click="handleEquipWeapon(selectedHeroArmory.base.id)"
+            >
+              <div class="wo-head">
+                <strong>🎯 {{ selectedHeroArmory.base.name }}</strong>
+                <span class="wo-badge">{{ selectedHeroArmory.equippedId === selectedHeroArmory.base.id ? 'EQUIPPED' : 'BASE' }}</span>
+              </div>
+              <small class="wo-stats">
+                {{ selectedHeroArmory.base.damage }} DMG · R{{ selectedHeroArmory.base.minRange }}-{{ selectedHeroArmory.base.maxRange }} · {{ selectedHeroArmory.base.arc.toUpperCase() }}
+                <template v-if="selectedHeroArmory.base.knockback"> · ⇄ Push</template>
+              </small>
+              <small class="wo-desc">{{ selectedHeroArmory.base.description }}</small>
+            </button>
+
+            <button
+              class="weapon-opt alt"
+              :class="{
+                equipped: selectedHeroArmory.equippedId === selectedHeroArmory.alt.id,
+                locked: !selectedHeroArmory.altUnlocked,
+              }"
+              :disabled="selectedHero.harvested || !selectedHeroArmory.altUnlocked"
+              @click="handleEquipWeapon(selectedHeroArmory.alt.id)"
+            >
+              <div class="wo-head">
+                <strong>⚔️ {{ selectedHeroArmory.alt.name }}</strong>
+                <span class="wo-badge">
+                  {{
+                    selectedHeroArmory.equippedId === selectedHeroArmory.alt.id
+                      ? 'EQUIPPED'
+                      : selectedHeroArmory.altUnlocked
+                        ? 'EQUIP ALT'
+                        : '🔒 MARKET / ELITE'
+                  }}
+                </span>
+              </div>
+              <small class="wo-stats">
+                {{ selectedHeroArmory.alt.damage }} DMG · R{{ selectedHeroArmory.alt.minRange }}-{{ selectedHeroArmory.alt.maxRange }} · {{ selectedHeroArmory.alt.arc.toUpperCase() }}
+                <template v-if="selectedHeroArmory.alt.knockback"> · ⇄ Push</template>
+                <template v-if="selectedHeroArmory.alt.appliesStatus"> · +{{ selectedHeroArmory.alt.appliesStatus.kind }}</template>
+              </small>
+              <small class="wo-desc">{{ selectedHeroArmory.alt.description }}</small>
+            </button>
           </div>
 
           <!-- 3-Branch Skill Tree Grid -->
@@ -571,6 +642,83 @@ function perkState(perkId: string): 'unlocked' | 'ready' | 'locked' {
 .stat-chip.graft {
   background: #fff2be;
   border-color: #c28717;
+}
+
+.armory-bar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.weapon-opt {
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: #fbf4e4;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: transform 0.12s ease, background-color 0.12s ease;
+}
+
+.weapon-opt:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #fffdf5;
+}
+
+.weapon-opt.equipped {
+  background: linear-gradient(180deg, #fff5c4 0%, #ffe382 100%);
+  border-color: #a66200;
+  box-shadow: 0 3px 0 #7a4600;
+}
+
+.weapon-opt.locked {
+  opacity: 0.62;
+  background: #ece2cd;
+  cursor: not-allowed;
+}
+
+.wo-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.wo-head strong {
+  font-size: 0.84rem;
+  color: var(--ink);
+}
+
+.wo-badge {
+  font-size: 0.62rem;
+  font-weight: 900;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1.4px solid var(--ink);
+  background: #fff8e6;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.weapon-opt.equipped .wo-badge {
+  background: #4e8c28;
+  color: #fffef5;
+  border-color: #264d12;
+}
+
+.wo-stats {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #7a3e0a;
+}
+
+.wo-desc {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  line-height: 1.28;
 }
 
 .tree-grid {

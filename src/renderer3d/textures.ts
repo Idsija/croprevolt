@@ -15,6 +15,7 @@ export const UNIT_WORLD_HEIGHTS: Record<string, number> = {
   rooster: 1.22,
   sheep: 1.14,
   goat: 1.2,
+  seed_cart: 0.98,
   digger: 1.4,
   digger_heavy: 1.34,
   trimmer: 1.44,
@@ -39,6 +40,7 @@ export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   rooster: 'right',
   sheep: 'right',
   goat: 'right',
+  seed_cart: 'right',
   digger: 'left',
   digger_heavy: 'left',
   trimmer: 'left',
@@ -52,7 +54,7 @@ export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
 export type SpriteVariantKind = 'base' | 'hit' | 'lowhp' | 'enraged';
 
 /**
- * Explicit registry of hand-crafted transparent variant PNGs in /sprites/.
+ * Explicit registry of ALL 24 hand-crafted transparent variant PNGs in /sprites/.
  * Prevents any 404 requests for units that rely on procedural 3D paper-craft overlays.
  */
 export const AVAILABLE_VARIANT_SPRITES = new Set<string>([
@@ -64,8 +66,19 @@ export const AVAILABLE_VARIANT_SPRITES = new Set<string>([
   'pea_lowhp',
   'lemon_hit',
   'lemon_lowhp',
+  'potato_lowhp',
+  'chili_lowhp',
+  'carrot_lowhp',
+  'corn_lowhp',
+  'blackberry_lowhp',
+  'pig_lowhp',
+  'rooster_lowhp',
+  'sheep_lowhp',
+  'goat_lowhp',
   'digger_hit',
   'trimmer_hit',
+  'sprayer_hit',
+  'mower_hit',
   'scarecrow_enraged',
   'tractor_enraged',
   'harvester_enraged',
@@ -231,6 +244,17 @@ export class CraftTextureLibrary {
     let back = this.spriteBackTextures.get(visualKind);
 
     if (!front || !back) {
+      if (visualKind === 'seed_cart') {
+        const pair = this.buildSeedCartSpritePair();
+        front = this.track(pair.front);
+        back = this.track(pair.back);
+        this.spriteTextures.set(visualKind, front);
+        this.spriteBackTextures.set(visualKind, back);
+        this.spriteAspects.set(visualKind, 1.18);
+        onAspectReady?.(1.18);
+        return { front, back, aspect: 1.18 };
+      }
+
       front = this.loader.load(`/sprites/${visualKind}.png`, (tex) => {
         if (this.disposed) return;
         const img = tex.image as HTMLImageElement | undefined;
@@ -270,6 +294,92 @@ export class CraftTextureLibrary {
     }
 
     return { front, back, aspect: existingAspect ?? 0.92 };
+  }
+
+  private buildSeedCartSpritePair(): { front: THREE.CanvasTexture; back: THREE.CanvasTexture } {
+    const w = 320;
+    const h = 272;
+    const { canvas, ctx } = makeCanvas(w, h);
+    ctx.clearRect(0, 0, w, h);
+
+    // Cream Paper Mario cut-paper sticker backing silhouette
+    ctx.fillStyle = '#fff8e6';
+    ctx.beginPath();
+    ctx.roundRect(24, 34, 272, 224, 42);
+    ctx.fill();
+    ctx.strokeStyle = '#5c3818';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+
+    // Glowing heirloom golden seed mound peeking out the wagon bed
+    const glow = ctx.createRadialGradient(160, 108, 12, 160, 108, 92);
+    glow.addColorStop(0, '#fff7b0');
+    glow.addColorStop(0.55, '#f5c23b');
+    glow.addColorStop(1, '#c97e18');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.ellipse(160, 114, 86, 54, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#6b3e12';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Sprouting golden leaf emblem at top of pile
+    ctx.fillStyle = '#7bd148';
+    ctx.beginPath();
+    ctx.ellipse(142, 62, 22, 11, -0.5, 0, Math.PI * 2);
+    ctx.ellipse(178, 62, 22, 11, 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#2d5c1a';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Sturdy painted wooden wagon body
+    ctx.fillStyle = '#c47c38';
+    ctx.beginPath();
+    ctx.roundRect(52, 116, 216, 78, 12);
+    ctx.fill();
+    ctx.strokeStyle = '#4a2810';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+
+    // Horizontal planks & gold trim rail
+    ctx.fillStyle = '#f5cb4c';
+    ctx.fillRect(54, 118, 212, 14);
+    ctx.strokeStyle = '#4a2810';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(54, 152);
+    ctx.lineTo(266, 152);
+    ctx.moveTo(114, 118);
+    ctx.lineTo(114, 192);
+    ctx.moveTo(206, 118);
+    ctx.lineTo(206, 192);
+    ctx.stroke();
+
+    // Twin red-spoked storybook wagon wheels
+    for (const wx of [100, 220]) {
+      ctx.fillStyle = '#9c3624';
+      ctx.beginPath();
+      ctx.arc(wx, 206, 36, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#3b1e0c';
+      ctx.lineWidth = 5;
+      ctx.stroke();
+
+      ctx.fillStyle = '#f2c144';
+      ctx.beginPath();
+      ctx.arc(wx, 206, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    const front = finalizeTexture(canvas);
+    const back = finalizeTexture(canvas);
+    back.wrapS = THREE.RepeatWrapping;
+    back.repeat.set(-1, 1);
+    back.offset.set(1, 0);
+    return { front, back };
   }
 
   public getTerrainTexture(theme: BoardTheme, terrain: TerrainType, checker: boolean): THREE.Texture {
@@ -648,6 +758,23 @@ export class CraftTextureLibrary {
       ctx.arc(s * 0.5, s * 0.5, s * 0.34, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
+    } else if (terrain === 'bounce_pad') {
+      // Storybook mossy meadow ring around a bouncy red-spotted launchpad mushroom!
+      const mg = ctx.createRadialGradient(s * 0.5, s * 0.5, 16, s * 0.5, s * 0.5, s * 0.48);
+      mg.addColorStop(0, '#ff688c');
+      mg.addColorStop(0.55, '#d63358');
+      mg.addColorStop(0.75, '#77b044');
+      mg.addColorStop(1, 'rgba(119, 176, 68, 0)');
+      ctx.fillStyle = mg;
+      ctx.beginPath();
+      ctx.arc(s * 0.5, s * 0.5, s * 0.46, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(255, 240, 178, 0.92)';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(s * 0.5, s * 0.5, s * 0.35, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
     // Crisp warm hand-inked paper tile bevel border

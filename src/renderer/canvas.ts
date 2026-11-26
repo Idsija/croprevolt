@@ -2311,6 +2311,9 @@ export class PaperCraftRenderer {
     } else if (tile.terrain === 'burrow') {
       fill = checker ? '#8a623c' : '#7f5834';
       topEdgeCol = '#2a8f85';
+    } else if (tile.terrain === 'bounce_pad') {
+      fill = checker ? '#c95e72' : '#b84f64';
+      topEdgeCol = '#f6d55c';
     }
 
     const d = m.boardDepth;

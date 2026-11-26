@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { HARVEST_HEAT_LEVELS, MAX_HARVEST_HEAT } from '../engine/difficulty';
 import { META_UNLOCK_COSTS } from '../engine/run';
 import type { MetaProgress } from '../engine/types';
 import { TitleBackdropRenderer } from '../renderer3d/TitleBackdropRenderer';
@@ -7,16 +8,27 @@ import {
   buyMetaUnlock,
   continueSavedRun,
   gameStore,
+  setSelectedHeat,
   startNewSeasonRun,
   toggleAudioMute,
+  toggleMusicMute,
 } from '../stores/gameStore';
+import AlmanacModal from './AlmanacModal.vue';
 import CraftIcon from './CraftIcon.vue';
 import CropRevoltLogo from './CropRevoltLogo.vue';
 
-const activeModal = ref<'none' | 'shed' | 'guide'>('none');
+const activeModal = ref<'none' | 'shed' | 'guide' | 'almanac'>('none');
 const backdropCanvasRef = ref<HTMLCanvasElement | null>(null);
 const webglReady = ref(false);
 let backdropRenderer: TitleBackdropRenderer | null = null;
+
+const maxHeatUnlocked = computed(() =>
+  Math.max(1, Math.min(MAX_HARVEST_HEAT, gameStore.meta.maxHeatUnlocked ?? 1))
+);
+const currentHeat = computed(() =>
+  Math.max(0, Math.min(maxHeatUnlocked.value, gameStore.meta.selectedHeat ?? 0))
+);
+const currentHeatInfo = computed(() => HARVEST_HEAT_LEVELS[currentHeat.value] ?? HARVEST_HEAT_LEVELS[0]);
 
 const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
   'extraItemSatchel',
@@ -53,9 +65,25 @@ onBeforeUnmount(() => {
         <CraftIcon name="seed" :size="15" />
         <span>{{ gameStore.meta.heirloomSeeds }} Seeds</span>
       </button>
-      <button class="paper-btn icon-only" aria-label="Toggle sound" @click="toggleAudioMute">
-        <CraftIcon :name="gameStore.muted ? 'sound_off' : 'sound_on'" :size="18" />
-      </button>
+      <div class="audio-controls">
+        <button
+          class="paper-btn icon-only music-btn"
+          :class="{ off: gameStore.musicMuted }"
+          :title="gameStore.musicMuted ? 'Unmute Storybook Music' : 'Mute Storybook Music'"
+          aria-label="Toggle music"
+          @click="toggleMusicMute"
+        >
+          <span>{{ gameStore.musicMuted ? '🔇' : '🎵' }}</span>
+        </button>
+        <button
+          class="paper-btn icon-only"
+          :title="gameStore.muted ? 'Unmute Sound Effects' : 'Mute Sound Effects'"
+          aria-label="Toggle sound effects"
+          @click="toggleAudioMute"
+        >
+          <CraftIcon :name="gameStore.muted ? 'sound_off' : 'sound_on'" :size="18" />
+        </button>
+      </div>
     </div>
 
     <!-- Main Centered Paper-Craft Game Cover -->
@@ -104,6 +132,34 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <!-- Harvest Heat Ascension Selector (0-5) -->
+      <div class="heat-panel">
+        <div class="heat-top">
+          <strong>🔥 Harvest Heat</strong>
+          <span class="heat-bonus" v-if="currentHeatInfo.seedBonusPct > 0">
+            +{{ currentHeatInfo.seedBonusPct }}% Heirloom Seeds
+          </span>
+          <span class="heat-bonus muted" v-else>Standard Mode</span>
+        </div>
+        <div class="heat-pills">
+          <button
+            v-for="h in HARVEST_HEAT_LEVELS"
+            :key="h.level"
+            class="heat-pill"
+            :class="{
+              active: currentHeat === h.level,
+              locked: h.level > maxHeatUnlocked,
+            }"
+            :disabled="h.level > maxHeatUnlocked"
+            :title="h.level > maxHeatUnlocked ? 'Win a run at lower Heat to unlock' : `${h.name}: ${h.desc}`"
+            @click="setSelectedHeat(h.level)"
+          >
+            {{ h.level > maxHeatUnlocked ? `🔒${h.level}` : `H${h.level}` }}
+          </button>
+        </div>
+        <small class="heat-desc">{{ currentHeatInfo.name }} — {{ currentHeatInfo.desc }}</small>
+      </div>
+
       <!-- Primary Thumb-Ready CTA Stack -->
       <div class="cta-stack">
         <button
@@ -122,23 +178,31 @@ onBeforeUnmount(() => {
           <CraftIcon name="play" :size="18" />
           <span>
             {{ gameStore.savedRunAvailable ? 'Start Fresh Run' : 'Play Run' }}
+            <template v-if="currentHeat > 0"> (Heat {{ currentHeat }})</template>
           </span>
         </button>
 
-        <div class="secondary-row">
+        <div class="secondary-row three-col">
           <button class="paper-btn sec-btn" @click="activeModal = 'shed'">
-            <CraftIcon name="shed" :size="16" />
+            <CraftIcon name="shed" :size="15" />
             <span>Seed Shed</span>
             <span class="mini-count">{{ gameStore.meta.heirloomSeeds }}</span>
           </button>
 
+          <button class="paper-btn gold sec-btn" @click="activeModal = 'almanac'">
+            <span>📖 Almanac</span>
+          </button>
+
           <button class="paper-btn sec-btn" @click="activeModal = 'guide'">
-            <CraftIcon name="book" :size="16" />
-            <span>Field Guide</span>
+            <CraftIcon name="book" :size="15" />
+            <span>Guide</span>
           </button>
         </div>
       </div>
     </main>
+
+    <!-- Storybook Field Almanac Compendium Modal -->
+    <AlmanacModal v-if="activeModal === 'almanac'" @close="activeModal = 'none'" />
 
     <!-- Seed Shed Meta-Progression Modal -->
     <div v-if="activeModal === 'shed'" class="modal-backdrop" @click.self="activeModal = 'none'">
@@ -447,6 +511,85 @@ onBeforeUnmount(() => {
   border-top: 1.4px solid var(--ink);
 }
 
+.audio-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.music-btn.off {
+  opacity: 0.65;
+}
+
+.heat-panel {
+  width: 100%;
+  background: rgba(255, 250, 236, 0.9);
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.heat-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+
+.heat-bonus {
+  background: #ffd978;
+  border: 1.4px solid var(--ink);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.69rem;
+  font-weight: 800;
+  color: #5e2c00;
+}
+
+.heat-bonus.muted {
+  background: #ece0c8;
+  color: var(--ink-soft);
+}
+
+.heat-pills {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+}
+
+.heat-pill {
+  border: 1.8px solid var(--ink);
+  border-radius: 8px;
+  padding: 4px 2px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  background: #f5e6c5;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.heat-pill.active {
+  background: linear-gradient(180deg, #ff9938 0%, #e04d1f 100%);
+  color: #fffef5;
+  box-shadow: 0 2px 0 var(--ink);
+}
+
+.heat-pill.locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: #e4d8bf;
+}
+
+.heat-desc {
+  font-size: 0.71rem;
+  color: var(--ink-soft);
+  line-height: 1.25;
+}
+
 .cta-stack {
   width: 100%;
   display: flex;
@@ -467,9 +610,15 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.secondary-row.three-col {
+  grid-template-columns: 1.15fr 1fr 0.85fr;
+  gap: 6px;
+}
+
 .sec-btn {
   min-height: 40px;
-  font-size: 0.86rem;
+  font-size: 0.82rem;
+  padding-inline: 8px;
 }
 
 .mini-count {

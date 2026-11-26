@@ -183,6 +183,10 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   private lastTime = 0;
   private elapsedTotal = 0;
   private hitstopTimer = 0;
+  private bossIntroMapKey = '';
+  private bossIntroStartMs = 0;
+  private bossIntroFocusPos: GridPos | null = null;
+  private victoryConfettiAccum = 0;
   private resizeObserver: ResizeObserver;
   private lastBoardDims = '';
   private tacticalCache: CachedTactics | null = null;
@@ -285,9 +289,12 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
 
   private resize(): void {
     const parent = this.canvas.parentElement ?? this.canvas;
-    const rect = parent.getBoundingClientRect();
-    this.cssW = Math.max(260, Math.floor(rect.width || window.innerWidth));
-    this.cssH = Math.max(200, Math.floor(rect.height || window.innerHeight));
+    // Use clientWidth/clientHeight (untransformed CSS layout box) so CSS 3D transitions
+    // like origami-flip never distort the WebGL/2D overlay alignment!
+    const w = parent.clientWidth || window.innerWidth;
+    const h = parent.clientHeight || window.innerHeight;
+    this.cssW = Math.max(260, Math.floor(w));
+    this.cssH = Math.max(200, Math.floor(h));
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     this.renderer.setPixelRatio(this.dpr);
@@ -296,8 +303,6 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     if (this.overlayCanvas) {
       this.overlayCanvas.width = Math.floor(this.cssW * this.dpr);
       this.overlayCanvas.height = Math.floor(this.cssH * this.dpr);
-      this.overlayCanvas.style.width = `${this.cssW}px`;
-      this.overlayCanvas.style.height = `${this.cssH}px`;
     }
 
     this.cameraCtrl.resize(this.cssW, this.cssH);
@@ -949,6 +954,123 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           break;
         }
 
+        case 'partner_assist': {
+          const pFrom = this.worldPointForTile(b, ev.from, 0.68);
+          const pTo = this.worldPointForTile(b, ev.to, 0.56);
+          const allyEntry = this.unitMap.get(ev.allyId);
+          if (allyEntry) {
+            allyEntry.squash = 0.7;
+          }
+          this.spawnProjectile3D(pFrom, pTo, 'direct', ev.allyKind);
+          this.triggerUnitHit(ev.targetId, false);
+          this.spawnBurst(pTo, ['#ffe052', '#7be054', '#fff9d6'], 14, 'confetti');
+          this.spawnPopup(
+            pTo.clone().add(new THREE.Vector3(0.18, 1.28, 0)),
+            `★ ASSIST +${ev.damage}`,
+            '#5c3200',
+            '#fff08c',
+            1.14
+          );
+          sfx.hit(false);
+          break;
+        }
+
+        case 'bounce_launch': {
+          const pFrom = this.worldPointForTile(b, ev.from, 0.35);
+          const pTo = this.worldPointForTile(b, ev.to, 0.35);
+          const entry = this.unitMap.get(ev.unitId);
+          if (entry) {
+            entry.anim = {
+              kind: 'path',
+              points: [this.worldPointForTile(b, ev.from, 0), this.worldPointForTile(b, ev.to, 0)],
+              elapsed: 0,
+              duration: 0.42,
+              arcHeight: 1.95,
+              leanAngle: 0.24,
+            };
+          }
+          this.spawnBurst(pFrom, ['#ff4fa3', '#ffe066', '#fff8e2'], 16, 'confetti');
+          this.spawnPopup(pTo.clone().add(new THREE.Vector3(0, 1.0, 0)), 'BOING!', '#8c1448', '#ffd9ec', 1.15);
+          sfx.jump();
+          break;
+        }
+
+        case 'pumpkin_roll': {
+          const pFrom = this.worldPointForTile(b, ev.from, 0.45);
+          const pTo = this.worldPointForTile(b, ev.to, 0.45);
+          this.spawnRollingPumpkin3D(pFrom, pTo, Math.max(0.32, (ev.path.length - 1) * 0.11));
+          this.cameraCtrl.triggerShake(0.32, 0.24);
+          this.hitstopTimer = Math.max(this.hitstopTimer, 0.06);
+          for (const hid of ev.hitIds) {
+            this.triggerUnitHit(hid, true);
+          }
+          this.spawnBurst(pTo, ['#f27f1b', '#ffba3b', '#4d8a2d', '#fbf3df'], 24, 'confetti');
+          this.spawnPopup(
+            pTo.clone().add(new THREE.Vector3(0, 1.1, 0)),
+            ev.hitIds.length > 0 ? `PUMPKIN BOWL! -${ev.damage}` : 'ROLLING PUMPKIN!',
+            '#6e2800',
+            '#ffdd99',
+            1.22
+          );
+          sfx.coverBreak();
+          break;
+        }
+
+        case 'bridge_collapse': {
+          const p = this.worldPointForTile(b, ev.pos, 0.35);
+          this.cameraCtrl.triggerShake(0.34, 0.26);
+          this.spawnBurst(p, ['#b5773c', '#824d23', '#e0b175'], 24, 'plank');
+          this.spawnBurst(
+            p,
+            ev.liquid === 'lava' ? ['#ff521b', '#ffd54f', '#3b150c'] : ['#33b8e8', '#a8ebff', '#ffffff'],
+            20,
+            ev.liquid === 'lava' ? 'confetti' : 'droplet'
+          );
+          this.spawnPopup(
+            p.clone().add(new THREE.Vector3(0, 1.05, 0)),
+            'BRIDGE COLLAPSED!',
+            '#5c2408',
+            '#ffe0bd',
+            1.2
+          );
+          sfx.coverBreak();
+          break;
+        }
+
+        case 'reinforcement_spawn': {
+          const p = this.worldPointForTile(b, ev.pos, 0.5);
+          this.spawnBurst(p, ['#8a623c', '#3cf0de', '#f2d080'], 18, 'confetti');
+          this.spawnPopup(
+            p.clone().add(new THREE.Vector3(0, 1.05, 0)),
+            `+ ${ev.unitName.toUpperCase()}!`,
+            '#6e160d',
+            '#ffe0d6',
+            1.1
+          );
+          sfx.dash();
+          break;
+        }
+
+        case 'escort_move': {
+          const pFrom = this.worldPointForTile(b, ev.from, 0);
+          const pTo = this.worldPointForTile(b, ev.to, 0);
+          const entry = this.unitMap.get(ev.unitId);
+          if (entry) {
+            entry.anim = {
+              kind: 'path',
+              points: [pFrom, pTo],
+              elapsed: 0,
+              duration: 0.36,
+              arcHeight: 0.14,
+              leanAngle: 0.06,
+            };
+          }
+          this.spawnBurst(pTo.clone().add(new THREE.Vector3(0, 0.4, 0)), ['#ffe066', '#fff9d6', '#7bd148'], 10, 'confetti');
+          this.spawnPopup(pTo.clone().add(new THREE.Vector3(0, 1.05, 0)), 'CONVOY ROLLS ON!', '#634100', '#fff3b8', 1.06);
+          sfx.step();
+          break;
+        }
+
         case 'banner': {
           this.banner = {
             text: ev.text,
@@ -962,6 +1084,33 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         }
       }
     }
+  }
+
+  private spawnRollingPumpkin3D(from: THREE.Vector3, to: THREE.Vector3, duration: number): void {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.SphereGeometry(0.38, 12, 10),
+      new THREE.MeshStandardMaterial({ color: '#ec781a', roughness: 0.65 })
+    );
+    body.scale.set(1.08, 0.88, 1.08);
+    body.castShadow = true;
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.08, 0.18, 6),
+      new THREE.MeshStandardMaterial({ color: '#477a28', roughness: 0.85 })
+    );
+    stem.position.y = 0.35;
+    group.add(body, stem);
+    group.position.copy(from);
+    this.fxGroup.add(group);
+    this.projectiles.push({
+      mesh: group,
+      from: from.clone(),
+      to: to.clone(),
+      elapsed: 0,
+      duration,
+      arcHeight: 0.12,
+      spinSpeed: 22,
+    });
   }
 
   private spawnProjectile3D(from: THREE.Vector3, to: THREE.Vector3, arc: string, attackerKind: string): void {
@@ -1138,13 +1287,13 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         : new Map<string, JumpOption>();
 
     const dashList =
-      b.phase === 'player' && selectedUnit && view.mode === 'move'
+      !b.prepPhase && b.phase === 'player' && selectedUnit && view.mode === 'move'
         ? computeDashOptions(b, selectedUnit)
         : [];
     const dashEnemyIds = new Set(dashList.map((d) => d.enemyId));
 
     const attackTiles =
-      b.phase === 'player' && selectedUnit && (view.mode === 'attack' || view.mode === 'move')
+      !b.prepPhase && b.phase === 'player' && selectedUnit && (view.mode === 'attack' || view.mode === 'move')
         ? getAttackableTiles(b, selectedUnit)
         : [];
     const attackKeySet = new Set(attackTiles.map(posKey));
@@ -1152,7 +1301,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     // Projected weapon range when hovering a Move/Jump destination tile!
     let isProjectingFromMove = false;
     let weaponRangeOrigin: GridPos | null = null;
-    if (b.phase === 'player' && selectedUnit && !selectedUnit.actions.hasAttacked) {
+    if (!b.prepPhase && b.phase === 'player' && selectedUnit && !selectedUnit.actions.hasAttacked) {
       if (
         view.mode === 'move' &&
         focusTile &&
@@ -1214,7 +1363,8 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       const fcTile = tileAt(b, focusTile);
       const isEnemy = Boolean(fu && fu.team === 'enemy');
       const isCover = Boolean(fcTile?.cover?.destructible);
-      if (isEnemy || isCover || (view.mode === 'attack' && selectedUnit.weapon.arc === 'lobbed')) {
+      const isBridge = Boolean(!fu && fcTile?.terrain === 'bridge' && (fcTile.bridgeHp ?? 0) > 0);
+      if (isEnemy || isCover || isBridge || (view.mode === 'attack' && selectedUnit.weapon.arc === 'lobbed')) {
         const fc = forecastAttack(b, selectedUnit, focusTile);
         if (fc.canAttack || !fc.reason?.startsWith('Out of range')) {
           focusForecast = fc;
@@ -1347,7 +1497,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         desiredVariant = 'hit';
       } else if (isBossEnraged) {
         desiredVariant = 'enraged';
-      } else if (isLowHp) {
+      } else if (isLowHp && b.status !== 'victory') {
         desiredVariant = 'lowhp';
       }
       entry.rig.setSpriteKey(resolveVariantSpriteKey(u.visualKind, desiredVariant));
@@ -1401,24 +1551,30 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       const hasBoosted = u.statuses.some((s) => s.kind === 'boosted');
       const isOverwatching = u.statuses.some((s) => s.kind === 'overwatch');
 
-      // 4. Expressive Idle Breathe, Pop-Up Fold-In, Aim Lean, Hit Recoil, Low-HP Droop & Fear Shiver!
+      // 4. Expressive Idle Breathe, Victory Celebration Dance, Pop-Up Fold-In, Aim Lean & Hit Recoil!
       const isSelected = u.id === view.selectedUnitId;
       const isAimingHero = isSelected && view.mode === 'attack' && b.phase === 'player';
       const isInspected = u.id === view.inspectedEnemyId;
       const isDashTarget = tac.dashEnemyIds.has(u.id);
       const isDone = tac.doneUnitIds.has(u.id);
+      const isCelebrating = b.status === 'victory' && u.team === 'player';
 
-      const breatheSpeed = isLowHp ? 6.2 : isSelected ? 4.4 : 2.6;
+      const breatheSpeed = isCelebrating ? 7.8 : isLowHp ? 6.2 : isSelected ? 4.4 : 2.6;
       const idlePhase = this.elapsedTotal * breatheSpeed + u.pos.x * 0.9 + u.pos.y * 1.3;
       const idleBounce = entry.anim
         ? 0
-        : Math.abs(Math.sin(idlePhase)) * (isSelected ? 0.085 : isLowHp ? 0.04 : 0.025);
+        : isCelebrating
+          ? Math.abs(Math.sin(idlePhase)) * 0.34
+          : Math.abs(Math.sin(idlePhase)) * (isSelected ? 0.085 : isLowHp ? 0.04 : 0.025);
+      if (isCelebrating && !entry.anim) {
+        extraSpinY += Math.sin(idlePhase * 0.5) * 0.55;
+      }
 
       const camPitch = this.cameraCtrl.getCurrentPitch();
       const tacticamTiltX = -Math.max(0, (camPitch - 0.72) * 0.52);
       const popUpFoldX = popUp < 1 ? (1 - popUpEase) * (-Math.PI * 0.45) : 0;
       const aimLeanX = isAimingHero ? 0.13 : 0;
-      const lowHpDroopX = isLowHp && !entry.anim ? 0.08 + Math.sin(idlePhase) * 0.03 : 0;
+      const lowHpDroopX = isLowHp && !isCelebrating && !entry.anim ? 0.08 + Math.sin(idlePhase) * 0.03 : 0;
       const hitRecoilX = entry.hitPoseTimer > 0 ? -Math.sin((entry.hitPoseTimer / 0.44) * Math.PI) * 0.28 : 0;
 
       const targetTiltX = tacticamTiltX + popUpFoldX + aimLeanX + lowHpDroopX + hitRecoilX;
@@ -1434,7 +1590,9 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       );
       entry.rig.tiltGroup.rotation.z =
         tiltZ +
-        (entry.anim ? 0 : Math.sin(idlePhase * 0.5) * (isSelected ? 0.045 : isLowHp ? 0.04 : 0.018)) +
+        (entry.anim
+          ? 0
+          : Math.sin(idlePhase * 0.5) * (isCelebrating ? 0.14 : isSelected ? 0.045 : isLowHp ? 0.04 : 0.018)) +
         (entry.hitPoseTimer > 0 ? Math.sin(entry.hitPoseTimer * 42) * 0.1 : 0);
 
       // Squash, Stretch & Paper-Accordion Hit Ripple
@@ -2069,6 +2227,53 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     });
 
     this.updateAimCamAndFocusAnchor(view, tac);
+
+    // 3D Boss Intro Camera Swoop (wall-clock 1.35s focus on Act Boss terrace on Turn 1 after Prep!)
+    if (b.objective === 'boss' && !b.prepPhase && b.turn === 1 && b.status === 'ongoing') {
+      const introKey = `${b.mapId}:${b.width}x${b.height}`;
+      if (this.bossIntroMapKey !== introKey) {
+        const boss = b.units.find((u) => u.isBoss && u.alive);
+        if (boss) {
+          this.bossIntroMapKey = introKey;
+          this.bossIntroStartMs = performance.now();
+          this.bossIntroFocusPos = { ...boss.pos };
+          this.focusOnGrid(boss.pos);
+          this.banner = {
+            text: `${boss.name.toUpperCase()} · ${boss.title.toUpperCase()}`,
+            tone: 'enemy',
+            startMs: performance.now(),
+            durationMs: 1350,
+          };
+        }
+      } else if (this.bossIntroFocusPos && this.bossIntroStartMs > 0) {
+        const elapsedMs = performance.now() - this.bossIntroStartMs;
+        if (elapsedMs > 1350) {
+          this.bossIntroFocusPos = null;
+          this.bossIntroStartMs = 0;
+          const firstHero = b.units.find((u) => u.team === 'player' && u.alive && !u.isEscortCart);
+          if (firstHero) this.focusOnGrid(firstHero.pos);
+        }
+      }
+    }
+
+    // Raining 3D Rainbow Paper Confetti during Battle Victory!
+    if (b.status === 'victory') {
+      this.victoryConfettiAccum += rawDt;
+      if (this.victoryConfettiAccum >= 0.16 && this.particles.length < 120) {
+        this.victoryConfettiAccum = 0;
+        const rx = (Math.random() - 0.5) * b.width * TILE_SIZE_3D * 0.88;
+        const rz = (Math.random() - 0.5) * b.height * TILE_SIZE_3D * 0.88;
+        this.spawnBurst(
+          new THREE.Vector3(rx, 4.4, rz),
+          ['#ffd54f', '#ff5c8a', '#52d4ff', '#7be054', '#ff9f43', '#fff8e2'],
+          6,
+          'confetti'
+        );
+      }
+    } else {
+      this.victoryConfettiAccum = 0;
+    }
+
     this.cameraCtrl.update(rawDt);
     this.overlays.update(this.elapsedTotal, this.cameraCtrl.camera.position);
     this.syncUnits(view, tac, simDt);

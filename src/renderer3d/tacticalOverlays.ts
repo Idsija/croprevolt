@@ -132,6 +132,7 @@ export class TacticalOverlaySystem3D {
       b.mapId,
       b.turn,
       b.phase,
+      b.prepPhase ? 'prep' : 'live',
       snap.selectedUnit?.id ?? '-',
       snap.selectedUnit ? `${snap.selectedUnit.pos.x},${snap.selectedUnit.pos.y}` : '-',
       snap.selectedUnit
@@ -153,7 +154,9 @@ export class TacticalOverlaySystem3D {
       snap.aoePreviewKeys.size,
       threatSig,
       telSig,
-      snap.focusForecast ? `${snap.focusForecast.hitChance}:${snap.focusForecast.coverLevel}:${snap.focusForecast.canAttack ? 1 : 0}` : '-',
+      snap.focusForecast
+        ? `${snap.focusForecast.hitChance}:${snap.focusForecast.coverLevel}:${snap.focusForecast.canAttack ? 1 : 0}:${snap.focusForecast.isPumpkinTarget ? 1 : 0}:${snap.focusForecast.isBridgeTarget ? 1 : 0}`
+        : '-',
     ].join('|');
 
     // Always update cursor position quickly
@@ -223,6 +226,24 @@ export class TacticalOverlaySystem3D {
     this.telegraphBeacons = [];
     const b = snap.battle;
     if (b.status !== 'ongoing') return;
+
+    // Pre-Battle Tactical Prep Phase: glow all valid player spawn tiles emerald/gold!
+    if (b.prepPhase) {
+      for (const sp of b.playerSpawnPositions ?? []) {
+        const isSelectedPos = Boolean(snap.selectedUnit && samePos(snap.selectedUnit.pos, sp));
+        const isFocused = Boolean(snap.focusTile && samePos(snap.focusTile, sp));
+        this.addTilePlate(
+          b,
+          sp,
+          isSelectedPos ? 0xf8c634 : 0x3ec96b,
+          isSelectedPos || isFocused ? 0.56 : 0.36,
+          isSelectedPos ? 0xfff6bd : 0xc6ffcf,
+          0.98,
+          0.032
+        );
+      }
+      return;
+    }
 
     // 0. Boss Telegraphed Super-Attack Danger Zones! (Always visible so player can dodge!)
     if (b.bossTelegraphs && b.bossTelegraphs.length > 0) {
@@ -303,17 +324,18 @@ export class TacticalOverlaySystem3D {
 
     // 2. Active Mode Tactical Tiles
     if (snap.mode === 'move') {
-      // Blue movable tiles
+      // Blue movable tiles (teal for Burrows, magenta-pink for Bouncy Mushrooms!)
       for (const node of snap.movableMap.values()) {
         const isFocused = Boolean(snap.focusTile && samePos(snap.focusTile, node.pos));
         const tile = tileAt(b, node.pos);
         const isBurrow = tile?.terrain === 'burrow';
+        const isBounce = tile?.terrain === 'bounce_pad';
         this.addTilePlate(
           b,
           node.pos,
-          isBurrow ? 0x2de0cf : 0x27b0f5,
-          isFocused ? 0.54 : isBurrow ? 0.42 : 0.34,
-          isFocused ? 0xc7f2ff : isBurrow ? 0xb5fff7 : 0x7adeff,
+          isBounce ? 0xee4c88 : isBurrow ? 0x2de0cf : 0x27b0f5,
+          isFocused ? 0.54 : isBounce || isBurrow ? 0.42 : 0.34,
+          isFocused ? 0xc7f2ff : isBounce ? 0xffd1e6 : isBurrow ? 0xb5fff7 : 0x7adeff,
           isFocused ? 1 : 0.85,
           0.026
         );
@@ -493,7 +515,7 @@ export class TacticalOverlaySystem3D {
     const b = snap.battle;
     const hero = snap.selectedUnit;
     const focus = snap.focusTile;
-    if (!hero || !focus || b.phase !== 'player' || b.status !== 'ongoing') return;
+    if (!hero || !focus || b.phase !== 'player' || b.status !== 'ongoing' || b.prepPhase) return;
 
     const focusKey = posKey(focus);
 
@@ -520,23 +542,25 @@ export class TacticalOverlaySystem3D {
       return;
     }
 
-    // Case B: Hovering a Move tile -> Smooth glowing cyan ribbon + teal Gopher Burrow warp arcs!
+    // Case B: Hovering a Move tile -> Smooth glowing cyan ribbon + teal Burrow / magenta Bounce Pad arcs!
     if (snap.mode === 'move' && snap.movableMap.has(focusKey)) {
       const node = snap.movableMap.get(focusKey)!;
       if (node.path.length >= 2) {
         let seg: THREE.Vector3[] = [this.tilePosY(b, node.path[0], 0.12)];
-        let hasWarp = false;
+        let specialColor = 0x8ce8ff;
         for (let i = 1; i < node.path.length; i++) {
           const prev = node.path[i - 1];
           const curr = node.path[i];
           if (manhattan(prev, curr) > 1) {
             if (seg.length >= 2) this.addTubeArc(seg, 0.068, 0x45d3ff, 0.92);
-            const fromW = this.tilePosY(b, prev, 0.14);
+            const fromW = this.tilePosY(b, prev, 0.16);
             const toW = this.tilePosY(b, curr, 0.14);
-            this.addParabolicArc(fromW, toW, 1.35, 0x3cf0de, 0.062, true);
-            this.addGroundRing(this.tilePosY(b, prev, 0.05), 0.36, 0.52, 0x3cf0de);
-            this.addGroundRing(this.tilePosY(b, curr, 0.05), 0.36, 0.52, 0x3cf0de);
-            hasWarp = true;
+            const isBounce = tileAt(b, prev)?.terrain === 'bounce_pad';
+            const arcCol = isBounce ? 0xff4fa3 : 0x3cf0de;
+            this.addParabolicArc(fromW, toW, isBounce ? 1.85 : 1.35, arcCol, 0.066, !isBounce);
+            this.addGroundRing(this.tilePosY(b, prev, 0.05), 0.36, 0.52, arcCol);
+            this.addGroundRing(this.tilePosY(b, curr, 0.05), 0.36, 0.52, arcCol);
+            specialColor = arcCol;
             seg = [this.tilePosY(b, curr, 0.12)];
           } else {
             seg.push(this.tilePosY(b, curr, 0.12));
@@ -545,12 +569,7 @@ export class TacticalOverlaySystem3D {
         if (seg.length >= 2) {
           this.addTubeArc(seg, 0.068, 0x45d3ff, 0.92);
         }
-        this.addGroundRing(
-          this.tilePosY(b, focus, 0.04),
-          0.32,
-          0.48,
-          hasWarp ? 0x3cf0de : 0x8ce8ff
-        );
+        this.addGroundRing(this.tilePosY(b, focus, 0.04), 0.32, 0.48, specialColor);
       }
       return;
     }
@@ -572,7 +591,7 @@ export class TacticalOverlaySystem3D {
       }
     }
 
-    // Case D: Combat Forecast Sightline / Lobbed Mortar Arc + Knockback Arrow!
+    // Case D: Combat Forecast Sightline / Lobbed Mortar Arc + Knockback / Rolling Pumpkin Arrow!
     if (snap.focusForecast && (snap.mode === 'attack' || snap.mode === 'move')) {
       const fc = snap.focusForecast;
       const fromPt = this.tilePosY(b, hero.pos, 0.68);
@@ -584,6 +603,14 @@ export class TacticalOverlaySystem3D {
         const lineColor =
           fc.hitChance >= 100 ? 0x57e368 : fc.hitChance > 0 ? 0xf7be38 : 0xef4437;
         this.addParabolicArc(fromPt, toPt, 0.16, lineColor, 0.044, fc.hitChance < 100);
+      }
+
+      // Rolling Pumpkin bowling lane arrow preview!
+      if (fc.isPumpkinTarget && fc.pumpkinRollDir && fc.canAttack) {
+        const startRoll = this.tilePosY(b, fc.targetPos, 0.3);
+        const dirVec = new THREE.Vector3(fc.pumpkinRollDir.x, 0, fc.pumpkinRollDir.y).normalize();
+        const arrow = new THREE.ArrowHelper(dirVec, startRoll, 2.6, 0xff8819, 0.42, 0.34);
+        this.ribbonLayer.add(arrow);
       }
 
       // Knockback direction preview arrow (color-coded for Lava, Water, Cliff Drop, or Bump!)

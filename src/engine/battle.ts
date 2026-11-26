@@ -53,10 +53,14 @@ import type {
  * (tests and fixed scenarios rely on that).
  */
 export interface BattleSetup {
-  rng: Rng;
-  difficulty: BattleDifficulty;
+  rng?: Rng;
+  difficulty?: BattleDifficulty;
   /** Palette override, e.g. Autumn reusing Spring layouts. */
   theme?: BoardTheme;
+  /** Enable Mario+Rabbids Pre-Battle Tactical Prep Phase (swap spawn positions & bench heroes). */
+  enablePrepPhase?: boolean;
+  /** Harvest Heat ascension level (0-5). */
+  harvestHeat?: number;
 }
 
 function mirrorTemplate(map: MapTemplate): MapTemplate {
@@ -70,6 +74,7 @@ function mirrorTemplate(map: MapTemplate): MapTemplate {
     gateTiles: map.gateTiles?.map(flip),
     cagePos: map.cagePos ? flip(map.cagePos) : undefined,
     burrowPairs: map.burrowPairs?.map(([a, b]) => [flip(a), flip(b)]),
+    escortStartPos: map.escortStartPos ? flip(map.escortStartPos) : undefined,
   };
 }
 
@@ -83,8 +88,11 @@ function shuffle<T>(items: T[], rng: Rng): T[] {
 }
 
 /** Re-roll regular farmhands and add reinforcements in the enemy half of the board. */
-function varyEnemySpawns(map: MapTemplate, setup: BattleSetup): MapTemplate['enemySpawns'] {
-  const { rng, difficulty } = setup;
+function varyEnemySpawns(
+  map: MapTemplate,
+  rng: Rng,
+  difficulty: BattleDifficulty
+): MapTemplate['enemySpawns'] {
   const spawns = map.enemySpawns.map((spawn) => {
     if (ENEMY_BLUEPRINTS[spawn.blueprintId]?.isBoss) return { ...spawn };
     if (rng() >= TUNING.rerollChance) return { ...spawn };
@@ -101,6 +109,7 @@ function varyEnemySpawns(map: MapTemplate, setup: BattleSetup): MapTemplate['ene
     ...spawns.map((sp) => posKey(sp)),
     ...map.playerSpawns.map(posKey),
     ...(map.gateTiles ?? []).map(posKey),
+    ...(map.escortStartPos ? [posKey(map.escortStartPos)] : []),
   ]);
   const playerTop = Math.min(...map.playerSpawns.map((p) => p.y));
   const candidates: GridPos[] = [];
@@ -196,6 +205,54 @@ export function createBattleUnitFromHero(hero: RosterHero, pos: GridPos): Battle
   return unit;
 }
 
+export function createEscortSeedCart(pos: GridPos): BattleUnit {
+  return {
+    id: 'escort_seed_cart',
+    blueprintId: 'seed_cart',
+    team: 'player',
+    name: 'Golden Seed Cart',
+    title: 'Escort Convoy',
+    visualKind: 'seed_cart',
+    family: 'neutral',
+    isEscortCart: true,
+    pos: { ...pos },
+    facing: 'right',
+    hp: 16,
+    maxHp: 16,
+    moveRange: 0,
+    jumpRange: 0,
+    dashDamage: 0,
+    weapon: {
+      id: 'cart_bell',
+      name: 'Brass Bell',
+      arc: 'melee',
+      minRange: 1,
+      maxRange: 1,
+      damage: 0,
+      coverDamage: 0,
+      description: 'Autonomous Heirloom Seed Cart — rolls 2 tiles north each turn!',
+    },
+    abilityCooldown: 99,
+    graftIds: [],
+    tier: 'heirloom',
+    statuses: [],
+    actions: {
+      hasMoved: true,
+      hasDashed: true,
+      dashesUsed: 1,
+      dashedEnemyIds: [],
+      hasJumped: true,
+      hasAttacked: true,
+      hasUsedSkill: true,
+      overwatchCharges: 0,
+    },
+    tempAttackBonus: 0,
+    alive: true,
+    color: '#f5cc42',
+    accentColor: '#8d5524',
+  };
+}
+
 export function createBattleUnitFromEnemy(blueprintId: string, index: number, pos: GridPos): BattleUnit {
   const bp = ENEMY_BLUEPRINTS[blueprintId];
   if (!bp) throw new Error(`Unknown enemy blueprint: ${blueprintId}`);
@@ -248,10 +305,14 @@ export function createBattleFromMap(
   const template = MAP_TEMPLATES[mapId];
   if (!template) throw new Error(`Unknown map template: ${mapId}`);
   let map: MapTemplate = template;
-  if (setup) {
+  if (setup?.rng) {
     if (setup.rng() < 0.5) map = mirrorTemplate(map);
-    map = { ...map, enemySpawns: varyEnemySpawns(map, setup) };
+    if (setup.difficulty) {
+      map = { ...map, enemySpawns: varyEnemySpawns(map, setup.rng, setup.difficulty) };
+    }
   }
+
+  const harvestHeat = setup?.harvestHeat ?? 0;
 
   const tiles: Tile[][] = [];
   for (let y = 0; y < map.height; y++) {
@@ -279,6 +340,28 @@ export function createBattleFromMap(
         captiveId,
         spec.cover === 'cage' ? captiveInfo?.hero : undefined
       );
+      // Harvest Heat 3+: wooden crates start brittle (-2 HP)!
+      if (harvestHeat >= 3 && tile.cover.kind === 'crate') {
+        tile.cover.hp = Math.max(2, tile.cover.hp - 2);
+      }
+    }
+  }
+
+  // Initialize Collapsible Wooden Bridges (detect whether bridge spans lava or water)
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      const t = tiles[y][x];
+      if (t.terrain === 'bridge') {
+        const adjLava = [
+          tiles[y]?.[x - 1],
+          tiles[y]?.[x + 1],
+          tiles[y - 1]?.[x],
+          tiles[y + 1]?.[x],
+        ].some((n) => n?.terrain === 'lava');
+        t.bridgeHp = 5;
+        t.bridgeMaxHp = 5;
+        t.bridgeOver = adjLava ? 'lava' : 'water';
+      }
     }
   }
 
@@ -297,22 +380,30 @@ export function createBattleFromMap(
     units.push(unit);
   });
 
+  // Spawn Golden Seed Cart on Escort missions!
+  if (map.objective === 'escort' && map.escortStartPos) {
+    units.push(createEscortSeedCart(map.escortStartPos));
+  }
+
   let diggerCounter = 0;
   map.enemySpawns.forEach((spawn, i) => {
     const variantIdx = spawn.blueprintId === 'digger' ? diggerCounter++ : i;
     const enemy = createBattleUnitFromEnemy(spawn.blueprintId, variantIdx, { x: spawn.x, y: spawn.y });
     enemy.id = `enemy_${spawn.blueprintId}_${i}`;
     enemy.facing = spawn.x < map.width / 2 ? 'right' : 'left';
-    if (setup) applyDifficultyToEnemy(enemy, setup.difficulty);
+    if (setup?.difficulty) applyDifficultyToEnemy(enemy, setup.difficulty);
     units.push(enemy);
   });
 
-  if (setup && setup.difficulty.veterans > 0) {
+  if (setup?.difficulty && setup.difficulty.veterans > 0) {
     const regulars = units.filter((u) => u.team === 'enemy' && !u.isBoss);
-    for (const unit of shuffle(regulars, setup.rng).slice(0, setup.difficulty.veterans)) {
+    const rng = setup.rng ?? Math.random;
+    for (const unit of shuffle(regulars, rng).slice(0, setup.difficulty.veterans)) {
       promoteToVeteran(unit);
     }
   }
+
+  const prepPhase = Boolean(setup?.enablePrepPhase);
 
   return {
     mapId: map.id,
@@ -327,6 +418,10 @@ export function createBattleFromMap(
     turn: 1,
     phase: 'player',
     status: 'ongoing',
+    prepPhase,
+    playerSpawnPositions: map.playerSpawns.map((p) => ({ ...p })),
+    surviveTurns: map.surviveTurns ?? (map.objective === 'survive' ? 4 : undefined),
+    harvestHeat,
     relicIds: [...relicIds],
     items: { ...items },
     gateTiles: map.gateTiles ? map.gateTiles.map((g) => ({ ...g })) : [],
@@ -338,9 +433,94 @@ export function createBattleFromMap(
     rescuedHeroUids: [],
     rescuedNewBlueprintIds: [],
     combatLog: [`Battle started: ${map.name} — ${map.objectiveLabel}`],
-    pendingEvents: [{ type: 'banner', text: 'PRODUCE PHASE — TURN 1', tone: 'player' }],
+    pendingEvents: [
+      {
+        type: 'banner',
+        text: prepPhase ? 'TACTICAL PREP — POSITION YOUR SQUAD!' : 'PRODUCE PHASE — TURN 1',
+        tone: 'player',
+      },
+    ],
     undoSnapshot: null,
   };
+}
+
+/**
+ * Pre-Battle Tactical Prep: swap a hero onto another glowing spawn tile (swapping if occupied).
+ */
+export function swapPrepHeroPositions(
+  state: BattleState,
+  fromPos: GridPos,
+  toPos: GridPos
+): boolean {
+  if (!state.prepPhase || state.status !== 'ongoing') return false;
+  if (samePos(fromPos, toPos)) return false;
+  const spawns = state.playerSpawnPositions ?? [];
+  const isTargetSpawn = spawns.some((p) => samePos(p, toPos));
+  if (!isTargetSpawn) return false;
+
+  const movingHero = unitAt(state, fromPos);
+  if (!movingHero || movingHero.team !== 'player' || movingHero.isEscortCart) return false;
+
+  const other = unitAt(state, toPos);
+  if (other && (other.team !== 'player' || other.isEscortCart)) return false;
+
+  movingHero.pos = { ...toPos };
+  movingHero.facing = toPos.x >= state.width / 2 ? 'left' : 'right';
+  if (other) {
+    other.pos = { ...fromPos };
+    other.facing = fromPos.x >= state.width / 2 ? 'left' : 'right';
+  }
+  pushLog(
+    state,
+    other
+      ? `Prep: Swapped ${movingHero.name} & ${other.name}'s starting positions.`
+      : `Prep: Repositioned ${movingHero.name} to (${toPos.x}, ${toPos.y}).`
+  );
+  return true;
+}
+
+/**
+ * Pre-Battle Tactical Prep: swap an active hero on the field with a bench hero at the exact same tile.
+ */
+export function swapPrepHeroWithBench(
+  state: BattleState,
+  fieldUnitId: string,
+  benchHero: RosterHero
+): BattleUnit | null {
+  if (!state.prepPhase || state.status !== 'ongoing' || benchHero.harvested) return null;
+  const idx = state.units.findIndex(
+    (u) => u.id === fieldUnitId && u.team === 'player' && !u.isEscortCart && u.alive
+  );
+  if (idx < 0) return null;
+  if (state.units.some((u) => u.rosterUid === benchHero.uid)) return null;
+
+  const oldUnit = state.units[idx];
+  const newUnit = createBattleUnitFromHero(benchHero, oldUnit.pos);
+  newUnit.facing = oldUnit.facing;
+  if (hasRelic(state.relicIds, 'rich_loam')) {
+    newUnit.hp = Math.min(newUnit.maxHp, newUnit.hp + 2);
+  }
+  if (hasGraft(newUnit, 'pumpkin_rind')) {
+    applyStatusToUnit(newUnit, 'shield', 1);
+  }
+  state.units[idx] = newUnit;
+  pushLog(state, `Prep: Deployed ${newUnit.name} in place of ${oldUnit.name}!`);
+  return newUnit;
+}
+
+/**
+ * Locks in squad positioning and begins Turn 1!
+ */
+export function finishPrepPhase(state: BattleState): boolean {
+  if (!state.prepPhase || state.status !== 'ongoing') return false;
+  state.prepPhase = false;
+  state.pendingEvents.push({
+    type: 'banner',
+    text: 'PRODUCE PHASE — TURN 1',
+    tone: 'player',
+  });
+  pushLog(state, 'Squad ready! Produce Phase — Turn 1 begins!');
+  return true;
 }
 
 export function getUnitById(state: BattleState, id: string): BattleUnit | undefined {
@@ -374,13 +554,53 @@ function pushLog(state: BattleState, message: string): void {
 function checkBattleEnd(state: BattleState): void {
   if (state.status !== 'ongoing') return;
 
-  const alivePlayers = state.units.filter((u) => u.team === 'player' && u.alive);
+  const alivePlayers = state.units.filter((u) => u.team === 'player' && u.alive && !u.isEscortCart);
   const aliveEnemies = state.units.filter((u) => u.team === 'enemy' && u.alive);
 
   if (alivePlayers.length === 0) {
     state.status = 'defeat';
     state.pendingEvents.push({ type: 'banner', text: 'SQUAD HARVESTED!', tone: 'defeat' });
     pushLog(state, 'All produce heroes were bagged by the farmers!');
+    return;
+  }
+
+  if (state.objective === 'escort') {
+    const cart = state.units.find((u) => u.isEscortCart);
+    if (!cart || !cart.alive) {
+      state.status = 'defeat';
+      state.pendingEvents.push({ type: 'banner', text: 'SEED CART DESTROYED!', tone: 'defeat' });
+      pushLog(state, 'The Golden Seed Cart was smashed by the farmers!');
+      return;
+    }
+    if (state.gateTiles.some((g) => samePos(cart.pos, g))) {
+      state.status = 'victory';
+      state.pendingEvents.push({ type: 'banner', text: 'SEED CART DELIVERED! VICTORY!', tone: 'victory' });
+      pushLog(state, 'The Golden Seed Cart rolled safely through the North Gate!');
+      return;
+    }
+    if (aliveEnemies.length === 0) {
+      state.status = 'victory';
+      state.pendingEvents.push({ type: 'banner', text: 'ESCORT ROUTE CLEARED! VICTORY!', tone: 'victory' });
+      pushLog(state, 'All raiders routed — the Golden Seed Cart rolls home safely!');
+      return;
+    }
+    return;
+  }
+
+  if (state.objective === 'survive') {
+    const targetTurns = state.surviveTurns ?? 4;
+    if (state.turn > targetTurns) {
+      state.status = 'victory';
+      state.pendingEvents.push({ type: 'banner', text: 'PATCH HELD! VICTORY!', tone: 'victory' });
+      pushLog(state, `Your squad held the patch for all ${targetTurns} turns!`);
+      return;
+    }
+    if (aliveEnemies.length === 0 && state.turn >= 3) {
+      state.status = 'victory';
+      state.pendingEvents.push({ type: 'banner', text: 'SIEGE BROKEN! VICTORY!', tone: 'victory' });
+      pushLog(state, 'Every wave of farmers was driven back!');
+      return;
+    }
     return;
   }
 
@@ -468,6 +688,7 @@ export function scheduleBossTelegraph(state: BattleState, boss: BattleUnit): voi
   if (players.length === 0) return;
 
   const isPhase2 = (state.bossPhase ?? 1) >= 2;
+  const heatTelegraphBonus = (state.harvestHeat ?? 0) >= 4 ? 1 : 0;
   const tiles: GridPos[] = [];
   const seen = new Set<string>();
   const addTile = (p: GridPos) => {
@@ -480,12 +701,12 @@ export function scheduleBossTelegraph(state: BattleState, boss: BattleUnit): voi
   };
 
   let name = 'Crow Storm';
-  let damage = isPhase2 ? 5 : 4;
+  let damage = (isPhase2 ? 5 : 4) + heatTelegraphBonus;
   let status: StatusKind | undefined = 'feared';
 
   if (boss.visualKind === 'tractor') {
     name = isPhase2 ? 'Overdrive Plow' : 'Harvester Charge';
-    damage = isPhase2 ? 6 : 5;
+    damage = (isPhase2 ? 6 : 5) + heatTelegraphBonus;
     status = 'burn';
     // Target the closest hero's column with a deadly south-plowing lane
     const anchor = [...players].sort((a, b) => manhattan(boss.pos, a.pos) - manhattan(boss.pos, b.pos))[0];
@@ -497,7 +718,7 @@ export function scheduleBossTelegraph(state: BattleState, boss: BattleUnit): voi
     }
   } else if (boss.visualKind === 'harvester') {
     name = isPhase2 ? 'Crimson Bramble Surge' : 'Bramble Barrage';
-    damage = isPhase2 ? 5 : 4;
+    damage = (isPhase2 ? 5 : 4) + heatTelegraphBonus;
     status = 'rooted';
     const picks = players.slice(0, isPhase2 ? 2 : 1);
     for (const h of picks) {
@@ -507,7 +728,7 @@ export function scheduleBossTelegraph(state: BattleState, boss: BattleUnit): voi
   } else {
     // Captain Scarecrow: Crow Storm cross (Phase 1) or full 3x3 (Phase 2)!
     name = isPhase2 ? 'Blazing Crow Storm' : 'Crow Storm';
-    damage = isPhase2 ? 5 : 4;
+    damage = (isPhase2 ? 5 : 4) + heatTelegraphBonus;
     status = 'feared';
     const anchor = [...players].sort((a, b) => {
       const ca = players.filter((o) => chebyshev(a.pos, o.pos) <= 1).length;
@@ -599,10 +820,162 @@ function handleUnitKO(state: BattleState, unit: BattleUnit): void {
 }
 
 /**
+ * Finds the nearest safe dry walkable tile when a collapsible bridge drops beneath a unit.
+ */
+function findNearestDryLanding(state: BattleState, origin: GridPos): GridPos | null {
+  let best: GridPos | null = null;
+  let bestDist = Infinity;
+  for (let y = 0; y < state.height; y++) {
+    for (let x = 0; x < state.width; x++) {
+      const p = { x, y };
+      if (samePos(p, origin)) continue;
+      const t = tileAt(state, p);
+      if (!t || t.cover || isHazardLiquid(t.terrain)) continue;
+      if (unitAt(state, p)) continue;
+      const d = manhattan(origin, p);
+      if (d < bestDist) {
+        bestDist = d;
+        best = p;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Collapsible Wooden Bridge: attacking or blasting a bridge damages its planks; at 0 HP
+ * it collapses into water or lava underneath, splashing anyone standing on it!
+ */
+export function damageBridgeAt(state: BattleState, pos: GridPos, amount: number): boolean {
+  const tile = tileAt(state, pos);
+  if (!tile || tile.terrain !== 'bridge' || (tile.bridgeHp ?? 0) <= 0) return false;
+
+  tile.bridgeHp = Math.max(0, (tile.bridgeHp ?? 5) - amount);
+  if (tile.bridgeHp > 0) {
+    pushLog(state, `Cracked wooden bridge at (${pos.x}, ${pos.y}) (${tile.bridgeHp}/${tile.bridgeMaxHp ?? 5} HP left)!`);
+    return false;
+  }
+
+  const liquid: 'water' | 'lava' = tile.bridgeOver ?? 'water';
+  tile.terrain = liquid;
+  tile.bridgeHp = 0;
+  const victim = unitAt(state, pos);
+
+  state.pendingEvents.push({
+    type: 'bridge_collapse',
+    pos: { ...pos },
+    liquid,
+    affectedUnitId: victim?.id,
+  });
+  pushLog(state, `BRIDGE COLLAPSED! Planks gave way into ${liquid} at (${pos.x}, ${pos.y})!`);
+
+  if (victim && victim.alive) {
+    const isLava = liquid === 'lava';
+    const hazDmg = isLava ? 4 : 3;
+    victim.hp -= hazDmg;
+    if (isLava) {
+      applyStatusToUnit(victim, 'burn', 2);
+    } else {
+      victim.statuses = victim.statuses.filter((s) => s.kind !== 'burn');
+    }
+    state.pendingEvents.push({
+      type: 'terrain_hazard',
+      kind: liquid,
+      unitId: victim.id,
+      pos: { ...pos },
+      damage: hazDmg,
+    });
+    pushLog(
+      state,
+      isLava
+        ? `LAVA DROP! ${victim.name} fell through the bridge (-${hazDmg} HP + Burn)!`
+        : `SPLASH! ${victim.name} plunged into the creek (-${hazDmg} HP)!`
+    );
+    handleUnitKO(state, victim);
+    if (victim.alive) {
+      const landing = findNearestDryLanding(state, pos);
+      if (landing) {
+        victim.pos = { ...landing };
+      }
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Rolling Pumpkin Boulder: bowling a carved giant pumpkin straight away from the attacker up to 5 tiles,
+ * dealing 4 DMG + knockback to every unit in its lane & smashing crates along the way!
+ */
+function rollPumpkinBoulder(
+  state: BattleState,
+  origin: GridPos,
+  dir: GridPos,
+  attackerTeam: 'player' | 'enemy',
+  rosterLookup?: RosterHero[],
+  visitedHazards: Set<string> = new Set()
+): void {
+  const pushDir = dir.x === 0 && dir.y === 0 ? { x: 0, y: -1 } : dir;
+  const path: GridPos[] = [{ ...origin }];
+  const hitIds: string[] = [];
+  let prevElev = tileAt(state, origin)?.elevation ?? 0;
+
+  for (let step = 1; step <= 5; step++) {
+    const p: GridPos = { x: origin.x + pushDir.x * step, y: origin.y + pushDir.y * step };
+    if (!inBounds(state, p)) break;
+    const t = tileAt(state, p);
+    if (!t) break;
+    if ((t.elevation ?? 0) > prevElev) break; // Can't roll uphill
+    prevElev = t.elevation ?? 0;
+
+    if (t.cover && !t.cover.destructible) {
+      break; // Stone pillar stops the pumpkin
+    }
+
+    path.push({ ...p });
+
+    if (t.cover && t.cover.destructible) {
+      damageCoverAt(state, p, 6, attackerTeam, rosterLookup, visitedHazards, pushDir);
+    }
+
+    const u = unitAt(state, p);
+    if (u && u.alive) {
+      u.hp -= 4;
+      hitIds.push(u.id);
+      pushLog(state, `PUMPKIN BOWL! Rolling boulder flattened ${u.name} for 4 DMG!`);
+      handleUnitKO(state, u);
+      if (u.alive) {
+        applyKnockback(state, u, pushDir, rosterLookup, visitedHazards);
+      }
+    }
+
+    if (isHazardLiquid(t.terrain)) {
+      break; // Splashes into water/lava!
+    }
+  }
+
+  const endPos = path[path.length - 1] ?? origin;
+  state.pendingEvents.push({
+    type: 'pumpkin_roll',
+    from: { ...origin },
+    to: { ...endPos },
+    path,
+    hitIds,
+    damage: 4,
+  });
+  pushLog(
+    state,
+    hitIds.length > 0
+      ? `ROLLING PUMPKIN bowled ${path.length - 1} tiles and crushed ${hitIds.length} target(s)!`
+      : `ROLLING PUMPKIN tumbled ${Math.max(1, path.length - 1)} tiles across the patch!`
+  );
+}
+
+/**
  * Directional Knockback & Bump Crunch (Into the Breach style):
  * - Slides target 1 tile in `dir` if walkable & empty.
  * - If blocked by a unit, cover, or board edge, deals +2 BUMP! damage (and +2 to blocking unit,
- *   or 4 crunch damage to destructible cover — letting you slam foes into Beehives & Sprinklers!).
+ *   or 4 crunch damage to destructible cover — letting you slam foes into Beehives, Sprinklers & Pumpkins!).
  */
 export function applyKnockback(
   state: BattleState,
@@ -705,7 +1078,7 @@ export function applyKnockback(
     });
     pushLog(state, `CRUNCH! ${target.name} slammed into ${nextTile.cover.kind} (-${bumpDmg} HP)!`);
     if (nextTile.cover.destructible) {
-      damageCoverAt(state, nextPos, 4, 'player', rosterLookup, visitedHazards);
+      damageCoverAt(state, nextPos, 4, 'player', rosterLookup, visitedHazards, dir);
     }
   } else {
     state.pendingEvents.push({
@@ -728,7 +1101,8 @@ function damageCoverAt(
   amount: number,
   attackerTeam: 'player' | 'enemy',
   rosterLookup?: RosterHero[],
-  visitedHazards: Set<string> = new Set()
+  visitedHazards: Set<string> = new Set(),
+  pushDir?: GridPos
 ): boolean {
   const tile = tileAt(state, pos);
   if (!tile?.cover || !tile.cover.destructible) return false;
@@ -761,8 +1135,21 @@ function damageCoverAt(
     }
   }
 
-  // Interactive Hazard 1: Explosive Beehive (3x3 angry bee swarm: 3 dmg + push outward + chain cover crunch!)
+  // Interactive Hazard 0: Rolling Pumpkin Boulder!
   const hazKey = posKey(pos);
+  if (destroyedCover.kind === 'pumpkin' && !visitedHazards.has(hazKey)) {
+    visitedHazards.add(hazKey);
+    rollPumpkinBoulder(
+      state,
+      pos,
+      pushDir ?? { x: 0, y: -1 },
+      attackerTeam,
+      rosterLookup,
+      visitedHazards
+    );
+  }
+
+  // Interactive Hazard 1: Explosive Beehive (3x3 angry bee swarm: 3 dmg + push outward + chain cover/bridge crunch!)
   if (destroyedCover.kind === 'beehive' && !visitedHazards.has(hazKey)) {
     visitedHazards.add(hazKey);
     state.pendingEvents.push({ type: 'hazard', kind: 'beehive', pos: { ...pos }, damage: 3 });
@@ -776,7 +1163,10 @@ function damageCoverAt(
         if (u && u.alive) victims.push(u);
         const adjTile = tileAt(state, p);
         if (adjTile?.cover?.destructible) {
-          damageCoverAt(state, p, 4, attackerTeam, rosterLookup, visitedHazards);
+          damageCoverAt(state, p, 4, attackerTeam, rosterLookup, visitedHazards, computePushDirection(pos, p));
+        }
+        if (adjTile?.terrain === 'bridge') {
+          damageBridgeAt(state, p, 3);
         }
       }
     }
@@ -925,9 +1315,9 @@ function triggerOverwatchInterrupts(state: BattleState, mover: BattleUnit): void
 }
 
 export function executeOverwatch(state: BattleState, unitId: string): boolean {
-  if (state.status !== 'ongoing' || state.phase !== 'player') return false;
+  if (state.status !== 'ongoing' || state.phase !== 'player' || state.prepPhase) return false;
   const unit = getUnitById(state, unitId);
-  if (!unit || !unit.alive || unit.team !== 'player' || unit.actions.hasAttacked) return false;
+  if (!unit || !unit.alive || unit.isEscortCart || unit.team !== 'player' || unit.actions.hasAttacked) return false;
 
   saveUndoSnapshot(state);
   unit.actions.hasAttacked = true;
@@ -951,9 +1341,9 @@ export function executeOverwatch(state: BattleState, unitId: string): boolean {
 }
 
 export function executeMove(state: BattleState, unitId: string, dest: GridPos): boolean {
-  if (state.status !== 'ongoing') return false;
+  if (state.status !== 'ongoing' || state.prepPhase) return false;
   const unit = getUnitById(state, unitId);
-  if (!unit || !unit.alive || unit.actions.hasMoved) return false;
+  if (!unit || !unit.alive || unit.isEscortCart || unit.actions.hasMoved) return false;
 
   const movable = computeMovableTiles(state, unit);
   const node = movable.get(posKey(dest));
@@ -975,16 +1365,27 @@ export function executeMove(state: BattleState, unitId: string, dest: GridPos): 
     path: node.path.map((p) => ({ ...p })),
   });
 
-  // Detect Gopher Burrow Warp Pipe hop in path!
+  // Detect Gopher Burrow Warp Pipe OR Bouncy Mushroom Launchpad leap in path!
   for (let i = 0; i < node.path.length - 1; i++) {
     if (manhattan(node.path[i], node.path[i + 1]) > 1) {
-      state.pendingEvents.push({
-        type: 'burrow_warp',
-        unitId: unit.id,
-        from: { ...node.path[i] },
-        to: { ...node.path[i + 1] },
-      });
-      pushLog(state, `${unit.name} zipped through a Gopher Burrow!`);
+      const originTile = tileAt(state, node.path[i]);
+      if (originTile?.terrain === 'bounce_pad') {
+        state.pendingEvents.push({
+          type: 'bounce_launch',
+          unitId: unit.id,
+          from: { ...node.path[i] },
+          to: { ...node.path[i + 1] },
+        });
+        pushLog(state, `BOING! ${unit.name} launched off a Bouncy Mushroom!`);
+      } else {
+        state.pendingEvents.push({
+          type: 'burrow_warp',
+          unitId: unit.id,
+          from: { ...node.path[i] },
+          to: { ...node.path[i + 1] },
+        });
+        pushLog(state, `${unit.name} zipped through a Gopher Burrow!`);
+      }
       break;
     }
   }
@@ -995,10 +1396,10 @@ export function executeMove(state: BattleState, unitId: string, dest: GridPos): 
 }
 
 export function executeDash(state: BattleState, unitId: string, targetEnemyId: string): boolean {
-  if (state.status !== 'ongoing') return false;
+  if (state.status !== 'ongoing' || state.prepPhase) return false;
   const unit = getUnitById(state, unitId);
   const dashesUsed = unit?.actions.dashesUsed ?? (unit?.actions.hasDashed ? 1 : 0);
-  if (!unit || !unit.alive || dashesUsed >= getMaxDashesForUnit(unit) || unit.actions.hasMoved) {
+  if (!unit || !unit.alive || unit.isEscortCart || dashesUsed >= getMaxDashesForUnit(unit) || unit.actions.hasMoved) {
     return false;
   }
 
@@ -1059,9 +1460,9 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
 }
 
 export function executeTeamJump(state: BattleState, unitId: string, dest: GridPos): boolean {
-  if (state.status !== 'ongoing') return false;
+  if (state.status !== 'ongoing' || state.prepPhase) return false;
   const unit = getUnitById(state, unitId);
-  if (!unit || !unit.alive || unit.team !== 'player' || unit.actions.hasMoved || unit.actions.hasJumped) {
+  if (!unit || !unit.alive || unit.isEscortCart || unit.team !== 'player' || unit.actions.hasMoved || unit.actions.hasJumped) {
     return false;
   }
 
@@ -1147,9 +1548,9 @@ export function executeAttack(
   rng: () => number = Math.random,
   rosterLookup?: RosterHero[]
 ): boolean {
-  if (state.status !== 'ongoing') return false;
+  if (state.status !== 'ongoing' || state.prepPhase) return false;
   const attacker = getUnitById(state, unitId);
-  if (!attacker || !attacker.alive) return false;
+  if (!attacker || !attacker.alive || attacker.isEscortCart) return false;
 
   const fc = forecastAttack(state, attacker, targetPos);
   if (!fc.canAttack) return false;
@@ -1164,11 +1565,22 @@ export function executeAttack(
   const targetTile = tileAt(state, targetPos);
   const defender = fc.targetUnitId ? getUnitById(state, fc.targetUnitId) : undefined;
 
-  // Case A: Attacking destructible cover / Barn Cage directly (or lobbing at empty tile)
+  // Case A: Attacking destructible cover / Barn Cage / Pumpkin / Collapsible Bridge directly (or lobbing at empty tile)
   if (!defender) {
     let coverDestroyed = false;
-    if (targetTile?.cover) {
-      coverDestroyed = damageCoverAt(state, targetPos, fc.coverDamage, attacker.team, rosterLookup);
+    const attackDir = computePushDirection(attacker.pos, targetPos);
+    if (fc.isBridgeTarget) {
+      coverDestroyed = damageBridgeAt(state, targetPos, fc.coverDamage);
+    } else if (targetTile?.cover) {
+      coverDestroyed = damageCoverAt(
+        state,
+        targetPos,
+        fc.coverDamage,
+        attacker.team,
+        rosterLookup,
+        new Set(),
+        attackDir
+      );
     }
 
     state.pendingEvents.push({
@@ -1181,11 +1593,11 @@ export function executeAttack(
       hit: true,
       damage: fc.coverDamage,
       matchup: 'neutral',
-      coverHitPos: targetTile?.cover || coverDestroyed ? { ...targetPos } : undefined,
+      coverHitPos: targetTile?.cover || coverDestroyed || fc.isBridgeTarget ? { ...targetPos } : undefined,
       coverDestroyed,
     });
 
-    // Lobbed AoE splash on empty/cover tile!
+    // Lobbed AoE splash on empty/cover/bridge tile!
     if (attacker.weapon.aoeRadius && attacker.weapon.aoeRadius > 0) {
       applyWeaponSplash(state, attacker, targetPos, undefined, rosterLookup);
     }
@@ -1202,7 +1614,15 @@ export function executeAttack(
     // Mario + Rabbids signature touch: a missed 50% shot hits & chips the protecting Half Cover!
     let coverDestroyed = false;
     if (fc.coverPos) {
-      coverDestroyed = damageCoverAt(state, fc.coverPos, fc.coverDamage, attacker.team, rosterLookup);
+      coverDestroyed = damageCoverAt(
+        state,
+        fc.coverPos,
+        fc.coverDamage,
+        attacker.team,
+        rosterLookup,
+        new Set(),
+        computePushDirection(attacker.pos, fc.coverPos)
+      );
     }
     state.pendingEvents.push({
       type: 'attack',
@@ -1271,6 +1691,31 @@ export function executeAttack(
 
   handleUnitKO(state, defender);
 
+  // Mario + Rabbids Partner Follow-Up Assist (+1 bonus DMG from an adjacent ally!)
+  if (defender.alive && fc.partnerAssistUnitId && fc.partnerAssistDamage) {
+    const assistAlly = getUnitById(state, fc.partnerAssistUnitId);
+    if (assistAlly && assistAlly.alive && !hasStatus(assistAlly, 'rooted')) {
+      if (defender.pos.x !== assistAlly.pos.x) {
+        assistAlly.facing = defender.pos.x > assistAlly.pos.x ? 'right' : 'left';
+      }
+      defender.hp -= fc.partnerAssistDamage;
+      state.pendingEvents.push({
+        type: 'partner_assist',
+        allyId: assistAlly.id,
+        allyKind: assistAlly.visualKind,
+        targetId: defender.id,
+        from: { ...assistAlly.pos },
+        to: { ...defender.pos },
+        damage: fc.partnerAssistDamage,
+      });
+      pushLog(
+        state,
+        `PARTNER ASSIST! ${assistAlly.name} piled on ${defender.name} for +${fc.partnerAssistDamage} DMG!`
+      );
+      handleUnitKO(state, defender);
+    }
+  }
+
   // Weapon Knockback (e.g. Spudnik, Billy Batter, Corn-elius, Baron Combine, or Cover Buster perk!)
   const totalKnockback = (attacker.weapon.knockback ?? 0) + (hasPerk(attacker, 'cover_buster') ? 1 : 0);
   if (defender.alive && totalKnockback > 0) {
@@ -1283,7 +1728,7 @@ export function executeAttack(
     applyWeaponSplash(state, attacker, targetPos, defender.id, rosterLookup);
   }
 
-  // Pierce weapon (Carroteer): skewers 1 tile behind target along cardinal line!
+  // Pierce weapon (Carroteer / Snap-Pea Railpod / Citric Beam): skewers 1 tile behind target along cardinal line!
   if (attacker.weapon.arc === 'pierce') {
     const dx = targetPos.x - attacker.pos.x;
     const dy = targetPos.y - attacker.pos.y;
@@ -1305,10 +1750,18 @@ export function executeAttack(
             status: 'acid',
             damage: pierceDmg,
           });
-          pushLog(state, `Taproot Lance pierced through to ${behindUnit.name} for ${pierceDmg} dmg!`);
+          pushLog(state, `${attacker.weapon.name} pierced through to ${behindUnit.name} for ${pierceDmg} dmg!`);
           handleUnitKO(state, behindUnit);
         } else if (behindTile?.cover) {
-          damageCoverAt(state, behind, fc.coverDamage, attacker.team, rosterLookup);
+          damageCoverAt(
+            state,
+            behind,
+            fc.coverDamage,
+            attacker.team,
+            rosterLookup,
+            new Set(),
+            { x: Math.sign(dx), y: Math.sign(dy) }
+          );
         }
       }
     }
@@ -1335,8 +1788,12 @@ function applyWeaponSplash(
       if (chebyshev(center, p) > radius) continue;
 
       const t = tileAt(state, p);
+      const covDmg = Math.max(2, Math.floor(attacker.weapon.coverDamage / 2));
       if (t?.cover && t.cover.destructible) {
-        damageCoverAt(state, p, Math.max(2, Math.floor(attacker.weapon.coverDamage / 2)), attacker.team, rosterLookup);
+        damageCoverAt(state, p, covDmg, attacker.team, rosterLookup, new Set(), computePushDirection(center, p));
+      }
+      if (t?.terrain === 'bridge') {
+        damageBridgeAt(state, p, covDmg);
       }
 
       const u = unitAt(state, p);
@@ -1360,7 +1817,7 @@ function applyWeaponSplash(
 }
 
 export function getAbilityTargetTiles(state: BattleState, unit: BattleUnit): GridPos[] {
-  if (!unit.ability || unit.actions.hasUsedSkill || unit.abilityCooldown > 0) return [];
+  if (unit.isEscortCart || !unit.ability || unit.actions.hasUsedSkill || unit.abilityCooldown > 0) return [];
   const ab = unit.ability;
   if (ab.targetType === 'self' || ab.targetType === 'aoe_self') {
     return [{ ...unit.pos }];
@@ -1384,9 +1841,9 @@ export function getAbilityTargetTiles(state: BattleState, unit: BattleUnit): Gri
 }
 
 export function executeAbility(state: BattleState, unitId: string, targetPos: GridPos): boolean {
-  if (state.status !== 'ongoing') return false;
+  if (state.status !== 'ongoing' || state.prepPhase) return false;
   const unit = getUnitById(state, unitId);
-  if (!unit || !unit.alive || !unit.ability || unit.actions.hasUsedSkill || unit.abilityCooldown > 0) {
+  if (!unit || !unit.alive || unit.isEscortCart || !unit.ability || unit.actions.hasUsedSkill || unit.abilityCooldown > 0) {
     return false;
   }
 
@@ -1500,7 +1957,7 @@ export function executeAbility(state: BattleState, unitId: string, targetPos: Gr
 
 export function getItemTargetTiles(state: BattleState, unit: BattleUnit, itemId: string): GridPos[] {
   const item = ITEM_REGISTRY[itemId];
-  if (!item || unit.actions.hasUsedSkill || (state.items[itemId] ?? 0) <= 0) return [];
+  if (unit.isEscortCart || !item || unit.actions.hasUsedSkill || (state.items[itemId] ?? 0) <= 0) return [];
 
   const out: GridPos[] = [];
   for (let y = 0; y < state.height; y++) {
@@ -1525,10 +1982,10 @@ export function executeItem(
   targetPos: GridPos,
   rosterLookup?: RosterHero[]
 ): boolean {
-  if (state.status !== 'ongoing') return false;
+  if (state.status !== 'ongoing' || state.prepPhase) return false;
   const unit = getUnitById(state, unitId);
   const item = ITEM_REGISTRY[itemId];
-  if (!unit || !unit.alive || !item || unit.actions.hasUsedSkill) return false;
+  if (!unit || !unit.alive || unit.isEscortCart || !item || unit.actions.hasUsedSkill) return false;
   if ((state.items[itemId] ?? 0) <= 0) return false;
   if (manhattan(unit.pos, targetPos) > item.range) return false;
 
@@ -1560,7 +2017,18 @@ export function executeItem(
 
         const t = tileAt(state, p);
         if (t?.cover && item.coverDamage) {
-          damageCoverAt(state, p, item.coverDamage, unit.team, rosterLookup);
+          damageCoverAt(
+            state,
+            p,
+            item.coverDamage,
+            unit.team,
+            rosterLookup,
+            new Set(),
+            samePos(p, targetPos) ? computePushDirection(unit.pos, p) : computePushDirection(targetPos, p)
+          );
+        }
+        if (t?.terrain === 'bridge' && item.coverDamage) {
+          damageBridgeAt(state, p, item.coverDamage);
         }
 
         const enemy = unitAt(state, p);
@@ -1594,8 +2062,113 @@ export function executeItem(
   return true;
 }
 
+/**
+ * Spawns enemy reinforcement waves on 'survive' ("Hold the Patch") missions at Turns 2 & 3!
+ */
+function spawnSurviveReinforcements(state: BattleState): void {
+  if (state.objective !== 'survive' || (state.turn !== 2 && state.turn !== 3)) return;
+  const candidateSpots: GridPos[] = [];
+  // Prefer northern burrows first, then open north edge tiles (y <= 1)
+  for (let y = 0; y <= 2; y++) {
+    for (let x = 0; x < state.width; x++) {
+      const t = state.tiles[y][x];
+      if (t.terrain === 'burrow' && !t.cover && !unitAt(state, { x, y })) {
+        candidateSpots.push({ x, y });
+      }
+    }
+  }
+  for (let y = 0; y <= 1; y++) {
+    for (let x = 0; x < state.width; x++) {
+      const t = state.tiles[y][x];
+      if (
+        !t.cover &&
+        !isHazardLiquid(t.terrain) &&
+        !unitAt(state, { x, y }) &&
+        !candidateSpots.some((c) => samePos(c, { x, y }))
+      ) {
+        candidateSpots.push({ x, y });
+      }
+    }
+  }
+
+  const waveBlueprints = state.turn === 2 ? ['trimmer', 'digger'] : ['mower', 'sprayer'];
+  let spawned = 0;
+  for (let i = 0; i < waveBlueprints.length && i < candidateSpots.length; i++) {
+    const pos = candidateSpots[i];
+    const bpId = waveBlueprints[i];
+    const enemy = createBattleUnitFromEnemy(bpId, state.units.length + i, pos);
+    enemy.id = `reinf_${bpId}_t${state.turn}_${i}`;
+    enemy.facing = pos.x < state.width / 2 ? 'right' : 'left';
+    if ((state.harvestHeat ?? 0) >= 1) {
+      enemy.maxHp = Math.ceil(enemy.maxHp * 1.15);
+      enemy.hp = enemy.maxHp;
+    }
+    if ((state.harvestHeat ?? 0) >= 5) {
+      enemy.weapon.damage += 1;
+    }
+    state.units.push(enemy);
+    state.pendingEvents.push({
+      type: 'reinforcement_spawn',
+      unitId: enemy.id,
+      unitName: enemy.name,
+      pos: { ...pos },
+    });
+    spawned += 1;
+  }
+  if (spawned > 0) {
+    pushLog(state, `REINFORCEMENTS! ${spawned} fresh farmhand(s) burst from the northern burrows!`);
+  }
+}
+
+/**
+ * Advances the Golden Seed Cart up to 2 tiles north toward the Gate on 'escort' missions!
+ */
+function advanceEscortSeedCart(state: BattleState): void {
+  if (state.objective !== 'escort') return;
+  const cart = state.units.find((u) => u.isEscortCart && u.alive);
+  if (!cart) return;
+
+  const targetGate = state.gateTiles[Math.floor(state.gateTiles.length / 2)] ?? {
+    x: Math.floor(state.width / 2),
+    y: 0,
+  };
+  const startPos = { ...cart.pos };
+
+  for (let step = 0; step < 2; step++) {
+    if (state.gateTiles.some((g) => samePos(cart.pos, g))) break;
+    const dxToGate = Math.sign(targetGate.x - cart.pos.x);
+    const tryOrder: GridPos[] = [
+      { x: cart.pos.x, y: cart.pos.y - 1 },
+      ...(dxToGate !== 0 ? [{ x: cart.pos.x + dxToGate, y: cart.pos.y }] : []),
+      { x: cart.pos.x - 1, y: cart.pos.y },
+      { x: cart.pos.x + 1, y: cart.pos.y },
+    ];
+    let stepped = false;
+    for (const next of tryOrder) {
+      if (!inBounds(state, next)) continue;
+      const nt = tileAt(state, next);
+      if (!nt || nt.cover || isHazardLiquid(nt.terrain)) continue;
+      if (unitAt(state, next)) continue;
+      cart.pos = { ...next };
+      stepped = true;
+      break;
+    }
+    if (!stepped) break;
+  }
+
+  if (!samePos(startPos, cart.pos)) {
+    state.pendingEvents.push({
+      type: 'escort_move',
+      unitId: cart.id,
+      from: startPos,
+      to: { ...cart.pos },
+    });
+    pushLog(state, `Golden Seed Cart rolled north to (${cart.pos.x}, ${cart.pos.y})!`);
+  }
+}
+
 export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): void {
-  if (state.status !== 'ongoing') return;
+  if (state.status !== 'ongoing' || state.prepPhase) return;
   const prevPhase = state.phase;
   state.undoSnapshot = null;
 
@@ -1622,11 +2195,20 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
 
   if (nextPhase === 'player') {
     state.turn += 1;
+    // Check survive victory right when entering turn > surviveTurns!
+    if (state.objective === 'survive' && state.turn > (state.surviveTurns ?? 4)) {
+      checkBattleEnd(state);
+      return;
+    }
     state.pendingEvents.push({
       type: 'banner',
       text: `PRODUCE PHASE — TURN ${state.turn}`,
       tone: 'player',
     });
+    spawnSurviveReinforcements(state);
+    advanceEscortSeedCart(state);
+    checkBattleEnd(state);
+    if (state.status !== 'ongoing') return;
   } else {
     state.pendingEvents.push({
       type: 'banner',
@@ -1640,9 +2222,11 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
   for (const unit of state.units) {
     if (!unit.alive || unit.team !== nextPhase) continue;
 
-    unit.actions = emptyActions();
-    unit.tempAttackBonus = 0;
-    if (unit.abilityCooldown > 0) unit.abilityCooldown -= 1;
+    if (!unit.isEscortCart) {
+      unit.actions = emptyActions();
+      unit.tempAttackBonus = 0;
+      if (unit.abilityCooldown > 0) unit.abilityCooldown -= 1;
+    }
 
     // Burn damage tick (deals damage first, then ticks down)
     const burn = unit.statuses.find((s) => s.kind === 'burn' && s.turns > 0);

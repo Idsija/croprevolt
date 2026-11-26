@@ -4,6 +4,13 @@ import { PRODUCE_BLUEPRINTS, RECRUITABLE_BLUEPRINT_IDS, STARTER_BLUEPRINT_IDS } 
 import { MAP_TEMPLATES } from '../data/maps';
 import { ALL_RELIC_IDS } from '../data/relics';
 import { canUnlockPerk, getXpToNextLevel, MAX_HERO_LEVEL, SKILL_PERKS } from '../data/skills';
+import {
+  ALL_ALT_WEAPON_IDS,
+  ALT_WEAPON_REGISTRY,
+  buildScaledWeaponForHero,
+  STARTER_UNLOCKED_WEAPONS,
+} from '../data/weapons';
+import { getHeatSeedMultiplier, MAX_HARVEST_HEAT } from './difficulty';
 import { ACTS, actIndexForSeason, actRng, generateActNodes, randomSeed } from './mapgen';
 import type {
   BattleState,
@@ -27,6 +34,8 @@ export function defaultMetaProgress(): MetaProgress {
     heirloomSeeds: 0,
     runsPlayed: 0,
     runsWon: 0,
+    maxHeatUnlocked: 1,
+    selectedHeat: 0,
     unlocks: {
       extraItemSatchel: false,
       heirloomSoil: false,
@@ -147,6 +156,7 @@ export function createHeroFromBlueprint(blueprintId: string, bonusMaxHp = 0): Ro
     dashKnockback: bp.dashKnockback,
     dashStatus: bp.dashStatus ? { ...bp.dashStatus } : undefined,
     weapon: { ...bp.weapon, appliesStatus: bp.weapon.appliesStatus ? { ...bp.weapon.appliesStatus } : undefined },
+    equippedWeaponId: bp.weapon.id,
     ability: { ...bp.ability, appliesStatus: bp.ability.appliesStatus ? { ...bp.ability.appliesStatus } : undefined },
     graftIds: [],
     level: 1,
@@ -163,10 +173,11 @@ export function createHeroFromBlueprint(blueprintId: string, bonusMaxHp = 0): Ro
 export function createNewRun(
   meta: MetaProgress,
   seasonId: SeasonId = 'spring',
-  seed: number = randomSeed()
+  seed: number = randomSeed(),
+  harvestHeat?: number
 ): RunState {
   const hpBonus = meta.unlocks.heirloomSoil ? 2 : 0;
-  // Starter squad: Spudnik, Snap-Pea, Zestia & Truffle Boar active + Habanero on bench (swap anytime!)
+  // Starter squad: Stitch, Crisphead, Snap-Pea & Zestia active + Spudnik, Truffle Boar, Habanero on bench!
   const roster = STARTER_BLUEPRINT_IDS.map((id) => createHeroFromBlueprint(id, hpBonus));
   const relicIds = meta.unlocks.starterRelic ? ['rich_loam'] : [];
   const items: Record<string, number> = {
@@ -175,6 +186,10 @@ export function createNewRun(
     honey_pot: 1,
   };
   const act = actIndexForSeason(seasonId);
+  const resolvedHeat = Math.max(
+    0,
+    Math.min(MAX_HARVEST_HEAT, Math.floor(harvestHeat ?? meta.selectedHeat ?? 0))
+  );
 
   const run: RunState = {
     id: `run_${Date.now()}`,
@@ -182,6 +197,8 @@ export function createNewRun(
     seasonName: actTitle(act),
     act,
     seed: seed >>> 0,
+    harvestHeat: resolvedHeat,
+    unlockedWeaponIds: [...STARTER_UNLOCKED_WEAPONS],
     recruitBonusHp: hpBonus,
     seenEventIds: [],
     pendingEvent: null,
@@ -239,12 +256,19 @@ export function migrateSavedRun(run: RunState): RunState {
   if (typeof run.seed !== 'number') {
     run.seed = randomSeed();
   }
+  if (typeof run.harvestHeat !== 'number') {
+    run.harvestHeat = 0;
+  }
+  if (!Array.isArray(run.unlockedWeaponIds)) {
+    run.unlockedWeaponIds = [...STARTER_UNLOCKED_WEAPONS];
+  }
   if (Array.isArray(run.roster)) {
     for (const hero of run.roster) {
       if (typeof hero.level !== 'number') hero.level = 1;
       if (typeof hero.xp !== 'number') hero.xp = 0;
       if (typeof hero.skillPoints !== 'number') hero.skillPoints = 1;
       if (!Array.isArray(hero.perkIds)) hero.perkIds = [];
+      if (!hero.equippedWeaponId) hero.equippedWeaponId = hero.weapon.id;
     }
   }
   return run;
@@ -271,6 +295,16 @@ function pickRandomDistinct<T>(pool: readonly T[], count: number, rng = Math.ran
   return out;
 }
 
+function getLockedWeaponPool(run: RunState): string[] {
+  const unlocked = new Set(run.unlockedWeaponIds ?? []);
+  const rosterSpecies = new Set(run.roster.map((h) => h.species));
+  const preferred = ALL_ALT_WEAPON_IDS.filter(
+    (id) => !unlocked.has(id) && rosterSpecies.has(ALT_WEAPON_REGISTRY[id].species)
+  );
+  if (preferred.length > 0) return preferred;
+  return ALL_ALT_WEAPON_IDS.filter((id) => !unlocked.has(id));
+}
+
 export function generateMarketOffers(run: RunState, rng = Math.random): MarketOffer[] {
   const graftPicks = pickRandomDistinct(ALL_GRAFT_IDS, 2, rng);
   const offers: MarketOffer[] = graftPicks.map((gid, i) => {
@@ -286,6 +320,24 @@ export function generateMarketOffers(run: RunState, rng = Math.random): MarketOf
       purchased: false,
     };
   });
+
+  // Offer 1 locked Alternate Weapon for the Armory!
+  const lockedWeapons = getLockedWeaponPool(run);
+  if (lockedWeapons.length > 0) {
+    const wid = pickRandomDistinct(lockedWeapons, 1, rng)[0];
+    const entry = ALT_WEAPON_REGISTRY[wid];
+    const ownerName = PRODUCE_BLUEPRINTS[entry.species]?.name ?? entry.species;
+    offers.push({
+      id: `mkt_weapon_${wid}`,
+      kind: 'weapon',
+      title: `${entry.weapon.name} (${ownerName})`,
+      desc: `${entry.tagline} · ${entry.weapon.description}`,
+      icon: '⚔️',
+      cost: entry.cost,
+      weaponUnlockId: wid,
+      purchased: false,
+    });
+  }
 
   const bomb = ITEM_REGISTRY.fertilizer_bomb;
   const can = ITEM_REGISTRY.watering_can;
@@ -341,6 +393,7 @@ export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Mat
   const availableRelics = ALL_RELIC_IDS.filter((id) => !ownedRelics.has(id));
   const ownedBlueprints = new Set(run.roster.map((h) => h.blueprintId));
   const recruitPool = RECRUITABLE_BLUEPRINT_IDS.filter((id) => !ownedBlueprints.has(id));
+  const lockedWeapons = getLockedWeaponPool(run);
 
   if (node.type === 'vault' || node.type === 'shop') {
     const picks = pickRandomDistinct(recruitPool, 3, rng);
@@ -349,16 +402,20 @@ export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Mat
       graftChoices: [],
       relicChoices: [],
       recruitChoices: picks,
+      weaponChoices: [],
       freeHealAmount: node.type === 'vault' ? 6 : 3,
       itemGrant: node.type === 'vault' ? { itemId: 'watering_can', count: 1 } : undefined,
       marketOffers: generateMarketOffers(run, rng),
       claimedGraft: true,
       claimedRelic: true,
       claimedRecruit: picks.length === 0,
+      claimedWeapon: true,
     };
   }
 
   const grantsRelic = node.type === 'elite' || node.type === 'escape' || node.type === 'barn_rescue';
+  const grantsWeapon = (node.type === 'elite' || node.type === 'boss') && lockedWeapons.length > 0;
+  const weaponChoices = grantsWeapon ? pickRandomDistinct(lockedWeapons, 2, rng) : [];
   const grantsRecruit =
     recruitPool.length > 0 && (node.type === 'skirmish' || node.type === 'barn_rescue');
   const recruitPicks = grantsRecruit ? pickRandomDistinct(recruitPool, 2, rng) : [];
@@ -372,11 +429,13 @@ export function generateRewardForNode(run: RunState, node: SeasonNode, rng = Mat
     graftChoices: pickRandomDistinct(ALL_GRAFT_IDS, node.type === 'elite' ? 4 : 3, rng),
     relicChoices: grantsRelic ? pickRandomDistinct(availableRelics, 3, rng) : [],
     recruitChoices: recruitPicks,
+    weaponChoices,
     itemGrant: { itemId: randomItem, count: node.type === 'elite' ? 2 : 1 },
     freeHealAmount: node.type === 'escape' ? 4 : 3,
     claimedGraft: false,
     claimedRelic: !grantsRelic || availableRelics.length === 0,
     claimedRecruit: recruitPicks.length === 0,
+    claimedWeapon: weaponChoices.length === 0,
   };
 }
 
@@ -417,6 +476,8 @@ export function buyMarketOffer(run: RunState, offerId: string, targetHeroUid?: s
     const ok = applyGraftToHero(run, targetHeroUid, offer.graftId);
     run.pendingReward!.claimedGraft = prevClaimed;
     if (!ok) return false;
+  } else if (offer.kind === 'weapon' && offer.weaponUnlockId) {
+    unlockRunWeapon(run, offer.weaponUnlockId);
   } else if (offer.kind === 'item' && offer.itemId) {
     run.items[offer.itemId] = (run.items[offer.itemId] ?? 0) + 1;
   } else if (offer.kind === 'heal') {
@@ -560,7 +621,8 @@ export function applyBattleOutcomeToRun(
 
   if (battle.status === 'defeat' || run.activeSquadUids.length === 0) {
     run.status = 'defeat';
-    const consolationSeeds = Math.max(10, run.seeds + defeatedEnemies * 2);
+    const heatMult = getHeatSeedMultiplier(run.harvestHeat ?? 0);
+    const consolationSeeds = Math.round(Math.max(10, run.seeds + defeatedEnemies * 2) * heatMult);
     meta.heirloomSeeds += consolationSeeds;
     meta.runsPlayed += 1;
     saveMetaProgress(meta);
@@ -604,11 +666,14 @@ export function applyBattleOutcomeToRun(
   }
 
   if (node?.type === 'boss') {
-    run.seeds += 40;
+    const heatMult = getHeatSeedMultiplier(run.harvestHeat ?? 0);
+    run.seeds = Math.round((run.seeds + 40) * heatMult);
     run.status = 'victory';
     meta.heirloomSeeds += run.seeds;
     meta.runsPlayed += 1;
     meta.runsWon += 1;
+    const nextHeat = Math.min(MAX_HARVEST_HEAT, (run.harvestHeat ?? 0) + 1);
+    meta.maxHeatUnlocked = Math.max(meta.maxHeatUnlocked ?? 1, nextHeat);
     saveMetaProgress(meta);
     clearSavedRun();
     return;
@@ -700,6 +765,45 @@ export function claimRecruitReward(run: RunState, blueprintId: string, bonusMaxH
   if (run.pendingReward) {
     run.pendingReward.claimedRecruit = true;
   }
+  return true;
+}
+
+export function unlockRunWeapon(run: RunState, weaponId: string): boolean {
+  if (!ALT_WEAPON_REGISTRY[weaponId]) return false;
+  if (!Array.isArray(run.unlockedWeaponIds)) run.unlockedWeaponIds = [];
+  if (run.unlockedWeaponIds.includes(weaponId)) return false;
+  run.unlockedWeaponIds.push(weaponId);
+  return true;
+}
+
+export function claimWeaponReward(run: RunState, weaponId: string): boolean {
+  if (!ALT_WEAPON_REGISTRY[weaponId]) return false;
+  unlockRunWeapon(run, weaponId);
+  // Auto-equip if that species is in the roster and still using their base weapon? Leave choice to Armory!
+  if (run.pendingReward) {
+    run.pendingReward.claimedWeapon = true;
+  }
+  return true;
+}
+
+export function equipHeroWeapon(run: RunState, heroUid: string, weaponId: string): boolean {
+  const hero = run.roster.find((h) => h.uid === heroUid && !h.harvested);
+  if (!hero) return false;
+  const bp = PRODUCE_BLUEPRINTS[hero.blueprintId];
+  if (!bp) return false;
+
+  if (weaponId === bp.weapon.id) {
+    hero.weapon = buildScaledWeaponForHero(hero, bp.weapon);
+    hero.equippedWeaponId = bp.weapon.id;
+    return true;
+  }
+
+  const altEntry = ALT_WEAPON_REGISTRY[weaponId];
+  if (!altEntry || altEntry.species !== hero.species) return false;
+  if (!(run.unlockedWeaponIds ?? []).includes(weaponId)) return false;
+
+  hero.weapon = buildScaledWeaponForHero(hero, altEntry.weapon);
+  hero.equippedWeaponId = altEntry.weapon.id;
   return true;
 }
 

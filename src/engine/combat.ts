@@ -58,12 +58,18 @@ export function forecastAttack(
     return invalid(`Out of range (${w.minRange}-${w.maxRange})`);
   }
 
-  // Can target an enemy unit, a destructible cover tile (crate/haystack/cage), or any tile with lobbed AoE
+  // Can target an enemy unit, a destructible cover tile (crate/haystack/cage/pumpkin),
+  // a collapsible wooden bridge, or any tile with lobbed AoE
   const isEnemyTarget = Boolean(targetUnit && targetUnit.team !== attacker.team);
   const isDestructibleCover = Boolean(targetTile?.cover && targetTile.cover.destructible);
+  const isBridgeTarget = Boolean(
+    !targetUnit &&
+      targetTile?.terrain === 'bridge' &&
+      (targetTile.bridgeHp ?? 0) > 0
+  );
   const isLobbedGround = w.arc === 'lobbed' && !targetUnit;
 
-  if (!isEnemyTarget && !isDestructibleCover && !isLobbedGround) {
+  if (!isEnemyTarget && !isDestructibleCover && !isBridgeTarget && !isLobbedGround) {
     return invalid('No valid target');
   }
 
@@ -74,9 +80,11 @@ export function forecastAttack(
   const rawBase = w.damage + boostBonus;
   const effCoverDmg = getEffectiveCoverDamage(attacker) + boostBonus;
 
-  // Targeting destructible cover / Barn Rescue cage directly (or lobbing onto empty ground): always 100% hit!
+  // Targeting destructible cover / Barn Rescue cage / Pumpkin / Bridge directly (or lobbing onto empty ground): always 100% hit!
   if (!isEnemyTarget) {
     const emptyLobSplash = Math.max(1, Math.floor(w.damage / 2));
+    const isPumpkin = targetTile?.cover?.kind === 'pumpkin';
+    const bridgeHp = targetTile?.bridgeHp ?? 0;
     return {
       attackerId: attacker.id,
       targetPos,
@@ -84,9 +92,14 @@ export function forecastAttack(
       coverLevel: 'none',
       matchup: 'neutral',
       baseDamage: rawBase,
-      finalDamage: isDestructibleCover ? effCoverDmg : emptyLobSplash,
+      finalDamage: isDestructibleCover || isBridgeTarget ? effCoverDmg : emptyLobSplash,
       coverDamage: effCoverDmg,
-      isLethal: Boolean(targetTile?.cover && effCoverDmg >= targetTile.cover.hp),
+      isLethal: isBridgeTarget
+        ? effCoverDmg >= bridgeHp
+        : Boolean(targetTile?.cover && effCoverDmg >= targetTile.cover.hp),
+      isBridgeTarget,
+      isPumpkinTarget: isPumpkin,
+      pumpkinRollDir: isPumpkin ? computePushDirection(attacker.pos, targetPos) : undefined,
       canAttack: true,
     };
   }
@@ -142,6 +155,28 @@ export function forecastAttack(
   if (hasStatus(defender, 'shield')) dmg -= 2;
   dmg = Math.max(1, dmg);
 
+  // Mario + Rabbids Partner Follow-Up Assist!
+  // If another living non-rooted player hero is orthogonally adjacent to the enemy, they pile on +1 bonus DMG!
+  let partnerAssistUnitId: string | undefined;
+  let partnerAssistUnitName: string | undefined;
+  let partnerAssistDamage = 0;
+  if (attacker.team === 'player' && hitChance > 0) {
+    const assistAlly = state.units.find(
+      (u) =>
+        u.alive &&
+        u.team === 'player' &&
+        !u.isEscortCart &&
+        u.id !== attacker.id &&
+        !hasStatus(u, 'rooted') &&
+        manhattan(u.pos, defender.pos) === 1
+    );
+    if (assistAlly) {
+      partnerAssistUnitId = assistAlly.id;
+      partnerAssistUnitName = assistAlly.name;
+      partnerAssistDamage = 1;
+    }
+  }
+
   const appliesStatus =
     w.appliesStatus?.kind ??
     (hitChance === 100 && hasGraft(attacker, 'spicy_shot') ? 'burn' : undefined);
@@ -185,13 +220,16 @@ export function forecastAttack(
     baseDamage: rawBase,
     finalDamage: hitChance === 0 ? 0 : dmg,
     coverDamage: effCoverDmg,
-    isLethal: hitChance > 0 && dmg + extraHazardDmg >= defender.hp,
+    isLethal: hitChance > 0 && dmg + partnerAssistDamage + extraHazardDmg >= defender.hp,
     knockbackDir,
     knockbackWillBump,
     knockbackHazard,
     elevationDiff,
     highGroundBonus,
     isCriticalFlank,
+    partnerAssistDamage: partnerAssistDamage || undefined,
+    partnerAssistUnitId,
+    partnerAssistUnitName,
     appliesStatus,
     canAttack: hitChance > 0,
     reason: hitChance === 0 ? 'Blocked by Full Cover! Flank, lob, or smash cover.' : undefined,
@@ -199,10 +237,10 @@ export function forecastAttack(
 }
 
 /**
- * Returns all tiles the attacker can click in Attack Mode (enemies + destructible cover + lobbed tiles).
+ * Returns all tiles the attacker can click in Attack Mode (enemies + destructible cover + bridges + lobbed tiles).
  */
 export function getAttackableTiles(state: BattleState, attacker: BattleUnit): GridPos[] {
-  if (attacker.actions.hasAttacked) return [];
+  if (attacker.isEscortCart || attacker.actions.hasAttacked) return [];
   const out: GridPos[] = [];
   const w = attacker.weapon;
   for (let y = 0; y < state.height; y++) {
@@ -212,7 +250,8 @@ export function getAttackableTiles(state: BattleState, attacker: BattleUnit): Gr
       if (d < w.minRange || d > w.maxRange) continue;
       const u = unitAt(state, p);
       const t = tileAt(state, p);
-      if ((u && u.team !== attacker.team) || (t?.cover && t.cover.destructible) || w.arc === 'lobbed') {
+      const canShootBridge = Boolean(!u && t?.terrain === 'bridge' && (t.bridgeHp ?? 0) > 0);
+      if ((u && u.team !== attacker.team) || (t?.cover && t.cover.destructible) || canShootBridge || w.arc === 'lobbed') {
         out.push(p);
       }
     }
@@ -303,7 +342,7 @@ export function getAllEnemiesThreatZone(state: BattleState): {
  * - Can still use their signature Ability (off cooldown)
  */
 export function unitHasMeaningfulAction(state: BattleState, unit: BattleUnit): boolean {
-  if (!unit.alive || unit.team !== 'player') return false;
+  if (!unit.alive || unit.team !== 'player' || unit.isEscortCart) return false;
 
   if (!unit.actions.hasMoved && !hasStatus(unit, 'rooted')) {
     return true;
@@ -344,6 +383,6 @@ export function unitHasMeaningfulAction(state: BattleState, unit: BattleUnit): b
  * Used to drive smooth Auto Turn-End when no skills or characters remain!
  */
 export function hasAnyPlayerActionRemaining(state: BattleState): boolean {
-  if (state.status !== 'ongoing' || state.phase !== 'player') return false;
+  if (state.status !== 'ongoing' || state.phase !== 'player' || state.prepPhase) return false;
   return state.units.some((u) => unitHasMeaningfulAction(state, u));
 }

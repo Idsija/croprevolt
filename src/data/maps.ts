@@ -133,24 +133,25 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       rect(6, 8, 6, 10, { terrain: 'soil' }),
       rect(2, 0, 2, 2, { terrain: 'soil' }),
       rect(6, 0, 6, 2, { terrain: 'soil' }),
-      // Compost, mud banks & flanking Gopher Burrow Warp Pipes!
+      // Compost, mud banks, Bouncy Mushrooms & flanking Gopher Burrow Warp Pipes!
       [
         { x: 0, y: 5, terrain: 'compost' },
         { x: 8, y: 5, terrain: 'compost' },
         { x: 1, y: 8, terrain: 'mud' },
         { x: 7, y: 2, terrain: 'mud' },
+        { x: 4, y: 8, terrain: 'bounce_pad', elevation: 0 },
         { x: 0, y: 8, terrain: 'burrow', elevation: 0 },
         { x: 0, y: 2, terrain: 'burrow', elevation: 0 },
         { x: 8, y: 8, terrain: 'burrow', elevation: 0 },
         { x: 8, y: 2, terrain: 'burrow', elevation: 0 },
       ],
-      // Tactical cover & creek-side explosive hazards
+      // Tactical cover, Rolling Pumpkins & creek-side explosive hazards
       [
         { x: 3, y: 8, cover: 'crate' },
         { x: 5, y: 8, cover: 'crate' },
         { x: 1, y: 6, cover: 'beehive' },
         { x: 7, y: 6, cover: 'sprinkler' },
-        { x: 3, y: 5, cover: 'crate' },
+        { x: 3, y: 5, cover: 'pumpkin' },
         { x: 5, y: 5, cover: 'crate' },
         { x: 1, y: 4, cover: 'haystack' },
         { x: 7, y: 4, cover: 'haystack' },
@@ -181,7 +182,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
   canyon_terrace: {
     id: 'canyon_terrace',
     name: 'Sunlit Canyon Terraces',
-    subtitle: 'Scale two-story terraced cliffs via ramps or Gopher Burrows and knock farmers off high ground!',
+    subtitle: 'Scale two-story terraced cliffs via Bouncy Mushrooms, ramps, or Gopher Burrows!',
     objective: 'defeat_all',
     objectiveLabel: 'Defeat all farmers',
     width: 10,
@@ -213,26 +214,28 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 4, y: 3, terrain: 'ramp', elevation: 1 },
         { x: 5, y: 3, terrain: 'ramp', elevation: 1 },
       ],
-      // Compost beds, sunbeams & Gopher Burrow Warp Pipes launching straight onto cliffs!
+      // Compost beds, sunbeams, Bouncy Mushrooms & Gopher Burrow Warp Pipes!
       [
         { x: 0, y: 6, terrain: 'compost', elevation: 1 },
         { x: 9, y: 6, terrain: 'compost', elevation: 1 },
         { x: 4, y: 1, terrain: 'sunbeam', elevation: 2 },
+        { x: 2, y: 8, terrain: 'bounce_pad', elevation: 0 },
+        { x: 7, y: 8, terrain: 'bounce_pad', elevation: 0 },
         { x: 1, y: 9, terrain: 'burrow', elevation: 0 },
         { x: 2, y: 3, terrain: 'burrow', elevation: 1 },
         { x: 8, y: 9, terrain: 'burrow', elevation: 0 },
         { x: 7, y: 3, terrain: 'burrow', elevation: 1 },
       ],
-      // Cover & interactive canyon props
+      // Cover, Rolling Pumpkins & interactive canyon props
       [
         { x: 3, y: 8, cover: 'crate' },
         { x: 6, y: 8, cover: 'crate' },
-        { x: 4, y: 7, cover: 'haystack' },
+        { x: 4, y: 7, cover: 'pumpkin' },
         { x: 5, y: 7, cover: 'beehive' },
         { x: 0, y: 5, cover: 'crate' },
         { x: 9, y: 5, cover: 'sprinkler' },
         { x: 2, y: 4, cover: 'crate' },
-        { x: 7, y: 4, cover: 'crate' },
+        { x: 7, y: 4, cover: 'pumpkin' },
         { x: 3, y: 2, cover: 'stone' },
         { x: 6, y: 2, cover: 'stone' },
       ]
@@ -929,6 +932,142 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { blueprintId: 'trimmer', x: 1, y: 3 },
       { blueprintId: 'mower', x: 7, y: 3 },
       { blueprintId: 'sprayer', x: 4, y: 1 },
+    ],
+  },
+
+  // ===== NEW MISSION TYPE 1: HOLD THE PATCH — SURVIVE 4 TURNS! =====
+  barnyard_siege: {
+    id: 'barnyard_siege',
+    name: 'Barnyard Hilltop Siege',
+    subtitle: 'Hold the garden knoll for 4 turns as farmer waves pour out of northern Gopher Burrows!',
+    theme: 'spring',
+    objective: 'survive',
+    objectiveLabel: 'Hold the Patch — Survive 4 Turns',
+    surviveTurns: 4,
+    width: 9,
+    height: 11,
+    tiles: mergeTiles(
+      // Raised defensive southern terrace (elevation 1) with central ramp & twin bounce pads
+      rect(2, 6, 6, 8, { terrain: 'grass', elevation: 1 }),
+      [
+        { x: 4, y: 5, terrain: 'ramp', elevation: 0 },
+        { x: 2, y: 5, terrain: 'bounce_pad', elevation: 0 },
+        { x: 6, y: 5, terrain: 'bounce_pad', elevation: 0 },
+      ],
+      // Flanking creek channels + collapsible bridges
+      rect(0, 4, 1, 4, { terrain: 'water', elevation: 0 }),
+      rect(7, 4, 8, 4, { terrain: 'water', elevation: 0 }),
+      [
+        { x: 1, y: 4, terrain: 'bridge', elevation: 0 },
+        { x: 7, y: 4, terrain: 'bridge', elevation: 0 },
+      ],
+      // Northern reinforcement Gopher Burrows + Compost beds on the hill
+      [
+        { x: 1, y: 1, terrain: 'burrow', elevation: 0 },
+        { x: 7, y: 1, terrain: 'burrow', elevation: 0 },
+        { x: 0, y: 8, terrain: 'burrow', elevation: 0 },
+        { x: 8, y: 8, terrain: 'burrow', elevation: 0 },
+        { x: 4, y: 7, terrain: 'compost', elevation: 1 },
+        { x: 3, y: 3, terrain: 'mud' },
+        { x: 5, y: 3, terrain: 'mud' },
+      ],
+      // Rolling Pumpkins perched on the ridge to bowl down attacking farmhands!
+      [
+        { x: 3, y: 6, cover: 'pumpkin' },
+        { x: 5, y: 6, cover: 'pumpkin' },
+        { x: 2, y: 7, cover: 'crate' },
+        { x: 6, y: 7, cover: 'crate' },
+        { x: 4, y: 4, cover: 'beehive' },
+        { x: 2, y: 3, cover: 'haystack' },
+        { x: 6, y: 3, cover: 'sprinkler' },
+      ]
+    ),
+    burrowPairs: [
+      [{ x: 0, y: 8 }, { x: 1, y: 1 }],
+      [{ x: 8, y: 8 }, { x: 7, y: 1 }],
+    ],
+    playerSpawns: [
+      { x: 1, y: 10 },
+      { x: 3, y: 9 },
+      { x: 5, y: 9 },
+      { x: 7, y: 10 },
+    ],
+    enemySpawns: [
+      { blueprintId: 'digger', x: 3, y: 2 },
+      { blueprintId: 'trimmer', x: 5, y: 2 },
+      { blueprintId: 'sprayer', x: 4, y: 1 },
+    ],
+  },
+
+  // ===== NEW MISSION TYPE 2: ESCORT THE GOLDEN SEED CART! =====
+  harvest_railroad: {
+    id: 'harvest_railroad',
+    name: 'Golden Seed Convoy',
+    subtitle: 'Escort the Golden Seed Cart north across twin bridges to the Gate — keep it safe!',
+    theme: 'autumn',
+    objective: 'escort',
+    objectiveLabel: 'Escort the Golden Seed Cart to the North Gate',
+    width: 9,
+    height: 12,
+    escortStartPos: { x: 4, y: 9 },
+    tiles: mergeTiles(
+      // North delivery gate
+      [
+        { x: 3, y: 0, terrain: 'gate', elevation: 0 },
+        { x: 4, y: 0, terrain: 'gate', elevation: 0 },
+        { x: 5, y: 0, terrain: 'gate', elevation: 0 },
+      ],
+      // Straight cobblestone/dirt convoy road down x=4
+      rect(4, 1, 4, 10, { terrain: 'soil', elevation: 0 }),
+      // Twin river crossings with wooden bridges!
+      rect(0, 7, 8, 7, { terrain: 'water', elevation: 0 }),
+      rect(0, 3, 8, 3, { terrain: 'water', elevation: 0 }),
+      [
+        { x: 2, y: 7, terrain: 'bridge', elevation: 0 },
+        { x: 4, y: 7, terrain: 'bridge', elevation: 0 },
+        { x: 6, y: 7, terrain: 'bridge', elevation: 0 },
+        { x: 4, y: 3, terrain: 'bridge', elevation: 0 },
+        { x: 7, y: 3, terrain: 'bridge', elevation: 0 },
+      ],
+      // Flanking high-ground escort overwatch hills (elevation 1) with Bouncy Mushrooms!
+      rect(0, 4, 1, 6, { terrain: 'grass', elevation: 1 }),
+      rect(7, 4, 8, 6, { terrain: 'grass', elevation: 1 }),
+      [
+        { x: 1, y: 8, terrain: 'bounce_pad', elevation: 0 },
+        { x: 7, y: 8, terrain: 'bounce_pad', elevation: 0 },
+        { x: 1, y: 6, terrain: 'ramp', elevation: 0 },
+        { x: 7, y: 6, terrain: 'ramp', elevation: 0 },
+        { x: 2, y: 5, terrain: 'compost', elevation: 0 },
+        { x: 6, y: 5, terrain: 'sunbeam', elevation: 0 },
+      ],
+      // Cover & Rolling Pumpkins along the escort highway (never blocking x=4 road!)
+      [
+        { x: 3, y: 8, cover: 'crate' },
+        { x: 5, y: 8, cover: 'crate' },
+        { x: 3, y: 6, cover: 'pumpkin' },
+        { x: 5, y: 6, cover: 'beehive' },
+        { x: 2, y: 4, cover: 'haystack' },
+        { x: 6, y: 4, cover: 'sprinkler' },
+        { x: 3, y: 2, cover: 'crate' },
+        { x: 5, y: 2, cover: 'pumpkin' },
+      ]
+    ),
+    playerSpawns: [
+      { x: 2, y: 11 },
+      { x: 3, y: 10 },
+      { x: 5, y: 10 },
+      { x: 6, y: 11 },
+    ],
+    enemySpawns: [
+      { blueprintId: 'digger', x: 3, y: 5 },
+      { blueprintId: 'trimmer', x: 6, y: 5 },
+      { blueprintId: 'mower', x: 2, y: 2 },
+      { blueprintId: 'sprayer', x: 6, y: 1 },
+    ],
+    gateTiles: [
+      { x: 3, y: 0 },
+      { x: 4, y: 0 },
+      { x: 5, y: 0 },
     ],
   },
 };

@@ -108,6 +108,37 @@ export function computeReachableMap(state: BattleState, unit: BattleUnit): Map<s
         }
       }
     }
+
+    // 3. Bouncy Mushroom Launchpad! Spring up to 3 tiles over water/lava/cover & up to +2 elevation for 1 Move!
+    if (currentTile.terrain === 'bounce_pad') {
+      const nextCost = current.cost + 1;
+      if (nextCost <= maxMove) {
+        const curElev = currentTile.elevation ?? 0;
+        for (let dy = -3; dy <= 3; dy++) {
+          for (let dx = -3; dx <= 3; dx++) {
+            const dist = Math.abs(dx) + Math.abs(dy);
+            if (dist < 2 || dist > 3) continue;
+            const dest = { x: current.pos.x + dx, y: current.pos.y + dy };
+            const destTile = tileAt(state, dest);
+            if (!destTile) continue;
+            if (!isTileWalkable(state, dest, unit.team, false)) continue;
+            if ((destTile.elevation ?? 0) - curElev > 2) continue;
+
+            const key = posKey(dest);
+            const existing = result.get(key);
+            if (!existing || nextCost < existing.cost) {
+              const node: ReachableNode = {
+                pos: dest,
+                cost: nextCost,
+                path: [...current.path, dest],
+              };
+              result.set(key, node);
+              queue.push(node);
+            }
+          }
+        }
+      }
+    }
   }
 
   return result;
@@ -118,7 +149,7 @@ export function computeReachableMap(state: BattleState, unit: BattleUnit): Map<s
  */
 export function computeMovableTiles(state: BattleState, unit: BattleUnit): Map<string, ReachableNode> {
   const out = new Map<string, ReachableNode>();
-  if (unit.actions.hasMoved || hasStatus(unit, 'rooted')) return out;
+  if (unit.isEscortCart || unit.actions.hasMoved || hasStatus(unit, 'rooted')) return out;
   const all = computeReachableMap(state, unit);
   for (const [k, node] of all.entries()) {
     if (samePos(node.pos, unit.pos)) continue;
@@ -136,7 +167,7 @@ export function computeMovableTiles(state: BattleState, unit: BattleUnit): Map<s
 export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOption[] {
   const dashesUsed = unit.actions.dashesUsed ?? (unit.actions.hasDashed ? 1 : 0);
   const maxDashes = getMaxDashesForUnit(unit);
-  if (dashesUsed >= maxDashes || unit.actions.hasMoved || hasStatus(unit, 'rooted')) return [];
+  if (unit.isEscortCart || dashesUsed >= maxDashes || unit.actions.hasMoved || hasStatus(unit, 'rooted')) return [];
 
   const alreadyDashed = new Set(unit.actions.dashedEnemyIds ?? []);
   const reachable = computeReachableMap(state, unit);
@@ -186,6 +217,7 @@ export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOp
 export function computeTeamJumpOptions(state: BattleState, unit: BattleUnit): Map<string, JumpOption> {
   const out = new Map<string, JumpOption>();
   if (
+    unit.isEscortCart ||
     unit.team !== 'player' ||
     unit.actions.hasMoved ||
     unit.actions.hasJumped ||

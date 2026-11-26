@@ -18,9 +18,10 @@ export type TerrainType =
   | 'bridge'
   | 'lava'
   | 'ramp'
-  | 'burrow';
+  | 'burrow'
+  | 'bounce_pad';
 
-export type CoverKind = 'none' | 'crate' | 'haystack' | 'stone' | 'thorns' | 'cage' | 'beehive' | 'sprinkler';
+export type CoverKind = 'none' | 'crate' | 'haystack' | 'stone' | 'thorns' | 'cage' | 'beehive' | 'sprinkler' | 'pumpkin';
 export type CoverLevel = 'none' | 'half' | 'full';
 
 export type WeaponArc = 'direct' | 'lobbed' | 'melee' | 'pierce';
@@ -29,7 +30,7 @@ export type StatusKind = 'burn' | 'rooted' | 'acid' | 'shield' | 'boosted' | 'fe
 
 export type PromotionTier = 'seedling' | 'ripe' | 'heirloom';
 
-export type ObjectiveType = 'defeat_all' | 'reach_gate' | 'barn_rescue' | 'boss';
+export type ObjectiveType = 'defeat_all' | 'reach_gate' | 'barn_rescue' | 'boss' | 'survive' | 'escort';
 
 export type VisualStyleId = 'papercraft';
 
@@ -61,6 +62,10 @@ export interface Tile {
   /** Stepped diorama height: 0 = ground/river, 1 = raised terrace, 2 = high bluff. */
   elevation: number;
   cover: CoverObject | null;
+  /** Collapsible wooden bridge durability (collapses into water/lava at 0 HP!). */
+  bridgeHp?: number;
+  bridgeMaxHp?: number;
+  bridgeOver?: 'water' | 'lava';
 }
 
 export interface WeaponDef {
@@ -227,6 +232,7 @@ export interface RosterHero {
   dashKnockback?: number;
   dashStatus?: StatusEffect;
   weapon: WeaponDef;
+  equippedWeaponId?: string;
   ability: AbilityDef;
   graftIds: string[];
   level: number;
@@ -259,9 +265,11 @@ export interface BattleUnit {
   team: Team;
   name: string;
   title: string;
-  visualKind: ProduceBlueprint['species'] | EnemyVisualKind;
+  visualKind: ProduceBlueprint['species'] | EnemyVisualKind | 'seed_cart';
   family: UnitFamily;
   isBoss?: boolean;
+  /** True for the autonomous Golden Seed Cart objective ally on Escort missions. */
+  isEscortCart?: boolean;
   /** Elite-fight promotion: tougher, hits harder, starts shielded. */
   isVeteran?: boolean;
   pos: GridPos;
@@ -311,6 +319,15 @@ export interface CombatForecast {
   elevationDiff?: number;
   highGroundBonus?: number;
   isCriticalFlank?: boolean;
+  /** Mario + Rabbids Partner Follow-Up Assist when an ally is adjacent to the enemy! */
+  partnerAssistDamage?: number;
+  partnerAssistUnitId?: string;
+  partnerAssistUnitName?: string;
+  /** True when aiming directly at a collapsible wooden bridge tile. */
+  isBridgeTarget?: boolean;
+  /** True when aiming directly at a Rolling Pumpkin Boulder. */
+  isPumpkinTarget?: boolean;
+  pumpkinRollDir?: GridPos;
   appliesStatus?: StatusKind;
   canAttack: boolean;
   reason?: string;
@@ -336,11 +353,17 @@ export type BattleEvent =
   | { type: 'move'; unitId: string; path: GridPos[] }
   | { type: 'dash'; unitId: string; targetId: string; from: GridPos; to: GridPos; targetPos: GridPos; damage: number; status?: StatusKind }
   | { type: 'jump'; unitId: string; allyPos: GridPos; from: GridPos; to: GridPos; coopBoost?: string }
+  | { type: 'bounce_launch'; unitId: string; from: GridPos; to: GridPos }
   | { type: 'stomp'; unitId: string; pos: GridPos; damage: number; hitIds: string[] }
   | { type: 'overwatch_shot'; attackerId: string; attackerKind: string; targetId: string; from: GridPos; to: GridPos; damage: number }
+  | { type: 'partner_assist'; allyId: string; allyKind: string; targetId: string; from: GridPos; to: GridPos; damage: number }
   | { type: 'knockback'; unitId: string; from: GridPos; to: GridPos; bumped: boolean; bumpDamage?: number; bumpedUnitId?: string }
   | { type: 'terrain_hazard'; kind: 'water' | 'lava' | 'drop'; unitId: string; pos: GridPos; damage: number }
   | { type: 'hazard'; kind: 'beehive' | 'sprinkler'; pos: GridPos; damage: number }
+  | { type: 'pumpkin_roll'; from: GridPos; to: GridPos; path: GridPos[]; hitIds: string[]; damage: number }
+  | { type: 'bridge_collapse'; pos: GridPos; liquid: 'water' | 'lava'; affectedUnitId?: string }
+  | { type: 'reinforcement_spawn'; unitId: string; unitName: string; pos: GridPos }
+  | { type: 'escort_move'; unitId: string; from: GridPos; to: GridPos }
   | { type: 'attack'; attackerId: string; attackerKind: string; from: GridPos; to: GridPos; arc: WeaponArc; hit: boolean; damage: number; targetId?: string; matchup: MatchupResult; coverHitPos?: GridPos; coverDestroyed?: boolean; status?: StatusKind }
   | { type: 'ability'; unitId: string; abilityName: string; from: GridPos; to: GridPos; affectedIds: string[]; heal?: number; damage?: number; status?: StatusKind; coverSpawned?: GridPos }
   | { type: 'item'; unitId: string; itemName: string; from: GridPos; to: GridPos; affectedIds: string[]; heal?: number; damage?: number; status?: StatusKind }
@@ -389,6 +412,10 @@ export interface MapTemplate {
   gateTiles?: GridPos[];
   cagePos?: GridPos;
   burrowPairs?: Array<[GridPos, GridPos]>;
+  /** Number of turns to survive on 'survive' maps (default 4). */
+  surviveTurns?: number;
+  /** Starting tile for the Golden Seed Cart on 'escort' maps. */
+  escortStartPos?: GridPos;
 }
 
 export type BattleStatus = 'ongoing' | 'victory' | 'defeat';
@@ -406,6 +433,13 @@ export interface BattleState {
   turn: number;
   phase: Team;
   status: BattleStatus;
+  /** Pre-Battle Tactical Prep Phase: rearrange spawn positions & swap bench heroes before Turn 1 starts. */
+  prepPhase?: boolean;
+  playerSpawnPositions?: GridPos[];
+  /** Number of turns to hold on 'survive' objective maps. */
+  surviveTurns?: number;
+  /** Harvest Heat ascension level (0-5) active in this battle. */
+  harvestHeat?: number;
   relicIds: string[];
   items: Record<string, number>;
   gateTiles: GridPos[];
@@ -437,13 +471,14 @@ export interface SeasonNode {
 
 export interface MarketOffer {
   id: string;
-  kind: 'graft' | 'item' | 'heal' | 'rescue';
+  kind: 'graft' | 'item' | 'heal' | 'rescue' | 'weapon';
   title: string;
   desc: string;
   icon: string;
   cost: number;
   graftId?: string;
   itemId?: string;
+  weaponUnlockId?: string;
   purchased: boolean;
 }
 
@@ -466,12 +501,14 @@ export interface RewardBundle {
   graftChoices: string[];
   relicChoices: string[];
   recruitChoices: string[];
+  weaponChoices?: string[];
   itemGrant?: { itemId: string; count: number };
   freeHealAmount?: number;
   marketOffers?: MarketOffer[];
   claimedGraft: boolean;
   claimedRelic: boolean;
   claimedRecruit: boolean;
+  claimedWeapon?: boolean;
 }
 
 export interface RunState {
@@ -482,6 +519,10 @@ export interface RunState {
   act: number;
   /** Seed for the procedural map, so a run can be reproduced (e.g. a daily run). */
   seed: number;
+  /** Harvest Heat Ascension Level (0-5). */
+  harvestHeat?: number;
+  /** Unlocked alternate weapon IDs swappable anytime in the Hero Build Armory. */
+  unlockedWeaponIds?: string[];
   nodes: SeasonNode[];
   currentNodeId: string | null;
   completedNodeIds: string[];
@@ -506,6 +547,9 @@ export interface MetaProgress {
   heirloomSeeds: number;
   runsPlayed: number;
   runsWon: number;
+  /** Highest Harvest Heat (0-5) unlocked by winning runs (0 = Heat 0..1 unlocked or 0..5). */
+  maxHeatUnlocked?: number;
+  selectedHeat?: number;
   unlocks: {
     extraItemSatchel: boolean; // +1 Fertilizer Bomb & +1 Watering Can at run start
     heirloomSoil: boolean; // All starter heroes begin with +2 Max HP

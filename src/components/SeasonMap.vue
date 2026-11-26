@@ -9,7 +9,9 @@ import {
   enterSeasonNode,
   gameStore,
   returnToTitle,
+  toggleMusicMute,
 } from '../stores/gameStore';
+import AlmanacModal from './AlmanacModal.vue';
 import CraftIcon from './CraftIcon.vue';
 import HeroBuildModal from './HeroBuildModal.vue';
 
@@ -27,6 +29,7 @@ const selectedNodeId = ref<string | null>(null);
 const hoveredNodeId = ref<string | null>(null);
 const showBuildModal = ref(false);
 const buildModalHeroUid = ref<string | null>(null);
+const showAlmanac = ref(false);
 const showRelicsPopover = ref(false);
 const isTraveling = ref(false);
 
@@ -234,6 +237,10 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="ow-top-right">
+        <span v-if="(run.harvestHeat ?? 0) > 0" class="paper-pill ow-heat-pill" :title="`Harvest Heat ${run.harvestHeat}`">
+          🔥 Heat {{ run.harvestHeat }}
+        </span>
+
         <span class="paper-pill ow-seed-pill">
           <CraftIcon name="seed" :size="14" /> {{ run.seeds }}
         </span>
@@ -244,6 +251,24 @@ onBeforeUnmount(() => {
           @click="showRelicsPopover = !showRelicsPopover"
         >
           🏅 {{ run.relicIds.length }} Relic{{ run.relicIds.length > 1 ? 's' : '' }}
+        </button>
+
+        <button
+          class="paper-btn icon-tool"
+          title="Storybook Field Almanac"
+          aria-label="Open Field Almanac"
+          @click="showAlmanac = true"
+        >
+          <span>📖</span>
+        </button>
+
+        <button
+          class="paper-btn icon-tool"
+          :title="gameStore.musicMuted ? 'Unmute Soundtrack' : 'Mute Soundtrack'"
+          :aria-label="gameStore.musicMuted ? 'Unmute Soundtrack' : 'Mute Soundtrack'"
+          @click="toggleMusicMute"
+        >
+          <span>{{ gameStore.musicMuted ? '🔇' : '🎵' }}</span>
         </button>
 
         <button
@@ -358,6 +383,9 @@ onBeforeUnmount(() => {
       :initial-hero-uid="buildModalHeroUid"
       @close="showBuildModal = false"
     />
+
+    <!-- Storybook Field Almanac -->
+    <AlmanacModal v-if="showAlmanac" @close="showAlmanac = false" />
   </div>
 </template>
 
@@ -758,6 +786,14 @@ onBeforeUnmount(() => {
 .stop-state.done {
   background: #daf5cf;
   color: #215e16;
+}
+
+.ow-heat-pill {
+  background: linear-gradient(180deg, #ff7a33 0%, #c8331a 100%);
+  color: #fff8e6;
+  border-color: #4f160a;
+  font-weight: 900;
+  font-size: 0.78rem;
 }
 
 @media (max-width: 820px) {

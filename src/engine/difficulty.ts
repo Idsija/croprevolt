@@ -40,13 +40,46 @@ export function threatFor(act: number, floor: number): number {
   return act * (FLOORS_PER_ACT + 1) + floor + 1;
 }
 
-export function difficultyFor(act: number, floor: number, nodeType: NodeType): BattleDifficulty {
+export const MAX_HARVEST_HEAT = 5;
+
+export interface HarvestHeatInfo {
+  level: number;
+  name: string;
+  desc: string;
+  seedBonusPct: number;
+}
+
+export const HARVEST_HEAT_LEVELS: HarvestHeatInfo[] = [
+  { level: 0, name: 'Heat 0 · Morning Dew', desc: 'Standard storybook adventure.', seedBonusPct: 0 },
+  { level: 1, name: 'Heat 1 · High Noon', desc: 'All farmhands gain +15% Max HP.', seedBonusPct: 20 },
+  { level: 2, name: 'Heat 2 · Barn Veterans', desc: 'Elites & battles field +1 Veteran farmhand.', seedBonusPct: 40 },
+  { level: 3, name: 'Heat 3 · Brittle Crates', desc: 'Wooden crates start cracked (-2 HP).', seedBonusPct: 60 },
+  { level: 4, name: 'Heat 4 · Wrathful Wardens', desc: 'Act Bosses gain +20% HP & +1 telegraph DMG.', seedBonusPct: 80 },
+  { level: 5, name: 'Heat 5 · Scorching Harvest', desc: 'All enemies gain +1 Weapon Damage!', seedBonusPct: 100 },
+];
+
+export function getHeatSeedMultiplier(heat = 0): number {
+  const clamped = Math.max(0, Math.min(MAX_HARVEST_HEAT, Math.floor(heat)));
+  return 1 + clamped * 0.2;
+}
+
+export function difficultyFor(
+  act: number,
+  floor: number,
+  nodeType: NodeType,
+  harvestHeat = 0
+): BattleDifficulty {
+  const heat = Math.max(0, Math.min(MAX_HARVEST_HEAT, Math.floor(harvestHeat)));
   const threat = threatFor(act, floor);
+  const heatHpMult = heat >= 1 ? 1.15 : 1;
+  const heatDmgBonus = heat >= 5 ? 1 : 0;
+
   if (nodeType === 'boss') {
+    const bossHeatMult = heat >= 4 ? 1.2 : 1;
     return {
       threat,
-      hpMult: 1 + TUNING.bossHpPerAct * act,
-      damageBonus: TUNING.damagePerAct * act,
+      hpMult: (1 + TUNING.bossHpPerAct * act) * heatHpMult * bossHeatMult,
+      damageBonus: TUNING.damagePerAct * act + heatDmgBonus,
       extraEnemies: 0,
       veterans: 0,
     };
@@ -54,12 +87,15 @@ export function difficultyFor(act: number, floor: number, nodeType: NodeType): B
   // Reinforcements carry over between acts (capped by MAX_ENEMIES_PER_BATTLE at build time).
   const extraEnemies =
     act * TUNING.extraEnemyFloors.length + TUNING.extraEnemyFloors.filter((f) => floor >= f).length;
+  const baseVeterans = nodeType === 'elite' ? (floor >= TUNING.eliteSecondVeteranFloor ? 2 : 1) : 0;
+  const heatExtraVet = heat >= 2 ? 1 : 0;
+
   return {
     threat,
-    hpMult: 1 + TUNING.hpPerThreat * (threat - 1),
-    damageBonus: (floor >= TUNING.damageBonusFloor ? 1 : 0) + TUNING.damagePerAct * act,
+    hpMult: (1 + TUNING.hpPerThreat * (threat - 1)) * heatHpMult,
+    damageBonus: (floor >= TUNING.damageBonusFloor ? 1 : 0) + TUNING.damagePerAct * act + heatDmgBonus,
     extraEnemies: nodeType === 'elite' ? Math.max(0, extraEnemies - 1) : extraEnemies,
-    veterans: nodeType === 'elite' ? (floor >= TUNING.eliteSecondVeteranFloor ? 2 : 1) : 0,
+    veterans: baseVeterans + heatExtraVet,
   };
 }
 

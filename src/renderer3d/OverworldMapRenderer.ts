@@ -906,9 +906,10 @@ export class OverworldMapRenderer {
 
   private resize(): void {
     const parent = this.canvas.parentElement ?? this.canvas;
-    const rect = parent.getBoundingClientRect();
-    this.cssW = Math.max(260, Math.floor(rect.width || window.innerWidth));
-    this.cssH = Math.max(200, Math.floor(rect.height || window.innerHeight));
+    const w = parent.clientWidth || window.innerWidth;
+    const h = parent.clientHeight || window.innerHeight;
+    this.cssW = Math.max(260, Math.floor(w));
+    this.cssH = Math.max(200, Math.floor(h));
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     this.renderer.setPixelRatio(this.dpr);
@@ -919,8 +920,6 @@ export class OverworldMapRenderer {
     if (this.overlayCanvas) {
       this.overlayCanvas.width = Math.floor(this.cssW * this.dpr);
       this.overlayCanvas.height = Math.floor(this.cssH * this.dpr);
-      this.overlayCanvas.style.width = `${this.cssW}px`;
-      this.overlayCanvas.style.height = `${this.cssH}px`;
     }
   }
 

@@ -39,6 +39,7 @@ const TERRAIN_Y_OFFSET: Record<TerrainType, number> = {
   lava: -0.095,
   ramp: 0.22,
   burrow: 0.015,
+  bounce_pad: 0.02,
 };
 
 export function getTerrainSurfaceY(terrain: TerrainType): number {
@@ -276,6 +277,8 @@ export class PaperDioramaWorld {
         // Decorative micro 3D paper props on special terrain tiles
         if (tile.terrain === 'burrow') {
           this.addBurrowPipeProp(wp.x, surfaceY, wp.z, x * 11 + y * 7, burrowRings);
+        } else if (tile.terrain === 'bounce_pad') {
+          this.addBounceMushroomProp(wp.x, surfaceY, wp.z, x * 13 + y * 5);
         } else if (tile.terrain === 'compost') {
           this.addCompostSprout(wp.x, surfaceY, wp.z, x * 7 + y * 13);
         } else if (tile.terrain === 'sunbeam') {
@@ -674,6 +677,84 @@ export class PaperDioramaWorld {
     g.add(post, sign);
 
     this.sceneryGroup.add(g);
+  }
+
+  private addBounceMushroomProp(x: number, y: number, z: number, seed: number): void {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+
+    // Cream mushroom stem
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.24, 0.24, 12),
+      new THREE.MeshStandardMaterial({ color: '#f7ebd2', roughness: 0.85 })
+    );
+    stem.position.y = 0.12;
+    stem.castShadow = true;
+    g.add(stem);
+
+    // Vibrant red bouncy toadstool cap
+    const capGroup = new THREE.Group();
+    capGroup.position.y = 0.24;
+    const cap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.46, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+      new THREE.MeshStandardMaterial({
+        color: '#e53953',
+        emissive: '#6e1021',
+        emissiveIntensity: 0.18,
+        roughness: 0.55,
+      })
+    );
+    cap.scale.set(1.04, 0.58, 1.04);
+    cap.castShadow = true;
+    cap.receiveShadow = true;
+    capGroup.add(cap);
+
+    // Cute cream polka-dot spots on top of the mushroom cap!
+    const spotMat = new THREE.MeshBasicMaterial({ color: '#fff8e2' });
+    const spotGeo = new THREE.SphereGeometry(0.085, 8, 6);
+    const spotOffsets: Array<[number, number, number]> = [
+      [0, 0.25, 0],
+      [0.24, 0.17, 0.12],
+      [-0.22, 0.17, 0.16],
+      [0.14, 0.16, -0.24],
+      [-0.18, 0.16, -0.18],
+    ];
+    for (const [sx, sy, sz] of spotOffsets) {
+      const spot = new THREE.Mesh(spotGeo, spotMat);
+      spot.scale.set(1, 0.45, 1);
+      spot.position.set(sx, sy, sz);
+      capGroup.add(spot);
+    }
+
+    g.add(capGroup);
+
+    // Subtle shimmering magenta spring halo ring
+    const ringGeo = new THREE.RingGeometry(0.42, 0.5, 22);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(
+      ringGeo,
+      new THREE.MeshBasicMaterial({
+        color: '#ff70b8',
+        transparent: true,
+        opacity: 0.72,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    ring.position.y = 0.03;
+    g.add(ring);
+
+    this.sceneryGroup.add(g);
+
+    const phase = seed * 0.35;
+    this.animatedParts.push({
+      update: (time) => {
+        const sq = Math.sin(time * 3.8 + phase) * 0.08;
+        capGroup.scale.set(1 + sq * 0.6, 1 - sq, 1 + sq * 0.6);
+        capGroup.position.y = 0.24 + Math.max(0, Math.sin(time * 3.8 + phase)) * 0.04;
+        ring.rotation.y = time * 1.1 + phase;
+      },
+    });
   }
 
   private buildActWeather(boardW: number, boardH: number, theme: BoardTheme): void {
@@ -1552,6 +1633,46 @@ export class PaperDioramaWorld {
       }
       spinner = armGroup;
       group.add(armGroup);
+    } else if (cover.kind === 'pumpkin') {
+      // Giant Carved Storybook Rolling Pumpkin Boulder!
+      height = 0.84;
+      const orangeMat = new THREE.MeshStandardMaterial({
+        color: '#eb7516',
+        roughness: 0.62,
+        bumpMap: this.textures.paperBump,
+        bumpScale: 0.02,
+      });
+      const ribMat = new THREE.MeshStandardMaterial({
+        color: '#d4600e',
+        roughness: 0.68,
+      });
+      // Ribbed pumpkin segments
+      for (let i = 0; i < 6; i++) {
+        const ang = (i / 6) * Math.PI * 2;
+        const lobe = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), i % 2 === 0 ? orangeMat : ribMat);
+        lobe.scale.set(0.88, 0.94, 0.72);
+        lobe.position.set(Math.cos(ang) * 0.14, 0.36, Math.sin(ang) * 0.14);
+        lobe.rotation.y = -ang;
+        markPickable(lobe);
+        group.add(lobe);
+      }
+      // Curly green pumpkin stem on top
+      const stem = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.09, 0.24, 7),
+        new THREE.MeshStandardMaterial({ color: '#4c8029', roughness: 0.85 })
+      );
+      stem.position.set(0.02, 0.72, 0);
+      stem.rotation.z = -0.22;
+      markPickable(stem);
+      group.add(stem);
+
+      // Playful painted jack-o-lantern eyes on front so it reads instantly as a Rolling Pumpkin!
+      const eyeMat = new THREE.MeshBasicMaterial({ color: '#ffe66d' });
+      for (const sx of [-0.14, 0.14]) {
+        const eye = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.1, 3), eyeMat);
+        eye.position.set(sx, 0.42, 0.42);
+        group.add(eye);
+      }
     } else {
       // Thorns bramble half-cover
       height = 0.68;

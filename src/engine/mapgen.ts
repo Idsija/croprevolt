@@ -52,16 +52,16 @@ export const ACTS: ActDef[] = [
     trailTitle: 'Garden Trail Map',
     trailHint: 'Pick a path. Captain Scarecrow waits at the end of the trail.',
     mapPools: {
-      skirmish: ['creek_crossing', 'canyon_terrace', 'vegetable_patch'],
-      escape: ['patch_breakout'],
+      skirmish: ['creek_crossing', 'canyon_terrace', 'barnyard_siege', 'vegetable_patch'],
+      escape: ['patch_breakout', 'harvest_railroad'],
       barn_rescue: ['barn_raid'],
       elite: ['tool_shed_ambush', 'molten_furnace'],
     },
     subtitles: {
-      skirmish: 'Defeat All — Seize high ground, cross bridges & drive out the farmers',
-      escape: 'Reach the Gate — Vault past foes for a Graft, Soil Relic & 16 Seeds',
+      skirmish: 'Skirmish / Siege — Seize high ground, bounce pads & hold the patch!',
+      escape: 'Breakout / Escort — Reach the Gate or escort the Golden Seed Cart!',
       barn_rescue: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
-      elite: 'Elite Fight — High-stakes battle for rare Graft + Soil Relic',
+      elite: 'Elite Fight — High-stakes battle for rare Graft, Alt Weapon & Relic',
     },
     boss: {
       mapId: 'scarecrow_stand',
@@ -70,7 +70,7 @@ export const ACTS: ActDef[] = [
     },
     shop: {
       name: "Farmer's Compost Market",
-      subtitle: 'Safe Market — Spend run Seeds on Grafts, Items, Healing & Recruits!',
+      subtitle: 'Safe Market — Spend run Seeds on Alt Weapons, Grafts, Items & Healing!',
     },
     vault: {
       name: 'Seed Vault & Compost',
@@ -83,16 +83,16 @@ export const ACTS: ActDef[] = [
     trailTitle: 'Summer Greenhouse Trail',
     trailHint: 'Pick a path. Baron Combine waits in the Conservatory.',
     mapPools: {
-      skirmish: ['greenhouse_entry', 'molten_furnace', 'canyon_terrace'],
-      escape: ['irrigation_run'],
+      skirmish: ['greenhouse_entry', 'molten_furnace', 'canyon_terrace', 'barnyard_siege'],
+      escape: ['irrigation_run', 'harvest_railroad'],
       barn_rescue: ['barn_raid'],
       elite: ['apiary_ambush', 'molten_furnace'],
     },
     subtitles: {
-      skirmish: 'Defeat All — Use Sunbeams (+2 ATK), Catwalks & Lava/Canal hazards',
-      escape: 'Reach the Gate — Blast Sprinklers & rush north for Graft + Relic',
+      skirmish: 'Skirmish / Siege — Use Sunbeams (+2 ATK), Catwalks & Rolling Pumpkins',
+      escape: 'Breakout / Escort — Blast Sprinklers or escort the Golden Seed Cart!',
       barn_rescue: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
-      elite: 'Elite Fight — Chain-detonate Beehives for rare Graft + Soil Relic',
+      elite: 'Elite Fight — Chain-detonate Beehives for rare Graft, Alt Weapon & Relic',
     },
     boss: {
       mapId: 'combine_throne',
@@ -101,7 +101,7 @@ export const ACTS: ActDef[] = [
     },
     shop: {
       name: "Farmer's Compost Market",
-      subtitle: 'Safe Market — Spend run Seeds on Grafts, Items, Healing & Recruits!',
+      subtitle: 'Safe Market — Spend run Seeds on Alt Weapons, Grafts, Items & Healing!',
     },
     vault: {
       name: 'Seed Vault & Compost',
@@ -115,16 +115,16 @@ export const ACTS: ActDef[] = [
     trailTitle: 'Autumn Orchard Trail',
     trailHint: 'Pick a path. Lord Bramblecoat waits in the moonlit orchard.',
     mapPools: {
-      skirmish: ['canyon_terrace', 'creek_crossing', 'greenhouse_entry', 'vegetable_patch'],
-      escape: ['patch_breakout', 'irrigation_run'],
+      skirmish: ['canyon_terrace', 'creek_crossing', 'barnyard_siege', 'greenhouse_entry', 'vegetable_patch'],
+      escape: ['patch_breakout', 'harvest_railroad', 'irrigation_run'],
       barn_rescue: ['barn_raid'],
       elite: ['molten_furnace', 'tool_shed_ambush', 'apiary_ambush'],
     },
     subtitles: {
-      skirmish: 'Defeat All — Clear the harvest crew from the fallen leaves',
-      escape: 'Reach the Gate — Slip through the orchard fence for a Graft + Relic',
+      skirmish: 'Skirmish / Siege — Clear the harvest crew or hold the orchard patch!',
+      escape: 'Breakout / Escort — Slip through the gate or escort the Seed Cart!',
       barn_rescue: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
-      elite: 'Elite Fight — The harvest veterans guard a rare Graft + Soil Relic',
+      elite: 'Elite Fight — The harvest veterans guard a Graft, Alt Weapon & Relic',
     },
     boss: {
       mapId: 'orchard_clearing',

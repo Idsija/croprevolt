@@ -93,6 +93,8 @@ export function createCover(
       return { kind: 'beehive', level: 'half', hp: 4, maxHp: 4, destructible: true };
     case 'sprinkler':
       return { kind: 'sprinkler', level: 'half', hp: 4, maxHp: 4, destructible: true };
+    case 'pumpkin':
+      return { kind: 'pumpkin', level: 'half', hp: 3, maxHp: 3, destructible: true };
     case 'cage':
       return {
         kind: 'cage',

@@ -375,9 +375,8 @@ export class TitleBackdropRenderer {
 
   private resize(): void {
     const parent = this.canvas.parentElement ?? this.canvas;
-    const rect = parent.getBoundingClientRect();
-    const w = Math.max(260, Math.floor(rect.width || window.innerWidth));
-    const h = Math.max(200, Math.floor(rect.height || window.innerHeight));
+    const w = Math.max(260, Math.floor(parent.clientWidth || window.innerWidth));
+    const h = Math.max(200, Math.floor(parent.clientHeight || window.innerHeight));
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;

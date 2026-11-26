@@ -33,6 +33,7 @@ import {
   cancelPreviewAction,
   clearAutoEndTimer,
   clearFocusOnTabAway,
+  confirmPrepPhase,
   cycleAimTarget,
   deselectAll,
   endPlayerTurn,
@@ -52,17 +53,21 @@ import {
   subscribeBattleEvents,
   subscribeCameraFocus,
   subscribeUndoReset,
+  swapPrepBenchHero,
   toggleAllDangerZone,
   toggleAudioMute,
   toggleAutoEndTurn,
   toggleBoardViewMode,
   toggleEnemySpeed,
   toggleInspectEnemy,
+  toggleMusicMute,
   toggleRendererKind,
   triggerOverwatch,
   triggerUndoMove,
 } from '../stores/gameStore';
+import AlmanacModal from './AlmanacModal.vue';
 import CraftIcon, { type CraftIconName } from './CraftIcon.vue';
+import HeroBuildModal from './HeroBuildModal.vue';
 
 const COACH_STORAGE_KEY = 'crop_revolt_coach_3d_v2';
 const COACH_TIPS = [
@@ -97,6 +102,8 @@ const canvas2dRef = ref<HTMLCanvasElement | null>(null);
 
 const showItemsMenu = ref(false);
 const showUtilityMenu = ref(false);
+const showAlmanac = ref(false);
+const showPrepArmory = ref(false);
 const inspectedNote = ref<{ title: string; desc: string } | null>(null);
 const zoomPercent = ref(100);
 const cameraMode = ref<CameraMode3D>('tactical');
@@ -138,13 +145,27 @@ let unsubscribeUndoReset: (() => void) | null = null;
 
 const is3D = computed(() => gameStore.rendererKind === '3d');
 const battle = computed(() => gameStore.battle!);
-const playerUnits = computed(() => battle.value.units.filter((u) => u.team === 'player'));
+const playerUnits = computed(() =>
+  battle.value.units.filter((u) => u.team === 'player' && !u.isEscortCart)
+);
+const escortCart = computed(
+  () => battle.value.units.find((u) => u.isEscortCart) ?? null
+);
+const prepBenchHeroes = computed(() => {
+  const run = gameStore.run;
+  if (!run) return [];
+  const activeSet = new Set(run.activeSquadUids);
+  return run.roster.filter((h) => !h.harvested && !activeSet.has(h.uid));
+});
 const aliveEnemiesCount = computed(
   () => battle.value.units.filter((u) => u.team === 'enemy' && u.alive).length
 );
 
 const selectedUnit = computed(
-  () => battle.value.units.find((u) => u.id === gameStore.selectedUnitId && u.alive) ?? null
+  () =>
+    battle.value.units.find(
+      (u) => u.id === gameStore.selectedUnitId && u.alive && !u.isEscortCart
+    ) ?? null
 );
 
 const inspectedEnemy = computed(() =>
@@ -157,13 +178,15 @@ const inspectedEnemy = computed(() =>
 
 const activeFocusTile = computed(() => gameStore.previewTile ?? gameStore.hoveredTile);
 
+const focusedTile = computed(() =>
+  activeFocusTile.value ? tileAt(battle.value, activeFocusTile.value) ?? null : null
+);
+
 const focusedUnit = computed(() =>
   activeFocusTile.value ? unitAt(battle.value, activeFocusTile.value) ?? null : null
 );
 
-const focusedCover = computed(() =>
-  activeFocusTile.value ? tileAt(battle.value, activeFocusTile.value)?.cover ?? null : null
-);
+const focusedCover = computed(() => focusedTile.value?.cover ?? null);
 
 const previewOptions = computed(() => getPreviewActionOptions());
 
@@ -235,23 +258,25 @@ const moveDestinationSummary = computed(() => {
   const destTerrain = destTile?.terrain ?? 'grass';
   const destElev = destTile?.elevation ?? 0;
   const terrainNote =
-    destTerrain === 'burrow'
-      ? '🕳️ Gopher Burrow (1-Move Warp Pipe!)'
-      : destTerrain === 'sunbeam'
-        ? '☀ Sunbeam (+2 ATK)'
-        : destTerrain === 'compost'
-          ? '🌿 Compost (+2 HP/turn)'
-          : destTerrain === 'mud'
-            ? '💧 Mud (2 Move cost)'
-            : destTerrain === 'gate'
-              ? '▲ Exit Gate (Win!)'
-              : destTerrain === 'bridge'
-                ? '🪵 Bridge Crossing'
-                : destTerrain === 'ramp'
-                  ? '↗ Ramp (No climb penalty)'
-                  : destElev > 0
-                    ? `▲ High Ground Lv.${destElev} (+2 DMG!)`
-                    : null;
+    destTerrain === 'bounce_pad'
+      ? '🍄 Bouncy Mushroom (Launch 3 tiles / +2 height!)'
+      : destTerrain === 'burrow'
+        ? '🕳️ Gopher Burrow (1-Move Warp Pipe!)'
+        : destTerrain === 'sunbeam'
+          ? '☀ Sunbeam (+2 ATK)'
+          : destTerrain === 'compost'
+            ? '🌿 Compost (+2 HP/turn)'
+            : destTerrain === 'mud'
+              ? '💧 Mud (2 Move cost)'
+              : destTerrain === 'gate'
+                ? '▲ Exit Gate (Win!)'
+                : destTerrain === 'bridge'
+                  ? '🪵 Bridge Crossing (Collapsible!)'
+                  : destTerrain === 'ramp'
+                    ? '↗ Ramp (No climb penalty)'
+                    : destElev > 0
+                      ? `▲ High Ground Lv.${destElev} (+2 DMG!)`
+                      : null;
 
   return {
     isJump,
@@ -275,6 +300,8 @@ function unitPortraitSrc(u: {
   maxHp: number;
   isBoss?: boolean;
 }): string {
+  // Zero-404 guard: seed_cart is rendered procedurally in 3D and as an emoji badge in HUD.
+  if (u.visualKind === 'seed_cart') return '/sprites/potato.png';
   const isBossEnraged = Boolean(u.isBoss && (battle.value.bossPhase ?? 1) >= 2);
   const variant = isBossEnraged ? 'enraged' : isLowHpUnit(u) ? 'lowhp' : 'base';
   return `/sprites/${resolveVariantSpriteKey(u.visualKind, variant)}.png`;
@@ -294,6 +321,7 @@ const activeAimTargetIndex = computed(() => {
 
 const activeForecast = computed(() => {
   if (
+    battle.value.prepPhase ||
     (gameStore.mode !== 'attack' && gameStore.mode !== 'move') ||
     !selectedUnit.value ||
     selectedUnit.value.actions.hasAttacked ||
@@ -304,9 +332,16 @@ const activeForecast = computed(() => {
   }
   const targetIsEnemy = Boolean(focusedUnit.value && focusedUnit.value.team === 'enemy');
   const targetIsDestructibleCover = Boolean(focusedCover.value?.destructible);
+  const targetIsCollapsibleBridge = Boolean(
+    !focusedUnit.value &&
+      focusedTile.value?.terrain === 'bridge' &&
+      (focusedTile.value.bridgeHp ?? 0) > 0 &&
+      gameStore.mode === 'attack'
+  );
   if (
     !targetIsEnemy &&
     !targetIsDestructibleCover &&
+    !targetIsCollapsibleBridge &&
     !(gameStore.mode === 'attack' && selectedUnit.value.weapon.arc === 'lobbed')
   ) {
     return null;
@@ -319,7 +354,9 @@ const activeForecast = computed(() => {
 });
 
 const previewDashDamage = computed(() => {
-  if (!selectedUnit.value || !focusedUnit.value || focusedUnit.value.team !== 'enemy') return null;
+  if (battle.value.prepPhase || !selectedUnit.value || !focusedUnit.value || focusedUnit.value.team !== 'enemy') {
+    return null;
+  }
   const dash = computeDashOptions(battle.value, selectedUnit.value).find(
     (d) => d.enemyId === focusedUnit.value!.id
   );
@@ -327,7 +364,9 @@ const previewDashDamage = computed(() => {
 });
 
 const showWorldForecastPill = computed(() => {
-  if (!is3D.value || !focusAnchor.value?.visible || battle.value.phase !== 'player') return false;
+  if (!is3D.value || !focusAnchor.value?.visible || battle.value.phase !== 'player' || battle.value.prepPhase) {
+    return false;
+  }
   return Boolean(activeForecast.value || previewDashDamage.value !== null);
 });
 
@@ -365,7 +404,8 @@ const forecastHpBars = computed(() => {
     const extraHaz = fc?.canAttack
       ? hazardBonusDamage(fc.knockbackHazard ?? (fc.knockbackWillBump ? 'bump' : undefined))
       : 0;
-    const dmg = fc?.canAttack ? fc.finalDamage + extraHaz : (previewDashDamage.value ?? 0);
+    const assistDmg = fc?.canAttack ? (fc.partnerAssistDamage ?? 0) : 0;
+    const dmg = fc?.canAttack ? fc.finalDamage + assistDmg + extraHaz : (previewDashDamage.value ?? 0);
     const rem = Math.max(0, cur - dmg);
     return {
       currentPct: (cur / max) * 100,
@@ -381,6 +421,21 @@ const forecastHpBars = computed(() => {
     const max = Math.max(1, focusedCover.value.maxHp);
     const cur = Math.max(0, focusedCover.value.hp);
     const dmg = fc?.canAttack ? fc.coverDamage : 0;
+    const rem = Math.max(0, cur - dmg);
+    return {
+      currentPct: (cur / max) * 100,
+      remainingPct: (rem / max) * 100,
+      damagePct: ((cur - rem) / max) * 100,
+      cur,
+      max,
+      rem,
+      dmg,
+    };
+  }
+  if (fc?.isBridgeTarget && focusedTile.value && (focusedTile.value.bridgeHp ?? 0) > 0) {
+    const max = Math.max(1, focusedTile.value.bridgeMaxHp ?? 4);
+    const cur = Math.max(0, focusedTile.value.bridgeHp ?? 0);
+    const dmg = fc.canAttack ? fc.coverDamage : 0;
     const rem = Math.max(0, cur - dmg);
     return {
       currentPct: (cur / max) * 100,
@@ -659,11 +714,15 @@ function onKeyDown(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
     showItemsMenu.value = false;
     showUtilityMenu.value = false;
+    showAlmanac.value = false;
+    showPrepArmory.value = false;
     inspectedNote.value = null;
     clearEndConfirm();
     deselectAll(true);
     return;
   }
+
+  if (showAlmanac.value || showPrepArmory.value) return;
 
   // Hero quick-select 1..4
   if (e.key >= '1' && e.key <= '4') {
@@ -686,6 +745,28 @@ function onKeyDown(e: KeyboardEvent): void {
   }
 
   const lower = e.key.toLowerCase();
+  if (lower === 'q') {
+    rotate3DCamera(-1);
+    return;
+  } else if (lower === 'e') {
+    rotate3DCamera(1);
+    return;
+  } else if (lower === 't') {
+    handleToggleTacticam();
+    return;
+  } else if (lower === 'r') {
+    recenterBoard();
+    return;
+  }
+
+  if (battle.value.prepPhase) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      confirmPrepPhase();
+    }
+    return;
+  }
+
   // Aim Cam target cycling with A/D or Left/Right!
   if (
     gameStore.mode === 'attack' &&
@@ -697,15 +778,7 @@ function onKeyDown(e: KeyboardEvent): void {
     return;
   }
 
-  if (lower === 'q') {
-    rotate3DCamera(-1);
-  } else if (lower === 'e') {
-    rotate3DCamera(1);
-  } else if (lower === 't') {
-    handleToggleTacticam();
-  } else if (lower === 'r') {
-    recenterBoard();
-  } else if (lower === 'f' && selectedUnit.value && !selectedUnit.value.actions.hasAttacked) {
+  if (lower === 'f' && selectedUnit.value && !selectedUnit.value.actions.hasAttacked) {
     toggleMode('attack');
   } else if (lower === 'o' && selectedUnit.value && !selectedUnit.value.actions.hasAttacked) {
     handleTriggerOverwatch();
@@ -906,7 +979,17 @@ onBeforeUnmount(() => {
 
           <div class="wf-info-col">
             <div class="wf-name-row">
-              <strong>{{ focusedUnit ? focusedUnit.name : focusedCover?.kind.toUpperCase() }}</strong>
+              <strong>
+                {{
+                  focusedUnit
+                    ? focusedUnit.name
+                    : activeForecast?.isBridgeTarget
+                      ? 'WOODEN BRIDGE'
+                      : focusedCover?.kind === 'pumpkin'
+                        ? 'ROLLING PUMPKIN'
+                        : focusedCover?.kind.toUpperCase()
+                }}
+              </strong>
               <span
                 v-if="focusedUnit && activeForecast && activeForecast.matchup !== 'neutral'"
                 class="wf-match"
@@ -940,10 +1023,19 @@ onBeforeUnmount(() => {
 
             <div class="wf-tags-row">
               <span v-if="activeForecast?.canAttack" class="wf-dmg-chip">
-                -{{ activeForecast.finalDamage }} DMG
+                -{{ activeForecast.isBridgeTarget || activeForecast.isPumpkinTarget ? activeForecast.coverDamage : activeForecast.finalDamage }} DMG
               </span>
               <span v-else-if="activeForecast && !activeForecast.canAttack" class="wf-blocked-chip">
                 BLOCKED (Full Cover)
+              </span>
+              <span v-if="activeForecast?.partnerAssistDamage" class="wf-assist-chip">
+                ★ +{{ activeForecast.partnerAssistDamage }} ASSIST
+              </span>
+              <span v-if="activeForecast?.isPumpkinTarget" class="wf-pumpkin-chip">
+                🎃 BOWL 4 DMG
+              </span>
+              <span v-if="activeForecast?.isBridgeTarget" class="wf-bridge-chip">
+                🪵 COLLAPSE
               </span>
               <span v-if="activeForecast?.highGroundBonus" class="wf-high-chip">
                 ▲ HIGH +{{ activeForecast.highGroundBonus }}
@@ -977,13 +1069,28 @@ onBeforeUnmount(() => {
     <!-- Top Tactical Bar -->
     <header class="top-hud">
       <div class="mr-top-banner kraft-ribbon">
-        <span class="turn-stamp" :class="battle.phase">
-          {{ battle.phase === 'player' ? `TURN ${battle.turn}` : 'FARMER TURN' }}
+        <span class="turn-stamp" :class="battle.prepPhase ? 'prep' : battle.phase">
+          {{
+            battle.prepPhase
+              ? 'PREP'
+              : battle.phase === 'player'
+                ? `TURN ${battle.turn}`
+                : 'FARMER TURN'
+          }}
         </span>
         <div class="status-copy">
           <strong>{{ battle.mapName }}</strong>
-          <small>{{ battle.objectiveLabel }} · {{ aliveEnemiesCount }} foes left</small>
+          <small v-if="battle.objective === 'survive'">
+            🛡️ Hold Turn {{ Math.min(battle.turn, battle.surviveTurns ?? 4) }}/{{ battle.surviveTurns ?? 4 }} · {{ aliveEnemiesCount }} foes
+          </small>
+          <small v-else-if="battle.objective === 'escort' && escortCart">
+            🛒 Seed Cart {{ escortCart.hp }}/{{ escortCart.maxHp }} HP · {{ aliveEnemiesCount }} foes
+          </small>
+          <small v-else>{{ battle.objectiveLabel }} · {{ aliveEnemiesCount }} foes left</small>
         </div>
+        <span v-if="(battle.harvestHeat ?? 0) > 0" class="cam-mode-pill heat">
+          🔥 H{{ battle.harvestHeat }}
+        </span>
         <span v-if="is3D && cameraMode === 'aim'" class="cam-mode-pill aim">AIM CAM</span>
         <span v-else-if="is3D && cameraMode === 'tacticam'" class="cam-mode-pill tacticam">TACTICAM</span>
       </div>
@@ -1038,6 +1145,16 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
+        <!-- Quick Soundtrack Toggle -->
+        <button
+          class="paper-btn tool-btn desktop-only"
+          :aria-label="gameStore.musicMuted ? 'Unmute Music' : 'Mute Music'"
+          :title="gameStore.musicMuted ? 'Unmute Soundtrack' : 'Mute Soundtrack'"
+          @click="toggleMusicMute"
+        >
+          <span>{{ gameStore.musicMuted ? '🔇' : '🎵' }}</span>
+        </button>
+
         <!-- 1x / 2x Enemy Phase Speed Toggle -->
         <button
           class="paper-btn tool-btn speed-btn"
@@ -1063,7 +1180,7 @@ onBeforeUnmount(() => {
         <button
           class="paper-btn tool-btn"
           :class="{ 'undo-ready': Boolean(battle.undoSnapshot) }"
-          :disabled="!battle.undoSnapshot || battle.phase !== 'player' || gameStore.enemyTurnRunning"
+          :disabled="battle.prepPhase || !battle.undoSnapshot || battle.phase !== 'player' || gameStore.enemyTurnRunning"
           aria-label="Undo last move (Z)"
           title="Undo last move (Z)"
           @click="triggerUndoMove"
@@ -1097,7 +1214,7 @@ onBeforeUnmount(() => {
 
     <!-- Turn-1 Sticky-Note Coachmarks -->
     <div
-      v-if="coachStep >= 0 && battle.phase === 'player' && battle.status === 'ongoing'"
+      v-if="!battle.prepPhase && coachStep >= 0 && battle.phase === 'player' && battle.status === 'ongoing'"
       class="coach-note paper-card pinned-card"
     >
       <span class="brass-pin tl"></span>
@@ -1137,14 +1254,26 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="focusedCover && !activeForecast && !isMovePreview" class="paper-card inspector-ribbon">
-        <img class="fc-sprite" :src="`/sprites/${focusedCover.kind}.png`" :alt="focusedCover.kind" />
+        <div v-if="focusedCover.kind === 'pumpkin'" class="fc-emoji-badge" aria-hidden="true">🎃</div>
+        <img v-else class="fc-sprite" :src="`/sprites/${focusedCover.kind}.png`" :alt="focusedCover.kind" />
         <div class="insp-copy">
           <div class="insp-top">
-            <strong>{{ focusedCover.isObjectiveCage ? 'Burlap Rescue Cage' : focusedCover.kind.toUpperCase() }}</strong>
+            <strong>
+              {{
+                focusedCover.isObjectiveCage
+                  ? 'Burlap Rescue Cage'
+                  : focusedCover.kind === 'pumpkin'
+                    ? 'Rolling Pumpkin'
+                    : focusedCover.kind.toUpperCase()
+              }}
+            </strong>
             <span class="paper-pill mini-fam">{{ focusedCover.level }}</span>
           </div>
           <small v-if="focusedCover.isObjectiveCage">
             Smash ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) to free a bagged ally!
+          </small>
+          <small v-else-if="focusedCover.kind === 'pumpkin'">
+            Rolling Pumpkin ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) — Shoot to bowl 5 tiles for 4 DMG + knockback!
           </small>
           <small v-else-if="focusedCover.kind === 'beehive'">
             Explosive Beehive ({{ focusedCover.hp }}/{{ focusedCover.maxHp }}) — 3×3 Bees + Push!
@@ -1196,6 +1325,9 @@ onBeforeUnmount(() => {
             <CraftIcon :name="gameStore.muted ? 'sound_off' : 'sound_on'" :size="16" />
             <span>{{ gameStore.muted ? 'SFX Off' : 'SFX On' }}</span>
           </button>
+          <button class="paper-btn" @click="toggleMusicMute">
+            <span>{{ gameStore.musicMuted ? '🔇 Music Off' : '🎵 Music On' }}</span>
+          </button>
           <button
             class="paper-btn"
             :class="{ gold: gameStore.enemySpeedFast }"
@@ -1216,6 +1348,15 @@ onBeforeUnmount(() => {
             <span>Reset Camera</span>
           </button>
           <button
+            class="paper-btn"
+            @click="
+              showUtilityMenu = false;
+              showAlmanac = true;
+            "
+          >
+            <span>📖 Field Almanac</span>
+          </button>
+          <button
             class="paper-btn toggle-wide"
             :class="{ primary: gameStore.autoEndTurnEnabled }"
             @click="toggleAutoEndTurn"
@@ -1230,10 +1371,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="menu-section">
-          <h4>3D Controls &amp; Matchups</h4>
+          <h4>3D Controls &amp; Board Toys</h4>
           <ul class="mini-rules">
             <li><strong>Camera:</strong> Right-drag (or <strong>Q / E</strong>) orbits 3D view · Left-drag pans · Scroll zooms · <strong>T</strong> toggles Tacticam · <strong>R</strong> resets.</li>
-            <li><strong>Hotkeys:</strong> <strong>1–4 / Tab</strong> switch hero · <strong>Z</strong> undoes move · <strong>Esc</strong> cancels.</li>
+            <li><strong>Tactics:</strong> <strong>🍄 Mushrooms</strong> launch 3 tiles/+2 elev · <strong>🎃 Pumpkins</strong> bowl 5 tiles for 4 DMG · <strong>🪵 Bridges</strong> collapse when shot · Adjacent allies deal <strong>+1 Assist DMG</strong>!</li>
             <li><strong>Strong (+30%):</strong> Roots &gt; Sprayers · Vines &gt; Diggers · Fruits &gt; Blades.</li>
           </ul>
         </div>
@@ -1405,8 +1546,55 @@ onBeforeUnmount(() => {
             {{ latestLogLine }}
           </button>
 
+          <!-- Pre-Battle Tactical Deployment Prep Deck -->
+          <div v-if="battle.prepPhase" class="corrugated-slab mr-deck deck-prep">
+            <div class="prep-head">
+              <div class="prep-title-copy">
+                <strong>⚔️ TACTICAL PREP · DEPLOY YOUR SQUAD</strong>
+                <small>
+                  Tap a hero &amp; any glowing green spawn tile to swap positions before Turn 1!
+                </small>
+              </div>
+              <span v-if="selectedUnit" class="prep-selected-pill">
+                Selected: {{ selectedUnit.name.split(' ')[0] }} ({{ selectedUnit.weapon.name }})
+              </span>
+            </div>
+
+            <div v-if="prepBenchHeroes.length > 0" class="prep-bench-row">
+              <span class="prep-bench-label">Bench Swap:</span>
+              <button
+                v-for="bh in prepBenchHeroes"
+                :key="bh.uid"
+                class="prep-bench-chip"
+                :title="`Swap ${selectedUnit?.name ?? 'selected hero'} with ${bh.name} (Lv.${bh.level})`"
+                @click="swapPrepBenchHero(bh.uid)"
+              >
+                <img :src="`/sprites/${bh.species}.png`" :alt="bh.name" />
+                <span>{{ bh.name.split(' ')[0] }} L{{ bh.level }}</span>
+              </button>
+            </div>
+
+            <div class="prep-actions">
+              <button
+                v-if="gameStore.run"
+                class="paper-btn gold prep-armory-btn"
+                title="Swap Alternate Weapons & spend Skill Points before battle"
+                @click="showPrepArmory = true"
+              >
+                <span>⚔️ Armory &amp; Perks</span>
+              </button>
+              <button
+                class="paper-btn primary prep-go-btn"
+                title="Lock formation and start Turn 1 (Enter)"
+                @click="confirmPrepPhase"
+              >
+                <span>Start Battle! →</span>
+              </button>
+            </div>
+          </div>
+
           <!-- Clean End Turn float when no hero/enemy is focused -->
-          <div v-if="!showBottomConsoleDeck" class="mr-end-only">
+          <div v-else-if="!showBottomConsoleDeck" class="mr-end-only">
             <button
               class="paper-btn mr-skew-btn"
               :class="{ primary: readyHeroesCount === 0, danger: endConfirmPending }"
@@ -1438,6 +1626,20 @@ onBeforeUnmount(() => {
                     :src="unitPortraitSrc(focusedUnit)"
                     :alt="focusedUnit.name"
                   />
+                  <div
+                    v-else-if="activeForecast?.isBridgeTarget"
+                    class="mh-emoji-badge"
+                    aria-hidden="true"
+                  >
+                    🪵
+                  </div>
+                  <div
+                    v-else-if="focusedCover && focusedCover.kind === 'pumpkin'"
+                    class="mh-emoji-badge"
+                    aria-hidden="true"
+                  >
+                    🎃
+                  </div>
                   <img
                     v-else-if="focusedCover"
                     class="mh-sprite"
@@ -1446,7 +1648,26 @@ onBeforeUnmount(() => {
                   />
                   <div class="mh-copy">
                     <div class="mh-title-row">
-                      <strong>{{ focusedUnit ? focusedUnit.name : focusedCover?.kind.toUpperCase() }}</strong>
+                      <strong>
+                        {{
+                          focusedUnit
+                            ? focusedUnit.name
+                            : activeForecast?.isBridgeTarget
+                              ? 'WOODEN BRIDGE'
+                              : focusedCover?.kind === 'pumpkin'
+                                ? 'ROLLING PUMPKIN'
+                                : focusedCover?.kind.toUpperCase()
+                        }}
+                      </strong>
+                      <span v-if="activeForecast?.partnerAssistDamage" class="deck-bonus-tag assist">
+                        ★ +{{ activeForecast.partnerAssistDamage }} ASSIST
+                      </span>
+                      <span v-if="activeForecast?.isPumpkinTarget" class="deck-bonus-tag pumpkin">
+                        🎃 BOWL 4 DMG
+                      </span>
+                      <span v-if="activeForecast?.isBridgeTarget" class="deck-bonus-tag bridge">
+                        🪵 COLLAPSE
+                      </span>
                       <span v-if="activeForecast?.highGroundBonus" class="deck-bonus-tag high">
                         ▲ HIGH +{{ activeForecast.highGroundBonus }}
                       </span>
@@ -1466,6 +1687,12 @@ onBeforeUnmount(() => {
                       <template v-if="gameStore.mode === 'attack' && aimTargets.length > 1 && activeAimTargetIndex >= 0">
                         · Target {{ activeAimTargetIndex + 1 }}/{{ aimTargets.length }}
                       </template>
+                    </small>
+                    <small v-else-if="activeForecast?.isBridgeTarget && focusedTile">
+                      Bridge {{ focusedTile.bridgeHp ?? 0 }}/{{ focusedTile.bridgeMaxHp ?? 4 }} HP — Collapse to plunge foes!
+                    </small>
+                    <small v-else-if="focusedCover && focusedCover.kind === 'pumpkin'">
+                      Rolling Pumpkin ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) — Bowls 5 tiles for 4 DMG!
                     </small>
                     <small v-else-if="focusedCover">
                       {{ focusedCover.hp }}/{{ focusedCover.maxHp }} Cover HP
@@ -1838,7 +2065,11 @@ onBeforeUnmount(() => {
     </footer>
 
     <!-- Battle Victory / Defeat Modal -->
-    <div v-if="battle.status !== 'ongoing'" class="outcome-backdrop">
+    <div
+      v-if="battle.status !== 'ongoing'"
+      class="outcome-backdrop"
+      :class="{ 'victory-clear': battle.status === 'victory' }"
+    >
       <div class="corrugated-slab outcome-modal">
         <div class="washi-tape"></div>
         <div class="out-ribbon" :class="{ defeat: battle.status !== 'victory' }">
@@ -1849,6 +2080,10 @@ onBeforeUnmount(() => {
           The farmers ran for the hills! Claim your Graft stickers, Seeds, and spoils before heading
           down the trail.
         </p>
+        <p v-else-if="battle.objective === 'escort' && escortCart && !escortCart.alive">
+          The Golden Seed Cart was smashed before reaching the Exit Gate — your Seeds still carry
+          back to the Seed Shed!
+        </p>
         <p v-else>
           All active produce heroes were bagged — your Seeds still carry back to the Seed Shed!
         </p>
@@ -1856,7 +2091,7 @@ onBeforeUnmount(() => {
         <div class="outcome-stats">
           <span class="paper-pill">Turns: {{ battle.turn }}</span>
           <span class="paper-pill">
-            Survivors: {{ battle.units.filter((u) => u.team === 'player' && u.alive).length }}
+            Survivors: {{ battle.units.filter((u) => u.team === 'player' && u.alive && !u.isEscortCart).length }}
           </span>
           <span
             v-if="battle.rescuedHeroUids.length + battle.rescuedNewBlueprintIds.length > 0"
@@ -1871,6 +2106,16 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
+
+    <!-- Storybook Field Almanac -->
+    <AlmanacModal v-if="showAlmanac" @close="showAlmanac = false" />
+
+    <!-- Pre-Battle Prep Armory & Skill Perks Modal -->
+    <HeroBuildModal
+      v-if="showPrepArmory && gameStore.run"
+      :initial-hero-uid="selectedUnit?.rosterUid ?? null"
+      @close="showPrepArmory = false"
+    />
   </div>
 </template>
 
@@ -3228,6 +3473,13 @@ onBeforeUnmount(() => {
   z-index: 45;
 }
 
+.outcome-backdrop.victory-clear {
+  background: rgba(28, 13, 4, 0.16);
+  backdrop-filter: none;
+  align-items: flex-end;
+  padding-bottom: 34px;
+}
+
 .utility-sheet {
   width: min(460px, 100%);
   max-height: 86dvh;
@@ -3728,5 +3980,170 @@ onBeforeUnmount(() => {
   .mr-action-bar.six-col .act-sub {
     font-size: 0.58rem;
   }
+}
+
+.turn-stamp.prep {
+  background: linear-gradient(180deg, #32a852 0%, #1d7a36 100%);
+  color: #fffef4;
+}
+
+.cam-mode-pill.heat {
+  background: linear-gradient(180deg, #ff7a33 0%, #c8331a 100%);
+  color: #fff8e6;
+  border-color: #4f160a;
+}
+
+.wf-assist-chip,
+.deck-bonus-tag.assist {
+  background: linear-gradient(180deg, #ffe37a 0%, #f0b225 100%);
+  color: #3e2000;
+  border: 1.5px solid #4a2400;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.wf-pumpkin-chip,
+.deck-bonus-tag.pumpkin {
+  background: linear-gradient(180deg, #ff9933 0%, #d45b12 100%);
+  color: #fffaf0;
+  border: 1.5px solid #4d1b00;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.wf-bridge-chip,
+.deck-bonus-tag.bridge {
+  background: linear-gradient(180deg, #c78b4b 0%, #8a5624 100%);
+  color: #fffaf0;
+  border: 1.5px solid #3c2008;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.fc-emoji-badge,
+.mh-emoji-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 2px solid var(--ink);
+  background: linear-gradient(180deg, #fff5dc 0%, #f0d7a8 100%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.45rem;
+  flex-shrink: 0;
+  box-shadow: 0 2px 0 var(--ink);
+}
+
+.deck-prep {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  border-color: #246b35;
+  background: linear-gradient(180deg, #f3fae6 0%, #dfecc8 100%);
+}
+
+.prep-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.prep-title-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.prep-title-copy strong {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.9rem;
+  color: #1f542a;
+  letter-spacing: 0.02em;
+}
+
+.prep-title-copy small {
+  font-size: 0.74rem;
+  color: #465d3d;
+  font-weight: 600;
+}
+
+.prep-selected-pill {
+  background: #fff9e6;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #3d240c;
+}
+
+.prep-bench-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.prep-bench-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #4a3520;
+}
+
+.prep-bench-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 5px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: #fffdf5;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow: 0 2px 0 var(--ink);
+  transition: transform 0.12s ease;
+}
+
+.prep-bench-chip:hover {
+  transform: translateY(-1px);
+  background: #fff3c4;
+}
+
+.prep-bench-chip img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.prep-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.prep-armory-btn {
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.prep-go-btn {
+  padding: 8px 20px;
+  font-size: 0.92rem;
+  font-weight: 900;
 }
 </style>

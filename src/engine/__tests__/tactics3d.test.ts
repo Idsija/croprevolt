@@ -1,24 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import { MAP_TEMPLATES } from '../../data/maps';
 import { canUnlockPerk, getXpToNextLevel } from '../../data/skills';
+import { ALT_WEAPONS, STARTER_UNLOCKED_WEAPONS } from '../../data/weapons';
 import { runEnemyUnitTurn } from '../ai';
 import {
   createBattleFromMap,
+  damageBridgeAt,
   executeAbility,
   executeAttack,
   executeDash,
   executeMove,
   executeOverwatch,
   executeTeamJump,
+  finishPrepPhase,
   startPhase,
+  swapPrepHeroPositions,
+  swapPrepHeroWithBench,
 } from '../battle';
 import { forecastAttack } from '../combat';
+import { difficultyFor, getHeatSeedMultiplier } from '../difficulty';
 import { createCover, posKey, tileAt } from '../grid';
 import { computeDashOptions, computeMovableTiles, getLinkedBurrowDest } from '../pathfinding';
 import {
   applyBattleOutcomeToRun,
+  claimWeaponReward,
+  createHeroFromBlueprint,
   createNewRun,
   defaultMetaProgress,
+  equipHeroWeapon,
+  generateRewardForNode,
   unlockHeroPerk,
 } from '../run';
 
@@ -395,5 +405,342 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     expect(hitHero.hp).toBeLessThan(20);
     expect(safeHero.hp).toBe(20);
     expect(battle.pendingEvents.some((e) => e.type === 'boss_telegraph_strike')).toBe(true);
+  });
+
+  it('triggers Partner Follow-Up Assist (+1 DMG) when an adjacent non-rooted ally flanks the target', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const battle = createBattleFromMap('vegetable_patch', run.roster.slice(0, 4), [], run.items);
+    for (let y = 0; y < battle.height; y++) {
+      for (let x = 0; x < battle.width; x++) {
+        battle.tiles[y][x].cover = null;
+        battle.tiles[y][x].elevation = 0;
+        battle.tiles[y][x].terrain = 'grass';
+      }
+    }
+
+    const [shooter, partner, ...restHeroes] = battle.units.filter((u) => u.team === 'player');
+    restHeroes.forEach((h, i) => {
+      h.pos = { x: i, y: battle.height - 1 };
+    });
+    const enemy = battle.units.find((u) => u.team === 'enemy')!;
+    enemy.hp = 25;
+    enemy.maxHp = 25;
+
+    shooter.pos = { x: 4, y: 6 };
+    enemy.pos = { x: 4, y: 4 };
+    partner.pos = { x: 0, y: 8 }; // far away — no assist
+
+    const soloFc = forecastAttack(battle, shooter, enemy.pos);
+    expect(soloFc.partnerAssistDamage ?? 0).toBe(0);
+
+    // Move partner adjacent to enemy -> +1 Partner Follow-Up Assist!
+    partner.pos = { x: 5, y: 4 };
+    const assistFc = forecastAttack(battle, shooter, enemy.pos);
+    expect(assistFc.partnerAssistDamage).toBe(1);
+    expect(assistFc.partnerAssistUnitId).toBe(partner.id);
+
+    // Rooted partner cannot assist!
+    partner.statuses.push({ kind: 'rooted', turns: 1 });
+    const rootedFc = forecastAttack(battle, shooter, enemy.pos);
+    expect(rootedFc.partnerAssistDamage ?? 0).toBe(0);
+
+    // Clear root & execute attack -> deals finalDamage + 1 assist & emits 'partner_assist'!
+    partner.statuses = [];
+    battle.pendingEvents = [];
+    const hpBefore = enemy.hp;
+    expect(executeAttack(battle, shooter.id, enemy.pos, () => 0)).toBe(true);
+    expect(enemy.hp).toBe(hpBefore - assistFc.finalDamage - 1);
+    expect(battle.pendingEvents.some((e) => e.type === 'partner_assist')).toBe(true);
+  });
+
+  it('launches units across water and +2 elevation via Bouncy Mushroom Launchpads for 1 Move', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const battle = createBattleFromMap('creek_crossing', run.roster.slice(0, 4), [], run.items);
+    for (let y = 0; y < battle.height; y++) {
+      for (let x = 0; x < battle.width; x++) {
+        battle.tiles[y][x].cover = null;
+        battle.tiles[y][x].elevation = 0;
+        battle.tiles[y][x].terrain = 'grass';
+      }
+    }
+
+    const hero = battle.units.find((u) => u.team === 'player')!;
+    battle.units.forEach((u, i) => {
+      if (u.id !== hero.id) u.pos = { x: i % battle.width, y: u.team === 'enemy' ? 0 : battle.height - 1 };
+    });
+
+    // Place hero on bounce_pad at (4,7); river water at (4,6) & (4,5); elevated +2 cliff at (4,4)!
+    battle.tiles[7][4].terrain = 'bounce_pad';
+    battle.tiles[6][4].terrain = 'water';
+    battle.tiles[5][4].terrain = 'water';
+    battle.tiles[4][4].terrain = 'grass';
+    battle.tiles[4][4].elevation = 2;
+    hero.pos = { x: 4, y: 7 };
+
+    const movable = computeMovableTiles(battle, hero);
+    const launchNode = movable.get('4,4');
+    expect(launchNode).toBeDefined();
+    expect(launchNode!.cost).toBe(1);
+
+    battle.pendingEvents = [];
+    expect(executeMove(battle, hero.id, { x: 4, y: 4 })).toBe(true);
+    expect(hero.pos).toEqual({ x: 4, y: 4 });
+    expect(battle.pendingEvents.some((e) => e.type === 'bounce_launch')).toBe(true);
+  });
+
+  it('bowls Rolling Pumpkin Boulders up to 5 tiles for 4 DMG + crate smash + knockback', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const battle = createBattleFromMap('vegetable_patch', run.roster.slice(0, 4), [], run.items);
+    for (let y = 0; y < battle.height; y++) {
+      for (let x = 0; x < battle.width; x++) {
+        battle.tiles[y][x].cover = null;
+        battle.tiles[y][x].elevation = 0;
+        battle.tiles[y][x].terrain = 'grass';
+      }
+    }
+
+    const shooter = battle.units.find((u) => u.team === 'player')!;
+    const enemy = battle.units.find((u) => u.team === 'enemy')!;
+    battle.units.forEach((u, i) => {
+      if (u.id !== shooter.id && u.id !== enemy.id) {
+        u.pos = { x: i % battle.width, y: u.team === 'enemy' ? 0 : battle.height - 1 };
+      }
+    });
+
+    shooter.pos = { x: 4, y: 7 };
+    battle.tiles[6][4].cover = createCover('pumpkin');
+    battle.tiles[5][4].cover = createCover('crate');
+    enemy.pos = { x: 4, y: 4 };
+    enemy.hp = 20;
+    enemy.maxHp = 20;
+
+    const fc = forecastAttack(battle, shooter, { x: 4, y: 6 });
+    expect(fc.canAttack).toBe(true);
+    expect(fc.isPumpkinTarget).toBe(true);
+    expect(fc.pumpkinRollDir).toEqual({ x: 0, y: -1 });
+
+    battle.pendingEvents = [];
+    expect(executeAttack(battle, shooter.id, { x: 4, y: 6 }, () => 0)).toBe(true);
+    expect(battle.tiles[6][4].cover).toBeNull(); // pumpkin rolled off start tile
+    expect(battle.tiles[5][4].cover).toBeNull(); // crate smashed in bowling lane!
+    expect(enemy.hp).toBeLessThanOrEqual(16); // took at least 4 pumpkin DMG!
+    expect(battle.pendingEvents.some((e) => e.type === 'pumpkin_roll')).toBe(true);
+  });
+
+  it('collapses Wooden Bridges under fire, turning them into water and splashing occupants', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const battle = createBattleFromMap('creek_crossing', run.roster.slice(0, 4), [], run.items);
+    // Find a wooden bridge tile with bridgeHp initialized
+    let bridgePos: { x: number; y: number } | null = null;
+    for (let y = 0; y < battle.height; y++) {
+      for (let x = 0; x < battle.width; x++) {
+        const t = battle.tiles[y][x];
+        if (t.terrain === 'bridge' && (t.bridgeHp ?? 0) > 0) {
+          bridgePos = { x, y };
+          break;
+        }
+      }
+      if (bridgePos) break;
+    }
+    expect(bridgePos).not.toBeNull();
+
+    const enemy = battle.units.find((u) => u.team === 'enemy')!;
+    enemy.pos = { ...bridgePos! };
+    enemy.hp = 20;
+    enemy.maxHp = 20;
+
+    battle.pendingEvents = [];
+    const collapsed = damageBridgeAt(battle, bridgePos!, 10);
+    expect(collapsed).toBe(true);
+    const tile = tileAt(battle, bridgePos!)!;
+    expect(tile.terrain === 'water' || tile.terrain === 'lava').toBe(true);
+    expect(battle.pendingEvents.some((e) => e.type === 'bridge_collapse')).toBe(true);
+    // Occupant took splash damage & was moved onto nearest dry tile!
+    expect(enemy.hp).toBeLessThan(20);
+    const afterTile = tileAt(battle, enemy.pos)!;
+    expect(afterTile.terrain).not.toBe('water');
+    expect(afterTile.terrain).not.toBe('lava');
+  });
+
+  it('supports Pre-Battle Tactical Prep Phase spawn swaps, bench swaps, and Start Battle lock-in', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const benchHero = createHeroFromBlueprint('chili');
+    run.roster.push(benchHero);
+
+    const activeSquad = run.activeSquadUids
+      .map((uid) => run.roster.find((h) => h.uid === uid)!)
+      .filter(Boolean);
+
+    const battle = createBattleFromMap('creek_crossing', activeSquad, [], run.items, undefined, {
+      enablePrepPhase: true,
+    });
+    expect(battle.prepPhase).toBe(true);
+    expect(battle.playerSpawnPositions && battle.playerSpawnPositions.length >= activeSquad.length).toBe(true);
+
+    const [heroA, heroB] = battle.units.filter((u) => u.team === 'player');
+    const posABefore = { ...heroA.pos };
+    const posBBefore = { ...heroB.pos };
+
+    // Swap two heroes across spawn positions
+    expect(swapPrepHeroPositions(battle, posABefore, posBBefore)).toBe(true);
+    expect(heroA.pos).toEqual(posBBefore);
+    expect(heroB.pos).toEqual(posABefore);
+
+    // Swap heroB with bench hero Chili
+    const swapped = swapPrepHeroWithBench(battle, heroB.id, benchHero);
+    expect(swapped).not.toBeNull();
+    expect(swapped!.visualKind).toBe('chili');
+    expect(swapped!.pos).toEqual(posABefore);
+
+    // Finish Prep Phase -> locks in Turn 1!
+    expect(finishPrepPhase(battle)).toBe(true);
+    expect(battle.prepPhase).toBe(false);
+    // Further prep swaps blocked once battle starts
+    expect(swapPrepHeroPositions(battle, posBBefore, posABefore)).toBe(false);
+  });
+
+  it('supports Armory Alternate Weapons unlocking, switching, and preserving upgrade deltas', () => {
+    const run = createNewRun(defaultMetaProgress());
+    expect(ALT_WEAPONS).toHaveLength(13);
+    for (const wid of STARTER_UNLOCKED_WEAPONS) {
+      expect(run.unlockedWeaponIds).toContain(wid);
+    }
+
+    const cow = run.roster.find((h) => h.species === 'cow')!;
+    const baseWeaponId = cow.weapon.id;
+    // Upgrade Cow's base weapon by +2 damage (simulating Workshop/Graft upgrade)
+    cow.weapon.damage += 2;
+
+    // Equip Cow's starter-unlocked Alt Weapon ('milk_jug_lob' — Creamery Lobber, base 4 dmg + 2 upgrade = 6!)
+    expect(equipHeroWeapon(run, cow.uid, 'milk_jug_lob')).toBe(true);
+    expect(cow.equippedWeaponId).toBe('milk_jug_lob');
+    expect(cow.weapon.id).toBe('milk_jug_lob');
+    expect(cow.weapon.arc).toBe('lobbed');
+    expect(cow.weapon.damage).toBe(6);
+
+    // Switching back to base weapon preserves the +2 upgrade delta!
+    expect(equipHeroWeapon(run, cow.uid, baseWeaponId)).toBe(true);
+    expect(cow.weapon.id).toBe(baseWeaponId);
+
+    // Elite reward bundles offer unlockable Alternate Weapons!
+    const eliteNode = {
+      id: 'elite_test',
+      act: 0,
+      stage: 3,
+      lane: 1,
+      type: 'elite' as const,
+      name: 'Test Elite',
+      subtitle: 'Armory test',
+      mapId: 'creek_crossing',
+      nextIds: [],
+      completed: false,
+    };
+    const reward = generateRewardForNode(run, eliteNode, () => 0.1);
+    run.pendingReward = reward;
+    expect(reward.weaponChoices && reward.weaponChoices.length > 0).toBe(true);
+    const chosenWeaponId = reward.weaponChoices![0];
+    expect(claimWeaponReward(run, chosenWeaponId)).toBe(true);
+    expect(run.unlockedWeaponIds).toContain(chosenWeaponId);
+  });
+
+  it('runs Survive 4 Turns (barnyard_siege) reinforcements & Escort Seed Cart (harvest_railroad) objectives', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const squad = run.roster.slice(0, 4);
+
+    // 1. Survive 4 Turns on Barnyard Siege
+    const siege = createBattleFromMap('barnyard_siege', squad, [], run.items);
+    expect(siege.objective).toBe('survive');
+    expect(siege.surviveTurns).toBe(4);
+    const initialEnemyCount = siege.units.filter((u) => u.team === 'enemy').length;
+
+    // Advance to Turn 2 -> spawns reinforcements!
+    siege.pendingEvents = [];
+    startPhase(siege, 'player');
+    expect(siege.turn).toBe(2);
+    expect(siege.units.filter((u) => u.team === 'enemy').length).toBeGreaterThan(initialEnemyCount);
+    expect(siege.pendingEvents.some((e) => e.type === 'reinforcement_spawn')).toBe(true);
+
+    // Advance Turns 3, 4, then Turn 5 -> Victory!
+    startPhase(siege, 'player'); // Turn 3
+    startPhase(siege, 'player'); // Turn 4
+    expect(siege.status).toBe('ongoing');
+    startPhase(siege, 'player'); // Survived 4 full turns!
+    expect(siege.status).toBe('victory');
+
+    // 2. Escort Golden Seed Cart on Harvest Railroad
+    const escort = createBattleFromMap('harvest_railroad', squad, [], run.items);
+    expect(escort.objective).toBe('escort');
+    const cart = escort.units.find((u) => u.isEscortCart)!;
+    expect(cart).toBeDefined();
+    expect(cart.visualKind).toBe('seed_cart');
+    const cartStartY = cart.pos.y;
+
+    // Clear obstacles directly ahead of cart so it advances cleanly on Turn 2
+    for (let y = 0; y < escort.height; y++) {
+      escort.tiles[y][cart.pos.x].cover = null;
+    }
+    escort.units.forEach((u, i) => {
+      if (u.id !== cart.id) u.pos = { x: i % 2 === 0 ? 0 : escort.width - 1, y: u.team === 'enemy' ? 1 : escort.height - 1 };
+    });
+
+    escort.pendingEvents = [];
+    startPhase(escort, 'player');
+    expect(cart.pos.y).toBeLessThan(cartStartY);
+    expect(escort.pendingEvents.some((e) => e.type === 'escort_move')).toBe(true);
+
+    // Place cart 1 tile south of the north gate -> next turn reaches Gate and wins!
+    let gatePos: { x: number; y: number } | null = null;
+    for (let y = 0; y < escort.height; y++) {
+      for (let x = 0; x < escort.width; x++) {
+        if (escort.tiles[y][x].terrain === 'gate') gatePos = { x, y };
+      }
+    }
+    expect(gatePos).not.toBeNull();
+    cart.pos = { x: gatePos!.x, y: gatePos!.y + 1 };
+    startPhase(escort, 'player');
+    expect(escort.status).toBe('victory');
+  });
+
+  it('scales Harvest Heat Ascension (0-5) difficulty, brittle crates, Heirloom Seed multiplier, and meta unlock', () => {
+    const heat0 = difficultyFor(0, 1, 'skirmish', 0);
+    const heat5 = difficultyFor(0, 1, 'skirmish', 5);
+    expect(heat5.hpMult).toBeGreaterThan(heat0.hpMult);
+    expect(heat5.damageBonus).toBeGreaterThan(heat0.damageBonus);
+    expect(heat5.veterans).toBeGreaterThan(heat0.veterans);
+    expect(getHeatSeedMultiplier(5)).toBeGreaterThan(getHeatSeedMultiplier(0));
+
+    // Heat 3+ makes wooden crates start cracked (-2 HP)!
+    const meta = defaultMetaProgress();
+    const run = createNewRun(meta, 'spring', 12345, 3);
+    const battle = createBattleFromMap('vegetable_patch', run.roster.slice(0, 4), [], run.items, undefined, {
+      harvestHeat: 3,
+    });
+    const crates = battle.tiles
+      .flat()
+      .map((t) => t.cover)
+      .filter((c) => c && c.kind === 'crate');
+    expect(crates.length).toBeGreaterThan(0);
+    for (const c of crates) {
+      expect(c!.hp).toBe(c!.maxHp - 2);
+    }
+
+    // Winning the final Act 3 Boss at Heat 1 unlocks Harvest Heat 2 in MetaProgress!
+    const winMeta = defaultMetaProgress();
+    winMeta.maxHeatUnlocked = 1;
+    const winRun = createNewRun(winMeta, 'spring', 999, 1);
+    winRun.act = 2; // Final act
+    const bossNode = winRun.nodes.find((n) => n.type === 'boss')!;
+    winRun.currentNodeId = bossNode.id;
+    const finalBattle = createBattleFromMap(bossNode.mapId!, winRun.roster.slice(0, 4), [], winRun.items, undefined, {
+      harvestHeat: 1,
+    });
+    finalBattle.units.filter((u) => u.team === 'enemy').forEach((e) => {
+      e.hp = 0;
+      e.alive = false;
+    });
+    finalBattle.status = 'victory';
+    applyBattleOutcomeToRun(winRun, finalBattle, winMeta);
+    expect(winRun.status).toBe('victory');
+    expect(winMeta.maxHeatUnlocked).toBe(2);
   });
 });

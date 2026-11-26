@@ -2,7 +2,7 @@ import { reactive } from 'vue';
 import { ITEM_REGISTRY } from '../data/items';
 import { RECRUITABLE_BLUEPRINT_IDS } from '../data/produce';
 import { runEnemyUnitTurn } from '../engine/ai';
-import { battleRng, difficultyFor } from '../engine/difficulty';
+import { battleRng, difficultyFor, MAX_HARVEST_HEAT } from '../engine/difficulty';
 import { leaveEvent, openEventNode, resolveEventChoice } from '../engine/events';
 import { ACTS } from '../engine/mapgen';
 import {
@@ -14,10 +14,13 @@ import {
   executeMove,
   executeOverwatch,
   executeTeamJump,
+  finishPrepPhase,
   getAbilityTargetTiles,
   getItemTargetTiles,
   getUnitById,
   startPhase,
+  swapPrepHeroPositions,
+  swapPrepHeroWithBench,
   undoLastAction,
 } from '../engine/battle';
 import {
@@ -37,13 +40,16 @@ import {
   buyMarketOffer,
   claimRecruitReward,
   claimRelicReward,
+  claimWeaponReward,
   clearSavedRun,
   createNewRun,
+  equipHeroWeapon,
   finishRewardsAndReturnToMap,
   loadMetaProgress,
   loadSavedRun,
   openVaultNode,
   purchaseMetaUnlock,
+  saveMetaProgress,
   saveRun,
   toggleHeroActiveSquad,
   unlockHeroPerk,
@@ -59,6 +65,7 @@ import type {
 } from '../engine/types';
 import type { InteractionMode } from '../renderer/canvas';
 import type { BoardViewMode } from '../renderer/iso';
+import { music, type MusicTheme } from '../renderer/music';
 import { sfx } from '../renderer/sfx';
 import type { RendererKind } from '../renderer3d/types';
 
@@ -145,6 +152,7 @@ export interface GameStoreState {
   enemyTurnRunning: boolean;
   enemySpeedFast: boolean;
   muted: boolean;
+  musicMuted: boolean;
   eventQueueVersion: number;
 }
 
@@ -175,8 +183,33 @@ export const gameStore = reactive<GameStoreState>({
   enemyTurnRunning: false,
   enemySpeedFast: loadEnemySpeedFast(),
   muted: sfx.isMuted(),
+  musicMuted: music.isMuted(),
   eventQueueVersion: 0,
 });
+
+export function syncAdaptiveMusic(): void {
+  let theme: MusicTheme = 'title';
+  if (gameStore.screen === 'title' || !gameStore.run) {
+    theme = 'title';
+  } else if (gameStore.run.status === 'victory') {
+    theme = 'victory';
+  } else if (gameStore.run.status === 'battle' && gameStore.battle) {
+    const b = gameStore.battle;
+    if (b.status === 'victory') {
+      theme = 'victory';
+    } else if (b.objective === 'boss') {
+      theme = (b.bossPhase ?? 1) >= 2 ? 'boss_enraged' : 'boss';
+    } else {
+      theme = 'battle';
+    }
+  } else {
+    theme = 'overworld';
+  }
+  music.setTheme(theme);
+}
+
+// Arm initial Title screen soundtrack theme
+syncAdaptiveMusic();
 
 export const AUTO_END_GRACE_MS = 2400;
 
@@ -224,6 +257,7 @@ function flushBattleEvents(): void {
   if (!gameStore.battle || gameStore.battle.pendingEvents.length === 0) return;
   const events = gameStore.battle.pendingEvents.splice(0);
   dispatchBattleEvents(events);
+  syncAdaptiveMusic();
 }
 
 export function clearAutoEndTimer(): void {
@@ -242,6 +276,7 @@ function scheduleAutoEndCheck(): void {
     !gameStore.autoEndTurnEnabled ||
     b.status !== 'ongoing' ||
     b.phase !== 'player' ||
+    b.prepPhase ||
     gameStore.enemyTurnRunning
   ) {
     return;
@@ -255,6 +290,7 @@ function scheduleAutoEndCheck(): void {
         gameStore.battle &&
         gameStore.battle.status === 'ongoing' &&
         gameStore.battle.phase === 'player' &&
+        !gameStore.battle.prepPhase &&
         !hasAnyPlayerActionRemaining(gameStore.battle)
       ) {
         void endPlayerTurn();
@@ -265,6 +301,21 @@ function scheduleAutoEndCheck(): void {
 
 export function toggleAudioMute(): void {
   gameStore.muted = sfx.toggleMute();
+}
+
+export function toggleMusicMute(): void {
+  gameStore.musicMuted = music.toggleMute();
+  if (!gameStore.musicMuted) {
+    syncAdaptiveMusic();
+  }
+}
+
+export function setSelectedHeat(level: number): void {
+  const maxUnlocked = Math.max(1, Math.min(MAX_HARVEST_HEAT, gameStore.meta.maxHeatUnlocked ?? 1));
+  const clamped = Math.max(0, Math.min(maxUnlocked, Math.floor(level)));
+  gameStore.meta.selectedHeat = clamped;
+  saveMetaProgress(gameStore.meta);
+  sfx.click();
 }
 
 export function toggleAllDangerZone(): boolean {
@@ -348,7 +399,7 @@ export function startNewSeasonRun(seasonId: SeasonId = 'spring'): void {
   lastUndoUnitId = null;
   clearAutoEndTimer();
   clearSavedRun();
-  const run = createNewRun(gameStore.meta, seasonId);
+  const run = createNewRun(gameStore.meta, seasonId, undefined, gameStore.meta.selectedHeat ?? 0);
   gameStore.run = run;
   gameStore.battle = null;
   gameStore.enemyTurnRunning = false;
@@ -358,6 +409,7 @@ export function startNewSeasonRun(seasonId: SeasonId = 'spring'): void {
   gameStore.screen = 'run';
   gameStore.savedRunAvailable = true;
   saveRun(run);
+  syncAdaptiveMusic();
 }
 
 export function continueSavedRun(): void {
@@ -380,6 +432,7 @@ export function continueSavedRun(): void {
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
   gameStore.screen = 'run';
+  syncAdaptiveMusic();
 }
 
 export function returnToTitle(): void {
@@ -399,6 +452,7 @@ export function returnToTitle(): void {
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
   gameStore.screen = 'title';
+  syncAdaptiveMusic();
 }
 
 export function enterSeasonNode(nodeId: string): void {
@@ -414,12 +468,14 @@ export function enterSeasonNode(nodeId: string): void {
   if (node.type === 'vault' || node.type === 'shop') {
     openVaultNode(run, nodeId);
     saveRun(run);
+    syncAdaptiveMusic();
     return;
   }
 
   if (node.type === 'event') {
     openEventNode(run, nodeId);
     saveRun(run);
+    syncAdaptiveMusic();
     return;
   }
 
@@ -434,6 +490,7 @@ export function enterSeasonNode(nodeId: string): void {
   const harvestedHero = run.roster.find((h) => h.harvested);
   const ownedBps = new Set(run.roster.map((h) => h.blueprintId));
   const fallbackBp = RECRUITABLE_BLUEPRINT_IDS.find((bp) => !ownedBps.has(bp)) ?? 'carrot';
+  const heat = run.harvestHeat ?? 0;
 
   const battle = createBattleFromMap(
     node.mapId,
@@ -444,8 +501,10 @@ export function enterSeasonNode(nodeId: string): void {
     {
       // Seeded per node: the same run seed always produces the same battles (daily runs).
       rng: battleRng(run.seed, node.id),
-      difficulty: difficultyFor(run.act, node.stage, node.type),
+      difficulty: difficultyFor(run.act, node.stage, node.type, heat),
       theme: ACTS[run.act]?.theme,
+      enablePrepPhase: true,
+      harvestHeat: heat,
     }
   );
 
@@ -458,10 +517,11 @@ export function enterSeasonNode(nodeId: string): void {
   gameStore.showAllDangerZone = false;
   gameStore.previewOverwatch = false;
   gameStore.enemyTurnRunning = false;
-  const firstHero = battle.units.find((u) => u.team === 'player' && u.alive);
+  const firstHero = battle.units.find((u) => u.team === 'player' && u.alive && !u.isEscortCart);
   gameStore.selectedUnitId = firstHero?.id ?? null;
 
   saveRun(run);
+  syncAdaptiveMusic();
   setTimeout(() => flushBattleEvents(), 60);
 }
 
@@ -507,12 +567,12 @@ export function selectBattleUnit(unitId: string, focusCamera = true, allowToggle
   const b = gameStore.battle;
   if (!b || b.phase !== 'player' || gameStore.enemyTurnRunning) return;
   const u = getUnitById(b, unitId);
-  if (!u || !u.alive || u.team !== 'player') return;
+  if (!u || !u.alive || u.team !== 'player' || u.isEscortCart) return;
 
   sfx.click();
   clearAutoEndTimer();
 
-  if (allowToggleOff && gameStore.selectedUnitId === u.id) {
+  if (allowToggleOff && gameStore.selectedUnitId === u.id && !b.prepPhase) {
     deselectAll(false);
     return;
   }
@@ -525,6 +585,51 @@ export function selectBattleUnit(unitId: string, focusCamera = true, allowToggle
   // Always start in default unified mode — never auto-switch into Skill/Ability!
   gameStore.mode = 'move';
   if (focusCamera) requestCameraFocus(u.pos);
+}
+
+export function confirmPrepPhase(): boolean {
+  const b = gameStore.battle;
+  if (!b || !b.prepPhase) return false;
+  sfx.rescue();
+  const ok = finishPrepPhase(b);
+  if (ok) {
+    gameStore.previewTile = null;
+    gameStore.inspectedEnemyId = null;
+    gameStore.mode = 'move';
+    const firstHero = b.units.find((u) => u.team === 'player' && u.alive && !u.isEscortCart);
+    if (firstHero && !gameStore.selectedUnitId) {
+      gameStore.selectedUnitId = firstHero.id;
+    }
+    flushBattleEvents();
+  }
+  return ok;
+}
+
+export function swapPrepBenchHero(benchHeroUid: string): boolean {
+  const b = gameStore.battle;
+  const run = gameStore.run;
+  if (!b || !run || !b.prepPhase) return false;
+  const selected = gameStore.selectedUnitId
+    ? getUnitById(b, gameStore.selectedUnitId)
+    : b.units.find((u) => u.team === 'player' && u.alive && !u.isEscortCart);
+  if (!selected || !selected.rosterUid) return false;
+
+  const benchHero = run.roster.find((h) => h.uid === benchHeroUid && !h.harvested);
+  if (!benchHero) return false;
+  if (run.activeSquadUids.includes(benchHeroUid)) return false;
+
+  const oldUid = selected.rosterUid;
+  const swapped = swapPrepHeroWithBench(b, selected.id, benchHero);
+  if (!swapped) return false;
+
+  const sqIdx = run.activeSquadUids.indexOf(oldUid);
+  if (sqIdx >= 0) {
+    run.activeSquadUids.splice(sqIdx, 1, benchHeroUid);
+  }
+  gameStore.selectedUnitId = swapped.id;
+  sfx.jump();
+  saveRun(run);
+  return true;
 }
 
 export function inspectEnemyUnit(enemyId: string | null): void {
@@ -542,9 +647,9 @@ export function inspectEnemyUnit(enemyId: string | null): void {
 
 export function getAttackTargetsForSelected(): BattleUnit[] {
   const b = gameStore.battle;
-  if (!b || !gameStore.selectedUnitId) return [];
+  if (!b || b.prepPhase || !gameStore.selectedUnitId) return [];
   const u = getUnitById(b, gameStore.selectedUnitId);
-  if (!u || !u.alive || u.actions.hasAttacked) return [];
+  if (!u || !u.alive || u.isEscortCart || u.actions.hasAttacked) return [];
   const targets = b.units.filter((other) => {
     if (!other.alive || other.team === u.team) return false;
     return forecastAttack(b, u, other.pos).canAttack;
@@ -576,10 +681,10 @@ export function cycleAimTarget(delta: 1 | -1): void {
 
 export function triggerOverwatch(): boolean {
   const b = gameStore.battle;
-  if (!b || b.status !== 'ongoing' || b.phase !== 'player' || gameStore.enemyTurnRunning) return false;
+  if (!b || b.prepPhase || b.status !== 'ongoing' || b.phase !== 'player' || gameStore.enemyTurnRunning) return false;
   if (!gameStore.selectedUnitId) return false;
   const selected = getUnitById(b, gameStore.selectedUnitId);
-  if (!selected || !selected.alive || selected.actions.hasAttacked) return false;
+  if (!selected || !selected.alive || selected.isEscortCart || selected.actions.hasAttacked) return false;
 
   clearAutoEndTimer();
   gameStore.previewOverwatch = false;
@@ -600,7 +705,7 @@ export function triggerOverwatch(): boolean {
  * Entering 'attack' mode automatically locks Aim Cam onto the highest-value target in range!
  */
 export function setInteractionMode(mode: InteractionMode, itemId?: string): void {
-  if (gameStore.enemyTurnRunning) return;
+  if (gameStore.enemyTurnRunning || gameStore.battle?.prepPhase) return;
   if (mode === 'item' && gameStore.battle && gameStore.selectedUnitId) {
     const selected = getUnitById(gameStore.battle, gameStore.selectedUnitId);
     if (!selected || selected.actions.hasUsedSkill) return;
@@ -656,9 +761,9 @@ export function cancelPreviewAction(): void {
  */
 export function getActionOptionsForTile(pos: GridPos | null): PreviewActionOption[] {
   const b = gameStore.battle;
-  if (!b || !pos || b.status !== 'ongoing' || b.phase !== 'player') return [];
+  if (!b || !pos || b.prepPhase || b.status !== 'ongoing' || b.phase !== 'player') return [];
   const selected = gameStore.selectedUnitId ? getUnitById(b, gameStore.selectedUnitId) : undefined;
-  if (!selected || !selected.alive) return [];
+  if (!selected || !selected.alive || selected.isEscortCart) return [];
 
   const options: PreviewActionOption[] = [];
   const key = posKey(pos);
@@ -692,24 +797,30 @@ export function getActionOptionsForTile(pos: GridPos | null): PreviewActionOptio
     }
     const fc = forecastAttack(b, selected, pos);
     if (fc.canAttack) {
+      const assistTag = fc.partnerAssistDamage ? ` +${fc.partnerAssistDamage}★` : '';
       options.push({
         kind: 'attack',
-        label: `Attack ${fc.hitChance}% (-${fc.finalDamage})`,
+        label: `Attack ${fc.hitChance}% (-${fc.finalDamage}${assistTag})`,
         tone: 'danger',
       });
     }
     return options;
   }
 
-  // Empty tile or destructible cover
+  // Empty tile, collapsible bridge, or destructible cover (including Rolling Pumpkins!)
   if (gameStore.mode === 'attack') {
     const fc = forecastAttack(b, selected, pos);
     if (fc.canAttack) {
+      const label = fc.isPumpkinTarget
+        ? `Bowl Pumpkin! (4 DMG lane)`
+        : fc.isBridgeTarget
+          ? `Collapse Bridge (-${fc.coverDamage})`
+          : fc.coverDamage && b.tiles[pos.y]?.[pos.x]?.cover
+            ? `Smash Cover (-${fc.coverDamage})`
+            : `Lob Here (-${fc.finalDamage})`;
       options.push({
         kind: 'attack',
-        label: fc.coverDamage && b.tiles[pos.y]?.[pos.x]?.cover
-          ? `Smash Cover (-${fc.coverDamage})`
-          : `Lob Here (-${fc.finalDamage})`,
+        label,
         tone: 'danger',
       });
     }
@@ -726,12 +837,14 @@ export function getActionOptionsForTile(pos: GridPos | null): PreviewActionOptio
     return options;
   }
 
-  // Clicking destructible cover directly while in default mode also offers quick Smash if in attack range!
+  // Clicking destructible cover directly while in default mode also offers quick Smash/Bowl if in attack range!
   const coverFc = forecastAttack(b, selected, pos);
   if (coverFc.canAttack && b.tiles[pos.y]?.[pos.x]?.cover?.destructible) {
     options.push({
       kind: 'attack',
-      label: `Smash Cover (-${coverFc.coverDamage})`,
+      label: coverFc.isPumpkinTarget
+        ? `Bowl Pumpkin!`
+        : `Smash Cover (-${coverFc.coverDamage})`,
       tone: 'danger',
     });
   }
@@ -786,7 +899,7 @@ export function executePreviewOption(kind: PreviewActionOption['kind'], explicit
   const b = gameStore.battle;
   const run = gameStore.run;
   const pos = explicitPos ?? gameStore.previewTile;
-  if (!b || !run || !pos || b.status !== 'ongoing' || b.phase !== 'player') return false;
+  if (!b || !run || !pos || b.prepPhase || b.status !== 'ongoing' || b.phase !== 'player') return false;
   const selected = gameStore.selectedUnitId ? getUnitById(b, gameStore.selectedUnitId) : undefined;
   if (!selected || !selected.alive) return false;
 
@@ -838,18 +951,13 @@ export function executePreviewOption(kind: PreviewActionOption['kind'], explicit
 export function handleOffBoardTap(): void {
   if (gameStore.enemyTurnRunning) return;
   clearAutoEndTimer();
-  deselectAll(true);
+  if (!gameStore.battle?.prepPhase) {
+    deselectAll(true);
+  }
 }
 
 /**
- * Unified Intuitive Tap Handler:
- * - Tap selected ally again -> UNCLICK / DESELECT cleanly!
- * - Tap another ally -> switch to that ally!
- * - Tap an out-of-range enemy (or with no ally selected) -> Tap 1 inspects Threat Zone; Tap 2 toggles OFF cleanly!
- * - Tap an actionable tile/enemy ->
- *     * Touch: Tap 1 previews (shows Forecast / Action confirmation); Tap 2 executes!
- *     * Mouse: 1-click executes when unambiguous (or shows choice pills if both Dash & Attack are available)!
- * - Tap empty non-actionable grass -> clears selection & enemy focus completely!
+ * Unified Intuitive Tap Handler (supports Pre-Battle Prep Swaps + Live Combat!):
  */
 export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
   const b = gameStore.battle;
@@ -861,6 +969,28 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
   clearAutoEndTimer();
   const isTouch = pointerType !== 'mouse';
   if (isTouch) gameStore.isTouchMode = true;
+
+  // 0. Pre-Battle Tactical Prep Phase: tap any hero, then tap another glowing spawn tile to swap positions!
+  if (b.prepPhase) {
+    const clickedUnit = unitAt(b, pos);
+    const selected = gameStore.selectedUnitId ? getUnitById(b, gameStore.selectedUnitId) : undefined;
+    const isSpawnTile = (b.playerSpawnPositions ?? []).some((sp) => samePos(sp, pos));
+
+    if (selected && isSpawnTile && !samePos(selected.pos, pos)) {
+      if (swapPrepHeroPositions(b, selected.pos, pos)) {
+        sfx.step();
+        return;
+      }
+    }
+    if (clickedUnit && clickedUnit.team === 'player' && !clickedUnit.isEscortCart) {
+      selectBattleUnit(clickedUnit.id, false, false);
+      return;
+    }
+    if (clickedUnit && clickedUnit.team === 'enemy') {
+      toggleInspectEnemy(clickedUnit.id);
+    }
+    return;
+  }
 
   // Guard against desktop double-click spillover onto the newly auto-advanced hero
   if (
@@ -881,6 +1011,9 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
 
   // 1. Clicking a friendly hero
   if (clickedUnit && clickedUnit.team === 'player') {
+    if (clickedUnit.isEscortCart) {
+      return;
+    }
     // Allow targeting allies/self when explicitly in Ability or Item targeting mode
     if (selected && (gameStore.mode === 'ability' || gameStore.mode === 'item')) {
       const opts = getActionOptionsForTile(pos);
@@ -982,7 +1115,7 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
     return;
   }
 
-  // 3B. Clicking an empty tile or cover
+  // 3B. Clicking an empty tile, bridge, or cover
   if (opts.length > 0) {
     gameStore.inspectedEnemyId = null;
     if (isTouch) {
@@ -1018,7 +1151,7 @@ export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
 
 export function triggerUndoMove(): void {
   const b = gameStore.battle;
-  if (!b || b.phase !== 'player' || gameStore.enemyTurnRunning) return;
+  if (!b || b.prepPhase || b.phase !== 'player' || gameStore.enemyTurnRunning) return;
   clearAutoEndTimer();
   const restored = undoLastAction(b);
   if (!restored) return;
@@ -1048,7 +1181,7 @@ function enemyPhaseSleep(ms: number): Promise<void> {
 
 export async function endPlayerTurn(): Promise<void> {
   const b = gameStore.battle;
-  if (!b || b.status !== 'ongoing' || b.phase !== 'player' || gameStore.enemyTurnRunning) return;
+  if (!b || b.prepPhase || b.status !== 'ongoing' || b.phase !== 'player' || gameStore.enemyTurnRunning) return;
 
   const session = battleSessionId;
   clearAutoEndTimer();
@@ -1088,10 +1221,20 @@ export async function endPlayerTurn(): Promise<void> {
       // Split movement/dash from attacks/abilities so players can read every farmer's beat clearly!
       const allEvents = gameStore.battle.pendingEvents.splice(0);
       const moveEvents = allEvents.filter(
-        (ev) => ev.type === 'move' || ev.type === 'dash' || ev.type === 'jump' || ev.type === 'burrow_warp'
+        (ev) =>
+          ev.type === 'move' ||
+          ev.type === 'dash' ||
+          ev.type === 'jump' ||
+          ev.type === 'burrow_warp' ||
+          ev.type === 'bounce_launch'
       );
       const combatEvents = allEvents.filter(
-        (ev) => ev.type !== 'move' && ev.type !== 'dash' && ev.type !== 'jump' && ev.type !== 'burrow_warp'
+        (ev) =>
+          ev.type !== 'move' &&
+          ev.type !== 'dash' &&
+          ev.type !== 'jump' &&
+          ev.type !== 'burrow_warp' &&
+          ev.type !== 'bounce_launch'
       );
 
       if (moveEvents.length > 0) {
@@ -1117,7 +1260,9 @@ export async function endPlayerTurn(): Promise<void> {
   if (gameStore.battle && gameStore.battle.status === 'ongoing') {
     startPhase(gameStore.battle, 'player');
     flushBattleEvents();
-    const firstAlive = gameStore.battle.units.find((u) => u.team === 'player' && u.alive);
+    const firstAlive = gameStore.battle.units.find(
+      (u) => u.team === 'player' && u.alive && !u.isEscortCart
+    );
     gameStore.selectedUnitId = firstAlive?.id ?? null;
     gameStore.mode = 'move';
     if (firstAlive) requestCameraFocus(firstAlive.pos);
@@ -1144,6 +1289,7 @@ export function finalizeBattleAndProceed(): void {
   } else {
     gameStore.savedRunAvailable = false;
   }
+  syncAdaptiveMusic();
 }
 
 export function graftHero(heroUid: string, graftId: string): boolean {
@@ -1177,6 +1323,38 @@ export function pickRecruit(blueprintId: string): boolean {
   return ok;
 }
 
+export function pickWeaponReward(weaponId: string): boolean {
+  if (!gameStore.run) return false;
+  const ok = claimWeaponReward(gameStore.run, weaponId);
+  if (ok) {
+    sfx.rescue();
+    saveRun(gameStore.run);
+  }
+  return ok;
+}
+
+export function equipWeapon(heroUid: string, weaponId: string): boolean {
+  if (!gameStore.run) return false;
+  const ok = equipHeroWeapon(gameStore.run, heroUid, weaponId);
+  if (ok) {
+    // Also update live battle unit weapon if currently in Pre-Battle Prep Phase!
+    const b = gameStore.battle;
+    if (b?.prepPhase) {
+      const hero = gameStore.run.roster.find((h) => h.uid === heroUid);
+      const unit = b.units.find((u) => u.rosterUid === heroUid);
+      if (hero && unit) {
+        unit.weapon = {
+          ...hero.weapon,
+          appliesStatus: hero.weapon.appliesStatus ? { ...hero.weapon.appliesStatus } : undefined,
+        };
+      }
+    }
+    sfx.click();
+    saveRun(gameStore.run);
+  }
+  return ok;
+}
+
 export function toggleSquadMember(heroUid: string): boolean {
   if (!gameStore.run) return false;
   const ok = toggleHeroActiveSquad(gameStore.run, heroUid);
@@ -1191,6 +1369,22 @@ export function unlockPerk(heroUid: string, perkId: string): boolean {
   if (!gameStore.run) return false;
   const ok = unlockHeroPerk(gameStore.run, heroUid, perkId);
   if (ok) {
+    const b = gameStore.battle;
+    if (b?.prepPhase) {
+      const hero = gameStore.run.roster.find((h) => h.uid === heroUid);
+      const unit = b.units.find((u) => u.rosterUid === heroUid);
+      if (hero && unit) {
+        unit.perkIds = [...hero.perkIds];
+        unit.maxHp = hero.maxHp;
+        unit.hp = Math.min(hero.maxHp, hero.hp);
+        unit.moveRange = hero.moveRange;
+        unit.dashDamage = hero.dashDamage;
+        unit.weapon = {
+          ...hero.weapon,
+          appliesStatus: hero.weapon.appliesStatus ? { ...hero.weapon.appliesStatus } : undefined,
+        };
+      }
+    }
     sfx.rescue();
     saveRun(gameStore.run);
   }
@@ -1212,6 +1406,7 @@ export function closeRewardsToMap(): void {
   sfx.click();
   finishRewardsAndReturnToMap(gameStore.run);
   saveRun(gameStore.run);
+  syncAdaptiveMusic();
 }
 
 export function chooseEventOption(choiceIndex: number): void {
@@ -1228,4 +1423,5 @@ export function closeEventToMap(): void {
   sfx.click();
   leaveEvent(gameStore.run);
   saveRun(gameStore.run);
+  syncAdaptiveMusic();
 }

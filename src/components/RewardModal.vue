@@ -4,6 +4,7 @@ import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
 import { PRODUCE_BLUEPRINTS } from '../data/produce';
 import { RELIC_REGISTRY } from '../data/relics';
+import { ALT_WEAPON_REGISTRY } from '../data/weapons';
 import { getFamilyLabel } from '../engine/hooks';
 import { MAX_GRAFTS_PER_HERO } from '../engine/run';
 import {
@@ -12,6 +13,7 @@ import {
   graftHero,
   pickRecruit,
   pickRelic,
+  pickWeaponReward,
   purchaseMarketOffer,
 } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
@@ -61,6 +63,7 @@ const unclaimedCount = computed(() => {
   if (reward.value.recruitChoices.length > 0 && !reward.value.claimedRecruit) left += 1;
   if (reward.value.graftChoices.length > 0 && !reward.value.claimedGraft) left += 1;
   if (reward.value.relicChoices.length > 0 && !reward.value.claimedRelic) left += 1;
+  if ((reward.value.weaponChoices?.length ?? 0) > 0 && !reward.value.claimedWeapon) left += 1;
   return left;
 });
 
@@ -293,6 +296,47 @@ function nextTierLabel(graftCount: number): string {
         </section>
         <div v-else-if="reward.relicChoices.length > 0" class="claimed-banner">
           <CraftIcon name="check" :size="16" /> Soil Relic added to your garden!
+        </div>
+
+        <!-- 3B. Armory Alternate Weapon Draft (Elites & Bosses!) -->
+        <section
+          v-if="(reward.weaponChoices?.length ?? 0) > 0 && !reward.claimedWeapon"
+          class="reward-sec"
+        >
+          <h3>⚔️ Unlock an Armory Alternate Weapon</h3>
+          <div class="choice-grid">
+            <div
+              v-for="wid in reward.weaponChoices"
+              :key="wid"
+              class="seed-packet choice-card"
+            >
+              <div class="choice-top">
+                <div class="recruit-id">
+                  <img
+                    class="recruit-thumb"
+                    :src="`/sprites/${ALT_WEAPON_REGISTRY[wid].species}.png`"
+                    :alt="ALT_WEAPON_REGISTRY[wid].weapon.name"
+                  />
+                  <div>
+                    <strong>{{ ALT_WEAPON_REGISTRY[wid].weapon.name }}</strong>
+                    <small class="sub-role">
+                      For {{ PRODUCE_BLUEPRINTS[ALT_WEAPON_REGISTRY[wid].species]?.name }} · {{ ALT_WEAPON_REGISTRY[wid].tagline }}
+                    </small>
+                  </div>
+                </div>
+              </div>
+              <p>{{ ALT_WEAPON_REGISTRY[wid].weapon.description }}</p>
+              <small class="stat-line">
+                🎯 {{ ALT_WEAPON_REGISTRY[wid].weapon.damage }} DMG · R{{ ALT_WEAPON_REGISTRY[wid].weapon.minRange }}-{{ ALT_WEAPON_REGISTRY[wid].weapon.maxRange }} · {{ ALT_WEAPON_REGISTRY[wid].weapon.arc.toUpperCase() }}
+              </small>
+              <button class="paper-btn gold" @click="pickWeaponReward(wid)">
+                Unlock for Armory
+              </button>
+            </div>
+          </div>
+        </section>
+        <div v-else-if="(reward.weaponChoices?.length ?? 0) > 0" class="claimed-banner">
+          <CraftIcon name="check" :size="16" /> Alternate Weapon unlocked — swap anytime in Squad Builds!
         </div>
 
         <!-- 4. Mid-Run Compost Market (Spend Run Seeds on Grafts, Items, Healing & Bailout!) -->
