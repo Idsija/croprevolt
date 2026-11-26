@@ -41,6 +41,8 @@ export interface BattleRendererHandle {
   setCameraMode?(mode: CameraMode3D): void;
   getCameraMode?(): CameraMode3D;
   destroy(): void;
+  /** Screen space covered by the HUD (CSS px), so the board is framed in what is left. */
+  setHudInsets?(topPx: number, bottomPx: number): void;
 }
 
 export interface TileWorldMetrics {

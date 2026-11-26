@@ -564,6 +564,10 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     return this.cameraCtrl.getMode();
   }
 
+  public setHudInsets(topPx: number, bottomPx: number): void {
+    this.cameraCtrl.setHudInsets(topPx, bottomPx);
+  }
+
   public focusOnGrid(pos: GridPos): void {
     const state = this.hooks.getState();
     if (!state) return;
@@ -907,7 +911,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           this.spawnBurst(pTo, ['#ffe052', '#ffae2b', '#fff9d6'], 20, 'confetti');
           this.spawnPopup(
             pTo.clone().add(new THREE.Vector3(0, 1.05, 0)),
-            `HERO SIGHT! -${ev.damage}`,
+            `WATCH! -${ev.damage}`,
             '#5c3200',
             '#ffe880',
             1.18
@@ -2177,6 +2181,9 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     }
 
     // 3. Bouncy Paper Mario Comic Damage / Event Popups!
+    // Popups never cover each other and never leave the screen: later ones stack upwards.
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    const viewW = ctx.canvas.clientWidth || 9999;
     for (const pop of this.popups) {
       const sc = this.projectToScreen(pop.worldPos);
       if (!sc.visible) continue;
@@ -2191,8 +2198,17 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       const tw = ctx.measureText(pop.text).width + 18;
       const th = fontSize + 10;
 
+      const px = Math.min(Math.max(sc.x, tw / 2 + 6), Math.max(tw / 2 + 6, viewW - tw / 2 - 6));
+      let py = Math.max(sc.y, th / 2 + 6);
+      for (let guard = 0; guard < 8; guard++) {
+        const hit = placed.find((r) => Math.abs(r.x - px) < (r.w + tw) / 2 && Math.abs(r.y - py) < (r.h + th) / 2 + 2);
+        if (!hit) break;
+        py = hit.y - (hit.h + th) / 2 - 4;
+      }
+      placed.push({ x: px, y: py, w: tw, h: th });
+
       // Slight comic slant
-      ctx.translate(sc.x, sc.y);
+      ctx.translate(px, py);
       ctx.rotate(-0.04);
 
       ctx.fillStyle = pop.bg;

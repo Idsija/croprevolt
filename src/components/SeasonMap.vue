@@ -127,7 +127,8 @@ watch(
   ([list]) => {
     if (list.length > 0) {
       if (!selectedNodeId.value || !availableIds.value.has(selectedNodeId.value)) {
-        selectedNodeId.value = list[0].id;
+        // Never pre-select the Act Boss when another stop is in reach: that is a choice to make on purpose.
+        selectedNodeId.value = (list.find((n) => n.type !== 'boss') ?? list[0]).id;
       }
     } else if (!selectedNodeId.value) {
       selectedNodeId.value = run.value.currentNodeId ?? run.value.nodes[0]?.id ?? null;
@@ -162,6 +163,36 @@ const selectedHopCount = computed(() => {
   const path = activeCardPaths.value.get(selectedNode.value.id);
   return path ? Math.max(0, path.length - 1) : 0;
 });
+
+/** Stops the selected hop passes without visiting: the player should know what they give up. */
+const skippedStops = computed<SeasonNode[]>(() => {
+  if (!selectedNode.value) return [];
+  const path = activeCardPaths.value.get(selectedNode.value.id) ?? [];
+  return path
+    .slice(1, -1)
+    .map((id) => run.value.nodes.find((n) => n.id === id))
+    .filter((n): n is SeasonNode => Boolean(n && n.type !== 'start' && !completedIds.value.has(n.id)));
+});
+
+/** Travel cards in hand that could reach the selected stop when the active card cannot. */
+const cardsReachingSelected = computed<BoardTravelCard[]>(() => {
+  const node = selectedNode.value;
+  if (!node || isSelectedAvailable.value || isSelectedCompleted.value) return [];
+  return travelHand.value.filter((c) => getBoardPathsForCard(run.value, c.id).has(node.id));
+});
+
+function useCardForSelected(cardId: string): void {
+  const keep = selectedNodeId.value;
+  selectTravelCard(cardId);
+  selectedNodeId.value = keep;
+}
+
+function selectNearestReachable(): void {
+  const first = availableNodes.value.find((n) => n.type !== 'boss') ?? availableNodes.value[0];
+  if (first) selectStop(first.id, false);
+}
+
+const showBellHelp = ref(false);
 
 const NODE_META: Record<NodeType, { label: string; icon: string; tone: string }> = {
   start: { label: 'Trailhead', icon: '⚑', tone: 'green' },
@@ -351,7 +382,11 @@ onBeforeUnmount(() => {
         <!-- Brass Harvest Bell Turn Pressure Dial -->
         <div
           class="bell-dial"
+          role="button"
+          tabindex="0"
           :class="{ urgent: isBellUrgent, overdue: isBellOverdue }"
+          @click="showBellHelp = !showBellHelp"
+          @keydown.enter="showBellHelp = !showBellHelp"
           :title="
             isBellOverdue
               ? 'Harvest Bell tolled! The Act Boss is Empowered (+3 HP & +1 ATK).'
@@ -373,6 +408,10 @@ onBeforeUnmount(() => {
               {{ isBellOverdue ? 'Boss Empowered' : 'Swift Bonus: +15 🌱' }}
             </small>
           </div>
+          <p v-if="showBellHelp" class="bell-help">
+            Every Travel Card you play uses one turn. Beat the Act Boss before the bell rings and you earn +15 seeds.
+            If it rings first, the boss gets tougher. Tap to close.
+          </p>
         </div>
 
         <!-- Active Next-Battle Blessing / Sprint Buff Pill -->
@@ -503,8 +542,8 @@ onBeforeUnmount(() => {
           <div class="tc-top">
             <span class="tc-key">{{ idx + 1 }}</span>
             <span class="tc-pips" :title="card.flexible ? `1–${card.steps} spaces` : `${card.steps} space(s)`">
-              <template v-if="card.flexible">1–{{ card.steps }}</template>
-              <template v-else>{{ '●'.repeat(card.steps) }}</template>
+              <template v-if="card.flexible">1–{{ card.steps }} hops</template>
+              <template v-else>{{ card.steps }} {{ card.steps === 1 ? 'hop' : 'hops' }}</template>
             </span>
           </div>
           <div class="tc-icon">{{ card.icon }}</div>
@@ -555,10 +594,32 @@ onBeforeUnmount(() => {
           <span v-else-if="isSelectedCompleted" class="paper-pill stop-state done">
             ✓ Cleared
           </span>
-          <span v-else class="paper-pill stop-state locked">
-            Out of Card Reach
-          </span>
+          <div v-else class="stop-reach-help">
+            <button
+              v-for="c in cardsReachingSelected"
+              :key="c.id"
+              class="paper-btn gold stop-card-btn"
+              @click="useCardForSelected(c.id)"
+            >
+              Use {{ c.icon }} {{ c.name }}
+            </button>
+            <template v-if="cardsReachingSelected.length === 0">
+              <span class="paper-pill stop-state locked">Too far this turn</span>
+              <button v-if="availableNodes.length > 0" class="paper-btn stop-card-btn" @click="selectNearestReachable">
+                Show stops in reach
+              </button>
+            </template>
+          </div>
         </div>
+
+        <p v-if="isSelectedAvailable && skippedStops.length > 0" class="stop-warning">
+          Skips {{ skippedStops.map((n) => `${NODE_META[n.type].icon} ${NODE_META[n.type].label}`).join(', ') }}.
+          You cannot walk back.
+        </p>
+        <p v-if="isSelectedAvailable && selectedNode.type === 'boss'" class="stop-warning boss">
+          👑 Act Boss: this ends the act. Battles on the way make your squad stronger, and
+          {{ turnsLeft > 0 ? `the Harvest Bell still gives you ${turnsLeft} turn${turnsLeft === 1 ? '' : 's'}.` : 'the Harvest Bell has rung.' }}
+        </p>
       </div>
     </footer>
 
@@ -1324,5 +1385,56 @@ onBeforeUnmount(() => {
   .shrine-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.stop-reach-help {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.stop-card-btn {
+  padding: 5px 10px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.stop-warning {
+  margin: 6px 0 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #fff1cf;
+  border: 1.5px dashed #b98524;
+  color: #5a3d00;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.stop-warning.boss {
+  background: #ffe1da;
+  border-color: #b23a2a;
+  color: #6b1c10;
+}
+.bell-dial {
+  position: relative;
+  cursor: pointer;
+}
+.bell-help {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  margin: 4px 0 0;
+  max-width: 300px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1.6px solid var(--ink);
+  background: #fffaeb;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
 }
 </style>

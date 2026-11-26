@@ -165,6 +165,14 @@ export function computeMovableTiles(state: BattleState, unit: BattleUnit): Map<s
  * Enemies the unit can Dash-bonk during its Move phase (before finishing movement).
  * Supports Multi-Dash (double_dash perk) to bonk up to 2 different enemies in one turn!
  */
+/** Dash damage after the target's Acid (+2) and Shield (-2, never below 1): what the dash will really do. */
+export function dashDamageAgainst(target: BattleUnit, base: number): number {
+  let dmg = base;
+  if (target.statuses.some((st) => st.kind === 'acid' && st.turns > 0)) dmg += 2;
+  if (target.statuses.some((st) => st.kind === 'shield' && st.turns > 0)) dmg = Math.max(1, dmg - 2);
+  return dmg;
+}
+
 export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOption[] {
   const dashesUsed = unit.actions.dashesUsed ?? (unit.actions.hasDashed ? 1 : 0);
   const maxDashes = getMaxDashesForUnit(unit);
@@ -204,7 +212,7 @@ export function computeDashOptions(state: BattleState, unit: BattleUnit): DashOp
         enemyPos: target.pos,
         stopPos: bestNode.pos,
         cost: bestNode.cost,
-        damage: getEffectiveDashDamage(unit) + dashBonus,
+        damage: dashDamageAgainst(target, getEffectiveDashDamage(unit) + dashBonus),
         knockback: dashKb > 0 ? dashKb : undefined,
         appliesStatus: dashStatus,
       });

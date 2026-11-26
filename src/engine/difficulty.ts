@@ -38,6 +38,9 @@ export const TUNING = {
   eliteSecondVeteranFloor: 4,
   /** Chance that each regular spawn is swapped for a different farmhand. */
   rerollChance: 0.5,
+  /** Heat 0 only: the first battles of a run are a warm-up, with softer farmers. */
+  openingHpMult: 0.85,
+  openingFloors: 2,
   /** Heat 1+: multiplier on every farmer's HP. */
   heatHpMult: 1.05,
   /** Heat 2+: elites always gain a Veteran, regular battles from this floor (0-based) on. */
@@ -126,7 +129,10 @@ export function difficultyFor(
 
   return {
     threat,
-    hpMult: (1 + TUNING.hpPerThreat * (threat - 1)) * heatHpMult,
+    hpMult:
+      (1 + TUNING.hpPerThreat * (threat - 1)) *
+      heatHpMult *
+      (heat === 0 && act === 0 && floor < TUNING.openingFloors ? TUNING.openingHpMult : 1),
     damageBonus: (floor >= TUNING.damageBonusFloor ? 1 : 0) + TUNING.damagePerAct * act,
     veteranDamageBonus: heatDmgBonus,
     extraEnemies: nodeType === 'elite' ? Math.max(0, extraEnemies - 1) : extraEnemies,
