@@ -350,7 +350,9 @@ export function getAllEnemiesThreatZone(state: BattleState): {
 export function unitHasMeaningfulAction(state: BattleState, unit: BattleUnit): boolean {
   if (!unit.alive || unit.team !== 'player' || unit.isEscortCart) return false;
 
-  if (!unit.actions.hasMoved && !hasStatus(unit, 'rooted')) {
+  // A fresh movement budget counts as something to do. Leftover steps after a move don't,
+  // so auto-advance and auto-end still kick in once a hero has walked and has nothing else left.
+  if (!unit.actions.hasMoved && (unit.actions.moveSpent ?? 0) === 0 && !hasStatus(unit, 'rooted')) {
     return true;
   }
 

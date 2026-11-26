@@ -83,6 +83,17 @@ export function getEffectiveMoveRange(unit: BattleUnit): number {
   return move;
 }
 
+/** Movement points left this turn after walking, dashing and team-jump approaches. */
+export function getRemainingMove(unit: BattleUnit): number {
+  return Math.max(0, getEffectiveMoveRange(unit) - (unit.actions.moveSpent ?? 0));
+}
+
+/** Spends movement points and marks movement as finished once the budget is gone. */
+export function spendMove(unit: BattleUnit, cost: number): void {
+  unit.actions.moveSpent = (unit.actions.moveSpent ?? 0) + Math.max(0, cost);
+  unit.actions.hasMoved = getRemainingMove(unit) <= 0;
+}
+
 export function getEffectiveJumpRange(unit: BattleUnit, springboardAlly?: BattleUnit): number {
   const launchBonus = springboardAlly?.launchpadCoop ? 2 : 0;
   return unit.jumpRange + launchBonus;
