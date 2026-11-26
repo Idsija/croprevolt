@@ -1,4 +1,4 @@
-import type { NodeType, SeasonId, SeasonNode } from './types';
+import type { BoardTheme, NodeType, SeasonId, SeasonNode } from './types';
 
 /**
  * Procedural run map generation (Slay the Spire style).
@@ -32,6 +32,8 @@ type BattleNodeType = Extract<NodeType, 'skirmish' | 'escape' | 'barn_rescue' | 
 
 export interface ActDef {
   id: SeasonId;
+  /** Overrides the battlefield palette (lets an act reuse earlier layouts in its own colours). */
+  theme?: BoardTheme;
   /** Shown in the map header, e.g. "Act 1 · Spring Patch" */
   name: string;
   trailTitle: string;
@@ -96,6 +98,38 @@ export const ACTS: ActDef[] = [
       mapId: 'combine_throne',
       name: "Baron Combine's Conservatory",
       subtitle: 'Summer Boss — Topple the vintage red harvester tractor!',
+    },
+    shop: {
+      name: "Farmer's Compost Market",
+      subtitle: 'Safe Market — Spend run Seeds on Grafts, Items, Healing & Recruits!',
+    },
+    vault: {
+      name: 'Seed Vault & Compost',
+      subtitle: 'Safe Stop — Heal squad +6 HP, recruit a Hero & grab a Watering Can',
+    },
+  },
+  {
+    id: 'autumn',
+    theme: 'autumn',
+    name: 'Autumn Orchard',
+    trailTitle: 'Autumn Orchard Trail',
+    trailHint: 'Pick a path. Lord Bramblecoat waits in the moonlit orchard.',
+    mapPools: {
+      skirmish: ['vegetable_patch', 'greenhouse_entry'],
+      escape: ['patch_breakout', 'irrigation_run'],
+      barn_rescue: ['barn_raid'],
+      elite: ['tool_shed_ambush', 'apiary_ambush'],
+    },
+    subtitles: {
+      skirmish: 'Defeat All — Clear the harvest crew from the fallen leaves',
+      escape: 'Reach the Gate — Slip through the orchard fence for a Graft + Relic',
+      barn_rescue: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
+      elite: 'Elite Fight — The harvest veterans guard a rare Graft + Soil Relic',
+    },
+    boss: {
+      mapId: 'orchard_clearing',
+      name: "Lord Bramblecoat's Orchard",
+      subtitle: 'Autumn Boss — Cut down the crimson harvest warden!',
     },
     shop: {
       name: "Farmer's Compost Market",
@@ -187,14 +221,18 @@ function weightedPick<T extends string>(rng: Rng, weights: Partial<Record<T, num
   return entries[entries.length - 1][0];
 }
 
+/** Node types that may be swapped for a guaranteed market / elite. */
+const CONVERTIBLE: ReadonlySet<NodeType> = new Set<NodeType>(['skirmish', 'event', 'escape', 'barn_rescue']);
+
 /** Node types that shouldn't appear twice in a row along a path. */
-const NO_REPEAT: ReadonlySet<NodeType> = new Set<NodeType>(['elite', 'shop', 'vault', 'escape', 'barn_rescue']);
+const NO_REPEAT: ReadonlySet<NodeType> = new Set<NodeType>(['elite', 'shop', 'vault', 'escape', 'barn_rescue', 'event']);
 
 function typeWeights(floor: number): Partial<Record<NodeType, number>> {
   if (floor === 0) return { skirmish: 1 };
-  if (floor === 1) return { skirmish: 55, escape: 25, barn_rescue: 20 };
+  if (floor === 1) return { skirmish: 45, escape: 20, barn_rescue: 15, event: 20 };
   return {
-    skirmish: 36,
+    skirmish: 30,
+    event: 14,
     escape: 14,
     barn_rescue: 12,
     elite: floor >= 2 ? 16 : 0,
@@ -206,6 +244,7 @@ function typeWeights(floor: number): Partial<Record<NodeType, number>> {
 function describeNode(act: ActDef, type: NodeType, rng: Rng): Pick<SeasonNode, 'name' | 'subtitle' | 'mapId'> {
   if (type === 'shop') return { name: act.shop.name, subtitle: act.shop.subtitle };
   if (type === 'vault') return { name: act.vault.name, subtitle: act.vault.subtitle };
+  if (type === 'event') return { name: 'Something Along the Trail', subtitle: 'Mystery — A strange find, a choice to make' };
   if (type === 'boss') return { name: act.boss.name, subtitle: act.boss.subtitle, mapId: act.boss.mapId };
   const battleType = type as BattleNodeType;
   return {
@@ -258,14 +297,17 @@ export function generateActNodes(
     if ([...types.values()].includes(required)) continue;
     const candidates = [...types.entries()].filter(([key, t]) => {
       const [floor, lane] = key.split(':').map(Number);
-      if (t !== 'skirmish' || floor < 2 || floor >= lastFloor - 1) return false;
+      if (!CONVERTIBLE.has(t) || floor < 2 || floor >= lastFloor - 1) return false;
       const neighbours = [
         ...(parents.get(key) ?? []).map((l) => types.get(`${floor - 1}:${l}`)),
         ...edges.filter((e) => e.floor === floor && e.from === lane).map((e) => types.get(`${floor + 1}:${e.to}`)),
       ];
       return !neighbours.includes(required);
     });
-    if (candidates.length > 0) types.set(pick(rng, candidates)[0], required);
+    // Prefer turning a plain skirmish into the missing stop; fall back to other filler nodes.
+    const skirmishes = candidates.filter(([, t]) => t === 'skirmish');
+    const pool = skirmishes.length > 0 ? skirmishes : candidates;
+    if (pool.length > 0) types.set(pick(rng, pool)[0], required);
   }
 
   const nodes: SeasonNode[] = [];

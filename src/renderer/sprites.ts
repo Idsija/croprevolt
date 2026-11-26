@@ -28,6 +28,7 @@ const PNG_SPRITE_KEYS = [
   'sprayer',
   'mower',
   'scarecrow',
+  'harvester',
   'tractor',
   'crate',
   'haystack',
@@ -131,6 +132,7 @@ const UNIT_HEIGHTS: Record<string, number> = {
   sprayer: 88,
   mower: 72,
   scarecrow: 118,
+  harvester: 122,
   tractor: 102,
 };
 
@@ -154,6 +156,7 @@ const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   sprayer: 'left',
   mower: 'left',
   scarecrow: 'left',
+  harvester: 'left',
   tractor: 'left',
 };
 
@@ -435,6 +438,31 @@ export function drawUnitStandee(
   if (hpRatio > 0) {
     roundRect(ctx, -barW / 2, barY, Math.max(3 * s, barW * hpRatio), barH, 2.5 * s);
     ctx.fill();
+  }
+
+  // Veteran pin: small die-cut paper star badge at the right end of the HP bar (shield sits on the left).
+  if (unit.isVeteran) {
+    const vx = barW / 2 + 8 * s;
+    const vy = barY + barH / 2;
+    ctx.fillStyle = PAPER_RIM;
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.4 * s;
+    ctx.beginPath();
+    ctx.arc(vx, vy, 7 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e8a91c';
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = (i % 2 === 0 ? 5 : 2.2) * s;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      if (i === 0) ctx.moveTo(vx + Math.cos(a) * r, vy + Math.sin(a) * r);
+      else ctx.lineTo(vx + Math.cos(a) * r, vy + Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.lineWidth = 0.9 * s;
+    ctx.stroke();
   }
 
   // Die-cut bouncing paper pointer chevron above active hero or inspected enemy!

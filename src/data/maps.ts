@@ -455,4 +455,56 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { blueprintId: 'sprayer', x: 6, y: 1 },
     ],
   },
+
+  // ===== ACT 3: AUTUMN ORCHARD (regular battles reuse earlier layouts with the autumn palette) =====
+  orchard_clearing: {
+    id: 'orchard_clearing',
+    name: "Lord Bramblecoat's Orchard",
+    subtitle: 'Autumn Boss — Cut down the crimson harvest warden!',
+    theme: 'autumn',
+    objective: 'boss',
+    objectiveLabel: 'Defeat Lord Bramblecoat',
+    width: 8,
+    height: 10,
+    tiles: [
+      // Winding orchard path
+      { x: 1, y: 8, terrain: 'soil' },
+      { x: 2, y: 7, terrain: 'soil' },
+      { x: 2, y: 6, terrain: 'soil' },
+      { x: 3, y: 5, terrain: 'soil' },
+      { x: 4, y: 4, terrain: 'soil' },
+      { x: 5, y: 3, terrain: 'soil' },
+      { x: 5, y: 2, terrain: 'soil' },
+      { x: 6, y: 1, terrain: 'soil' },
+      // Leaf-mould compost beds and soggy ruts
+      { x: 0, y: 5, terrain: 'compost' },
+      { x: 7, y: 6, terrain: 'compost' },
+      { x: 3, y: 7, terrain: 'mud' },
+      { x: 4, y: 7, terrain: 'mud' },
+      { x: 1, y: 3, terrain: 'mud' },
+      // Orchard cover: thorny brambles, hay bales, crates and old stones
+      { x: 1, y: 6, cover: 'haystack' },
+      { x: 6, y: 6, cover: 'crate' },
+      { x: 3, y: 6, cover: 'crate' },
+      { x: 5, y: 5, cover: 'thorns' },
+      { x: 2, y: 4, cover: 'thorns' },
+      { x: 6, y: 4, cover: 'haystack' },
+      { x: 0, y: 2, cover: 'stone' },
+      { x: 3, y: 2, cover: 'stone' },
+      { x: 7, y: 3, cover: 'crate' },
+      { x: 4, y: 6, cover: 'beehive' },
+    ],
+    playerSpawns: [
+      { x: 2, y: 9 },
+      { x: 5, y: 9 },
+      { x: 1, y: 9 },
+      { x: 6, y: 9 },
+    ],
+    enemySpawns: [
+      { blueprintId: 'harvester', x: 4, y: 1 },
+      { blueprintId: 'trimmer', x: 1, y: 2 },
+      { blueprintId: 'mower', x: 6, y: 2 },
+      { blueprintId: 'sprayer', x: 3, y: 0 },
+    ],
+  },
 };

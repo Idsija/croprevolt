@@ -4,6 +4,13 @@ import { MAP_TEMPLATES } from '../data/maps';
 import { PRODUCE_BLUEPRINTS } from '../data/produce';
 import { computePushDirection, forecastAttack } from './combat';
 import {
+  MAX_ENEMIES_PER_BATTLE,
+  REGULAR_ENEMY_POOL,
+  TUNING,
+  type BattleDifficulty,
+} from './difficulty';
+import type { Rng } from './mapgen';
+import {
   chebyshev,
   createCover,
   getNeighbors,
@@ -28,11 +35,100 @@ import {
 } from './pathfinding';
 import type {
   BattleState,
+  BoardTheme,
   BattleUnit,
   GridPos,
+  MapTemplate,
   RosterHero,
   Tile,
 } from './types';
+
+/**
+ * Optional run-time variation for a battle. Without it a map is built exactly as authored
+ * (tests and fixed scenarios rely on that).
+ */
+export interface BattleSetup {
+  rng: Rng;
+  difficulty: BattleDifficulty;
+  /** Palette override, e.g. Autumn reusing Spring layouts. */
+  theme?: BoardTheme;
+}
+
+function mirrorTemplate(map: MapTemplate): MapTemplate {
+  const fx = (x: number) => map.width - 1 - x;
+  const flip = (p: GridPos): GridPos => ({ x: fx(p.x), y: p.y });
+  return {
+    ...map,
+    tiles: map.tiles.map((t) => ({ ...t, x: fx(t.x) })),
+    playerSpawns: map.playerSpawns.map(flip),
+    enemySpawns: map.enemySpawns.map((e) => ({ ...e, x: fx(e.x) })),
+    gateTiles: map.gateTiles?.map(flip),
+    cagePos: map.cagePos ? flip(map.cagePos) : undefined,
+  };
+}
+
+function shuffle<T>(items: T[], rng: Rng): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/** Re-roll regular farmhands and add reinforcements in the enemy half of the board. */
+function varyEnemySpawns(map: MapTemplate, setup: BattleSetup): MapTemplate['enemySpawns'] {
+  const { rng, difficulty } = setup;
+  const spawns = map.enemySpawns.map((spawn) => {
+    if (ENEMY_BLUEPRINTS[spawn.blueprintId]?.isBoss) return { ...spawn };
+    if (rng() >= TUNING.rerollChance) return { ...spawn };
+    const pool = REGULAR_ENEMY_POOL.filter((id) => id !== spawn.blueprintId);
+    return { ...spawn, blueprintId: pool[Math.floor(rng() * pool.length)] };
+  });
+
+  const room = Math.max(0, MAX_ENEMIES_PER_BATTLE - spawns.length);
+  const extra = Math.min(room, difficulty.extraEnemies);
+  if (extra === 0) return spawns;
+
+  const blocked = new Set<string>([
+    ...map.tiles.filter((t) => t.cover).map((t) => posKey(t)),
+    ...spawns.map((sp) => posKey(sp)),
+    ...map.playerSpawns.map(posKey),
+    ...(map.gateTiles ?? []).map(posKey),
+  ]);
+  const playerTop = Math.min(...map.playerSpawns.map((p) => p.y));
+  const candidates: GridPos[] = [];
+  for (let y = 0; y < map.height; y++) {
+    // Reinforcements arrive in the enemy half and never within 3 rows of the squad.
+    if (y > playerTop - 4 || y > Math.floor(map.height / 2)) continue;
+    for (let x = 0; x < map.width; x++) {
+      if (!blocked.has(posKey({ x, y }))) candidates.push({ x, y });
+    }
+  }
+  for (const pos of shuffle(candidates, rng).slice(0, extra)) {
+    const blueprintId = REGULAR_ENEMY_POOL[Math.floor(rng() * REGULAR_ENEMY_POOL.length)];
+    spawns.push({ blueprintId, x: pos.x, y: pos.y });
+  }
+  return spawns;
+}
+
+function applyDifficultyToEnemy(unit: BattleUnit, difficulty: BattleDifficulty): void {
+  unit.maxHp = Math.ceil(unit.maxHp * difficulty.hpMult);
+  unit.hp = unit.maxHp;
+  if (difficulty.damageBonus > 0) {
+    unit.weapon.damage += difficulty.damageBonus;
+    if (unit.ability?.damage) unit.ability.damage += difficulty.damageBonus;
+  }
+}
+
+function promoteToVeteran(unit: BattleUnit): void {
+  unit.isVeteran = true;
+  unit.title = `Veteran ${unit.title}`;
+  unit.maxHp = Math.ceil(unit.maxHp * 1.5);
+  unit.hp = unit.maxHp;
+  unit.weapon.damage += 1;
+  applyStatusToUnit(unit, 'shield', 1);
+}
 
 function emptyActions() {
   return {
@@ -132,10 +228,16 @@ export function createBattleFromMap(
   activeHeroes: RosterHero[],
   relicIds: string[],
   items: Record<string, number>,
-  captiveInfo?: { hero?: RosterHero; blueprintId?: string }
+  captiveInfo?: { hero?: RosterHero; blueprintId?: string },
+  setup?: BattleSetup
 ): BattleState {
-  const map = MAP_TEMPLATES[mapId];
-  if (!map) throw new Error(`Unknown map template: ${mapId}`);
+  const template = MAP_TEMPLATES[mapId];
+  if (!template) throw new Error(`Unknown map template: ${mapId}`);
+  let map: MapTemplate = template;
+  if (setup) {
+    if (setup.rng() < 0.5) map = mirrorTemplate(map);
+    map = { ...map, enemySpawns: varyEnemySpawns(map, setup) };
+  }
 
   const tiles: Tile[][] = [];
   for (let y = 0; y < map.height; y++) {
@@ -186,13 +288,21 @@ export function createBattleFromMap(
     const enemy = createBattleUnitFromEnemy(spawn.blueprintId, variantIdx, { x: spawn.x, y: spawn.y });
     enemy.id = `enemy_${spawn.blueprintId}_${i}`;
     enemy.facing = spawn.x < map.width / 2 ? 'right' : 'left';
+    if (setup) applyDifficultyToEnemy(enemy, setup.difficulty);
     units.push(enemy);
   });
+
+  if (setup && setup.difficulty.veterans > 0) {
+    const regulars = units.filter((u) => u.team === 'enemy' && !u.isBoss);
+    for (const unit of shuffle(regulars, setup.rng).slice(0, setup.difficulty.veterans)) {
+      promoteToVeteran(unit);
+    }
+  }
 
   return {
     mapId: map.id,
     mapName: map.name,
-    theme: map.theme ?? 'spring',
+    theme: setup?.theme ?? map.theme ?? 'spring',
     objective: map.objective,
     objectiveLabel: map.objectiveLabel,
     width: map.width,

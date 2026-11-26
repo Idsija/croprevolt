@@ -18,9 +18,11 @@ const isVictory = computed(() => run.value.status === 'victory');
         <span>
           {{
             isVictory
-              ? run.seasonId === 'summer'
-                ? 'SUMMER GREENHOUSE VICTORY!'
-                : 'SPRING REVOLT VICTORY!'
+              ? run.seasonId === 'autumn'
+                ? 'FULL HARVEST VICTORY!'
+                : run.seasonId === 'summer'
+                  ? 'SUMMER GREENHOUSE VICTORY!'
+                  : 'SPRING REVOLT VICTORY!'
               : 'SQUAD HARVESTED!'
           }}
         </span>
@@ -30,7 +32,9 @@ const isVictory = computed(() => run.value.status === 'victory');
       <p class="desc">
         {{
           isVictory
-            ? run.seasonId === 'summer'
+            ? run.seasonId === 'autumn'
+              ? 'Lord Bramblecoat fell in a whirl of crimson leaves! Spring, Summer and Autumn: the whole garden is free.'
+              : run.seasonId === 'summer'
               ? 'Baron Combine ground to a halt in a burst of steam and popcorn! Your heirloom squad rules the Summer Greenhouse.'
               : 'Captain Scarecrow toppled in a shower of straw! Your heirloom squad rules the Spring Patch.'
             : 'Every revolt plants stronger seeds. Visit the Seed Shed to unlock permanent perks for your next run!'

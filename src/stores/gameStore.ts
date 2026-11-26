@@ -2,6 +2,9 @@ import { reactive } from 'vue';
 import { ITEM_REGISTRY } from '../data/items';
 import { RECRUITABLE_BLUEPRINT_IDS } from '../data/produce';
 import { runEnemyUnitTurn } from '../engine/ai';
+import { battleRng, difficultyFor } from '../engine/difficulty';
+import { leaveEvent, openEventNode, resolveEventChoice } from '../engine/events';
+import { ACTS } from '../engine/mapgen';
 import {
   createBattleFromMap,
   executeAbility,
@@ -348,6 +351,12 @@ export function enterSeasonNode(nodeId: string): void {
     return;
   }
 
+  if (node.type === 'event') {
+    openEventNode(run, nodeId);
+    saveRun(run);
+    return;
+  }
+
   if (!node.mapId) return;
   run.currentNodeId = nodeId;
   run.status = 'battle';
@@ -365,7 +374,13 @@ export function enterSeasonNode(nodeId: string): void {
     activeHeroes,
     run.relicIds,
     run.items,
-    harvestedHero ? { hero: harvestedHero } : { blueprintId: fallbackBp }
+    harvestedHero ? { hero: harvestedHero } : { blueprintId: fallbackBp },
+    {
+      // Seeded per node: the same run seed always produces the same battles (daily runs).
+      rng: battleRng(run.seed, node.id),
+      difficulty: difficultyFor(run.act, node.stage, node.type),
+      theme: ACTS[run.act]?.theme,
+    }
   );
 
   gameStore.battle = battle;
@@ -1049,5 +1064,21 @@ export function closeRewardsToMap(): void {
   if (!gameStore.run) return;
   sfx.click();
   finishRewardsAndReturnToMap(gameStore.run);
+  saveRun(gameStore.run);
+}
+
+export function chooseEventOption(choiceIndex: number): void {
+  const run = gameStore.run;
+  if (!run) return;
+  const outcome = resolveEventChoice(run, choiceIndex);
+  if (!outcome) return;
+  sfx.click();
+  saveRun(run);
+}
+
+export function closeEventToMap(): void {
+  if (!gameStore.run) return;
+  sfx.click();
+  leaveEvent(gameStore.run);
   saveRun(gameStore.run);
 }

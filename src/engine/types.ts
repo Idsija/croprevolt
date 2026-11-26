@@ -122,7 +122,7 @@ export interface ProduceBlueprint {
 export interface EnemyBlueprint {
   id: string;
   name: string;
-  archetype: 'digger' | 'trimmer' | 'sprayer' | 'mower' | 'scarecrow' | 'tractor';
+  archetype: 'digger' | 'trimmer' | 'sprayer' | 'mower' | 'scarecrow' | 'tractor' | 'harvester';
   title: string;
   family: ToolFamily;
   isBoss?: boolean;
@@ -241,6 +241,8 @@ export interface BattleUnit {
   visualKind: ProduceBlueprint['species'] | EnemyVisualKind;
   family: UnitFamily;
   isBoss?: boolean;
+  /** Elite-fight promotion: tougher, hits harder, starts shielded. */
+  isVeteran?: boolean;
   pos: GridPos;
   facing: 'left' | 'right';
   hp: number;
@@ -319,7 +321,7 @@ export type BattleEvent =
   | { type: 'unit_ko'; unitId: string; pos: GridPos; team: Team; unitName: string }
   | { type: 'banner'; text: string; tone: 'player' | 'enemy' | 'victory' | 'defeat' };
 
-export type BoardTheme = 'spring' | 'greenhouse';
+export type BoardTheme = 'spring' | 'greenhouse' | 'autumn';
 
 export interface MapTemplate {
   id: string;
@@ -371,9 +373,9 @@ export interface BattleState {
   undoSnapshot: string | null;
 }
 
-export type SeasonId = 'spring' | 'summer';
+export type SeasonId = 'spring' | 'summer' | 'autumn';
 
-export type NodeType = 'skirmish' | 'escape' | 'vault' | 'shop' | 'barn_rescue' | 'elite' | 'boss';
+export type NodeType = 'skirmish' | 'escape' | 'vault' | 'shop' | 'barn_rescue' | 'elite' | 'boss' | 'event';
 
 export interface SeasonNode {
   id: string;
@@ -431,7 +433,13 @@ export interface RunState {
   battlesWon: number;
   enemiesDefeated: number;
   pendingReward: RewardBundle | null;
-  status: 'map' | 'battle' | 'vault' | 'shop' | 'reward' | 'victory' | 'defeat';
+  status: 'map' | 'battle' | 'vault' | 'shop' | 'reward' | 'event' | 'victory' | 'defeat';
+  /** The "?" event currently open, if any. */
+  pendingEvent?: { eventId: string; outcome: string[] | null; choiceIndex: number | null } | null;
+  /** Events already met this run, so they don't repeat. */
+  seenEventIds?: string[];
+  /** Max-HP bonus new recruits get (Heirloom Soil unlock). */
+  recruitBonusHp?: number;
 }
 
 export interface MetaProgress {
