@@ -51,6 +51,8 @@ export function computeParTurns(state: BattleState): number {
       const bestMove = Math.max(1, ...heroes.map((h) => h.moveRange));
       return Math.ceil(closest / bestMove) + 1;
     }
+    case 'rout':
+      return 2 + Math.ceil((state.routTarget ?? foes) / 2);
     case 'barn_rescue':
     case 'boss':
       return sweep + 1;

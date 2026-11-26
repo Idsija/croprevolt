@@ -1,6 +1,7 @@
 import { registerDailyAttempt } from '../engine/daily';
 import { reactive } from 'vue';
 import { ITEM_REGISTRY } from '../data/items';
+import { rollObjectiveForNode } from '../engine/objectives';
 import { RECRUITABLE_BLUEPRINT_IDS } from '../data/produce';
 import { runEnemyUnitTurn } from '../engine/ai';
 import { battleRng, difficultyFor, MAX_HARVEST_HEAT } from '../engine/difficulty';
@@ -546,6 +547,7 @@ export function enterSeasonNode(nodeId: string, travelCardId?: string): void {
       harvestHeat: heat,
       nextBattleBuff: pendingBuff,
       bossEmpowered,
+      objective: rollObjectiveForNode(run.seed, node),
     }
   );
   // Consume one-battle Travel Card / Shrine boost once battle starts

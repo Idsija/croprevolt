@@ -30,7 +30,7 @@ export type StatusKind = 'burn' | 'rooted' | 'acid' | 'shield' | 'boosted' | 'fe
 
 export type PromotionTier = 'seedling' | 'ripe' | 'heirloom';
 
-export type ObjectiveType = 'defeat_all' | 'reach_gate' | 'barn_rescue' | 'boss' | 'survive' | 'escort';
+export type ObjectiveType = 'defeat_all' | 'rout' | 'reach_gate' | 'barn_rescue' | 'boss' | 'survive' | 'escort';
 
 export type VisualStyleId = 'papercraft';
 
@@ -460,6 +460,8 @@ export interface BattleState {
   playerSpawnPositions?: GridPos[];
   /** Number of turns to hold on 'survive' objective maps. */
   surviveTurns?: number;
+  /** Farmers to bonk for victory on 'rout' battles (the rest flee). */
+  routTarget?: number;
   /** Turn par for this battle: win in this many turns or fewer for a Great or Perfect Harvest. */
   parTurns?: number;
   /** Harvest Heat ascension level (0-5) active in this battle. */
