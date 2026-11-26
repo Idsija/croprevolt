@@ -19,6 +19,7 @@ import {
   hasRelic,
 } from '../engine/hooks';
 import { computeDashOptions, computeTeamJumpOptions } from '../engine/pathfinding';
+import { GRADE_LABELS, gradeBattle } from '../engine/par';
 import type { StatusKind } from '../engine/types';
 import { type InteractionMode, PaperCraftRenderer } from '../renderer/canvas';
 import { PaperDioramaRenderer } from '../renderer3d/PaperDioramaRenderer';
@@ -698,6 +699,10 @@ function onVisibilityChange(): void {
   }
 }
 
+const victoryGrade = computed(() =>
+  battle.value.status === 'victory' ? gradeBattle(toRaw(battle.value)) : null
+);
+
 const selectedMoveLeft = computed(() => (selectedUnit.value ? getRemainingMove(selectedUnit.value) : 0));
 
 const remainingDashesForSelected = computed(() => {
@@ -1155,6 +1160,14 @@ onBeforeUnmount(() => {
           </small>
           <small v-else>{{ battle.objectiveLabel }} · {{ aliveEnemiesCount }} foes left</small>
         </div>
+        <span
+          v-if="battle.parTurns"
+          class="cam-mode-pill par"
+          :class="{ over: !battle.prepPhase && battle.turn > battle.parTurns }"
+          :title="`Win within ${battle.parTurns} turns for a Great Harvest, with no hero bagged for a Perfect Harvest`"
+        >
+          Par {{ battle.parTurns }}
+        </span>
         <span v-if="(battle.harvestHeat ?? 0) > 0" class="cam-mode-pill heat">
           🔥 H{{ battle.harvestHeat }}
         </span>
@@ -2190,7 +2203,13 @@ onBeforeUnmount(() => {
         </p>
 
         <div class="outcome-stats">
-          <span class="paper-pill">Turns: {{ battle.turn }}</span>
+          <span v-if="victoryGrade" class="paper-pill grade-pill" :class="victoryGrade.grade">
+            {{ GRADE_LABELS[victoryGrade.grade] }}
+          </span>
+          <span class="paper-pill">
+            Turns: {{ victoryGrade ? victoryGrade.turns : battle.turn
+            }}<template v-if="battle.parTurns"> / Par {{ battle.parTurns }}</template>
+          </span>
           <span class="paper-pill">
             Survivors: {{ battle.units.filter((u) => u.team === 'player' && u.alive && !u.isEscortCart).length }}
           </span>
@@ -4218,6 +4237,25 @@ onBeforeUnmount(() => {
   color: #fffef4;
 }
 
+.cam-mode-pill.par {
+  background: #f3e7c9;
+  color: #5b4a2c;
+}
+.cam-mode-pill.par.over {
+  background: #e9d2b4;
+  color: #8a5a2b;
+  opacity: 0.8;
+}
+.grade-pill.perfect {
+  background: #f6d66b;
+  color: #5a3d00;
+  font-weight: 800;
+}
+.grade-pill.great {
+  background: #cfe8b5;
+  color: #2f4f1a;
+  font-weight: 700;
+}
 .cam-mode-pill.heat {
   background: linear-gradient(180deg, #ff7a33 0%, #c8331a 100%);
   color: #fff8e6;

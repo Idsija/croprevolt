@@ -11,6 +11,7 @@ import {
   STARTER_UNLOCKED_WEAPONS,
 } from '../data/weapons';
 import { battleRng, getHeatSeedMultiplier, MAX_HARVEST_HEAT } from './difficulty';
+import { PAR_TUNING, gradeBattle } from './par';
 import { dailyKeyFor, dailySeedFor, recordRunScore } from './score';
 import {
   ACTS,
@@ -242,6 +243,8 @@ export function createNewRun(
     items,
     seeds: act > 0 ? 8 * act : 0,
     battlesWon: 0,
+    turnsUnderPar: 0,
+    perfectHarvests: 0,
     enemiesDefeated: 0,
     pendingReward: null,
     status: 'map',
@@ -815,6 +818,15 @@ export function applyBattleOutcomeToRun(
 
   // Victory!
   run.battlesWon += 1;
+  const graded = gradeBattle(battle);
+  run.turnsUnderPar = (run.turnsUnderPar ?? 0) + graded.turnsUnderPar;
+  if (graded.grade === 'perfect') run.perfectHarvests = (run.perfectHarvests ?? 0) + 1;
+  const battleGrade = {
+    grade: graded.grade,
+    par: graded.par,
+    turns: graded.turns,
+    bonusSeeds: PAR_TUNING.bonusSeeds[graded.grade],
+  };
   if (node) {
     node.completed = true;
     if (!run.completedNodeIds.includes(node.id)) {
@@ -837,6 +849,8 @@ export function applyBattleOutcomeToRun(
     const reward = generateRewardForNode(run, node);
     reward.xpEarned = xpEarned;
     reward.levelUps = levelUps;
+    reward.battleGrade = battleGrade;
+    reward.seedsEarned += battleGrade.bonusSeeds;
     run.seeds += reward.seedsEarned;
     if (reward.itemGrant) {
       run.items[reward.itemGrant.itemId] =
@@ -867,6 +881,8 @@ export function applyBattleOutcomeToRun(
     const reward = generateRewardForNode(run, node);
     reward.xpEarned = xpEarned;
     reward.levelUps = levelUps;
+    reward.battleGrade = battleGrade;
+    reward.seedsEarned += battleGrade.bonusSeeds;
     run.seeds += reward.seedsEarned;
     if (reward.itemGrant) {
       run.items[reward.itemGrant.itemId] =

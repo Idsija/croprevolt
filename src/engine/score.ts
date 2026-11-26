@@ -11,9 +11,10 @@ export const SCORE_TUNING = {
   perActCleared: 500,
   victoryBonus: 1000,
   perSurvivor: 50,
-  /** Battle turns allowed per won battle before the speed bonus runs out. */
+  /** Fallback for runs started before per-battle par: turns allowed per won battle. */
   parTurnsPerBattle: 8,
   perTurnUnderPar: 15,
+  perPerfectHarvest: 60,
   /** Each Harvest Heat level multiplies the total by this much more. */
   heatMultPerLevel: 0.2,
 } as const;
@@ -38,13 +39,19 @@ export function computeRunScore(run: RunState): RunScore {
   const actsCleared = run.act + (won ? 1 : 0);
   const survivors = run.roster.filter((h) => !h.harvested).length;
   const turns = run.battleTurns ?? 0;
-  const turnsUnderPar = Math.max(0, run.battlesWon * T.parTurnsPerBattle - turns);
+  // Runs that track per-battle par use it; older saves fall back to the flat allowance.
+  const turnsUnderPar =
+    run.turnsUnderPar !== undefined
+      ? run.turnsUnderPar
+      : Math.max(0, run.battlesWon * T.parTurnsPerBattle - turns);
+  const perfects = run.perfectHarvests ?? 0;
 
   const lines: ScoreLine[] = [
     { label: 'Battles won', detail: `${run.battlesWon} × ${T.perBattleWon}`, points: run.battlesWon * T.perBattleWon },
     { label: 'Farmers routed', detail: `${run.enemiesDefeated} × ${T.perEnemyRouted}`, points: run.enemiesDefeated * T.perEnemyRouted },
     { label: 'Acts cleared', detail: `${actsCleared} × ${T.perActCleared}`, points: actsCleared * T.perActCleared },
     { label: 'Swift harvest', detail: `${turnsUnderPar} turns under par`, points: turnsUnderPar * T.perTurnUnderPar },
+    { label: 'Perfect harvests', detail: `${perfects} × ${T.perPerfectHarvest}`, points: perfects * T.perPerfectHarvest },
     { label: 'Produce standing', detail: `${survivors} × ${T.perSurvivor}`, points: survivors * T.perSurvivor },
   ];
   if (won) lines.push({ label: 'Garden freed', detail: 'Victory bonus', points: T.victoryBonus });

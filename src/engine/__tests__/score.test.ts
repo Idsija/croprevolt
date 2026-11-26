@@ -25,21 +25,30 @@ describe('run score', () => {
     const run = createNewRun(defaultMetaProgress(), 'spring', 42, 0);
     run.battlesWon = 5;
     run.enemiesDefeated = 20;
-    run.battleTurns = 30; // par is 40, so 10 under
+    run.turnsUnderPar = 10; // summed over each won battle's own par
+    run.perfectHarvests = 2;
     const base = computeRunScore(run);
     expect(base.subtotal).toBe(base.lines.reduce((s, l) => s + l.points, 0));
-    expect(base.total).toBe(5 * 100 + 20 * 10 + 10 * 15 + run.roster.length * 50);
+    expect(base.total).toBe(5 * 100 + 20 * 10 + 10 * 15 + 2 * 60 + run.roster.length * 50);
 
     run.harvestHeat = 5;
     expect(computeRunScore(run).total).toBe(base.total * 2);
   });
 
+  it('falls back to the flat par allowance for runs saved before per-battle par', () => {
+    const run = createNewRun(defaultMetaProgress(), 'spring', 42, 0);
+    run.turnsUnderPar = undefined;
+    run.battlesWon = 5;
+    run.battleTurns = 30; // flat par is 40, so 10 under
+    expect(computeRunScore(run).lines.find((l) => l.label === 'Swift harvest')?.points).toBe(10 * 15);
+  });
+
   it('rewards winning, going further and playing faster', () => {
     const run = createNewRun(defaultMetaProgress(), 'spring', 42, 0);
     run.battlesWon = 6;
-    run.battleTurns = 60;
+    run.turnsUnderPar = 2;
     const slow = computeRunScore(run).total;
-    run.battleTurns = 30;
+    run.turnsUnderPar = 12;
     const fast = computeRunScore(run).total;
     expect(fast).toBeGreaterThan(slow);
     run.act = 2;
