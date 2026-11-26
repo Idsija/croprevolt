@@ -472,6 +472,9 @@ export interface BattleState {
   burrowPairs?: Array<[GridPos, GridPos]>;
   bossPhase?: 1 | 2;
   bossTelegraphs?: BossTelegraph[];
+  /** Squad Bonds are applied once, when Turn 1 starts (see bonds.ts). */
+  bondsApplied?: boolean;
+  activeBonds?: Array<{ id: string; tier: 1 | 2 }>;
   rescuedHeroUids: string[];
   rescuedNewBlueprintIds: string[];
   combatLog: string[];

@@ -1,3 +1,4 @@
+import { applySquadBonds } from './bonds';
 import { ENEMY_BLUEPRINTS } from '../data/enemies';
 import { ITEM_REGISTRY } from '../data/items';
 import { MAP_TEMPLATES } from '../data/maps';
@@ -478,6 +479,7 @@ export function createBattleFromMap(
     applyRolledObjective(state, setup.objective);
   }
   state.parTurns = computeParTurns(state);
+  if (!prepPhase) announceSquadBonds(state);
   return state;
 }
 
@@ -608,7 +610,14 @@ export function finishPrepPhase(state: BattleState): boolean {
     tone: 'player',
   });
   pushLog(state, 'Squad ready! Produce Phase — Turn 1 begins!');
+  announceSquadBonds(state);
   return true;
+}
+
+function announceSquadBonds(state: BattleState): void {
+  const bonds = applySquadBonds(state);
+  if (bonds.length === 0) return;
+  pushLog(state, `Squad Bonds: ${bonds.map((b) => `${b.def.icon} ${b.def.name}${b.tier > 1 ? ' II' : ''}`).join(', ')}`);
 }
 
 export function getUnitById(state: BattleState, id: string): BattleUnit | undefined {
