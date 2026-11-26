@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAP_TEMPLATES } from '../../data/maps';
 import { canUnlockPerk, getXpToNextLevel } from '../../data/skills';
+import { runEnemyUnitTurn } from '../ai';
 import {
   createBattleFromMap,
   executeAbility,
@@ -13,7 +14,7 @@ import {
 } from '../battle';
 import { forecastAttack } from '../combat';
 import { createCover, posKey, tileAt } from '../grid';
-import { computeDashOptions, computeMovableTiles } from '../pathfinding';
+import { computeDashOptions, computeMovableTiles, getLinkedBurrowDest } from '../pathfinding';
 import {
   applyBattleOutcomeToRun,
   createNewRun,
@@ -304,5 +305,95 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
       }
       expect(posKey(battle.units[0].pos)).toBeTruthy();
     }
+  });
+
+  it('warps units across rivers & cliffs via linked Gopher Burrow pipes for 1 Move cost', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const battle = createBattleFromMap('creek_crossing', run.roster.slice(0, 4), [], run.items);
+    expect(battle.burrowPairs && battle.burrowPairs.length > 0).toBe(true);
+
+    const [burrowA, burrowB] = battle.burrowPairs![0];
+    expect(getLinkedBurrowDest(battle, burrowA)).toEqual(burrowB);
+    expect(getLinkedBurrowDest(battle, burrowB)).toEqual(burrowA);
+
+    const hero = battle.units.find((u) => u.team === 'player')!;
+    // Move allies & enemies out of the burrow endpoints
+    battle.units.forEach((u, idx) => {
+      if (u.id !== hero.id) u.pos = { x: idx % battle.width, y: u.team === 'enemy' ? 0 : battle.height - 1 };
+    });
+    hero.pos = { ...burrowA };
+
+    const movable = computeMovableTiles(battle, hero);
+    const destNode = movable.get(posKey(burrowB));
+    expect(destNode).toBeDefined();
+    expect(destNode!.cost).toBe(1);
+
+    battle.pendingEvents = [];
+    expect(executeMove(battle, hero.id, burrowB)).toBe(true);
+    expect(hero.pos).toEqual(burrowB);
+    expect(battle.pendingEvents.some((e) => e.type === 'burrow_warp')).toBe(true);
+  });
+
+  it('triggers Boss Phase 2 Enrage at <= 50% HP and resolves dodgeable Telegraphed Boss super-attacks', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const battle = createBattleFromMap('scarecrow_stand', run.roster.slice(0, 4), [], run.items);
+    const boss = battle.units.find((u) => u.isBoss)!;
+    const hero = battle.units.find((u) => u.team === 'player')!;
+    expect(boss).toBeDefined();
+    expect(battle.bossPhase).toBe(1);
+
+    // Clear cover so Pea/hero has clear shot, drop boss near half HP, then hit it across <= 50% threshold!
+    for (let y = 0; y < battle.height; y++) {
+      for (let x = 0; x < battle.width; x++) {
+        battle.tiles[y][x].cover = null;
+      }
+    }
+    boss.pos = { x: 4, y: 4 };
+    hero.pos = { x: 4, y: 6 };
+    boss.hp = Math.floor(boss.maxHp / 2) + 1;
+
+    battle.pendingEvents = [];
+    expect(executeAttack(battle, hero.id, boss.pos, () => 0)).toBe(true);
+    expect(battle.bossPhase).toBe(2);
+    expect(boss.statuses.some((s) => s.kind === 'shield')).toBe(true);
+    expect(boss.statuses.some((s) => s.kind === 'boosted')).toBe(true);
+    expect(battle.pendingEvents.some((e) => e.type === 'boss_phase')).toBe(true);
+
+    // Boss runs its turn and schedules a 1-turn Red Warning Telegraphed super-attack!
+    startPhase(battle, 'enemy');
+    runEnemyUnitTurn(battle, boss.id);
+    expect(battle.bossTelegraphs && battle.bossTelegraphs.length).toBeGreaterThan(0);
+    const tel = battle.bossTelegraphs![0];
+    expect(tel.tiles.length).toBeGreaterThan(0);
+
+    // Place one hero INSIDE the red telegraph zone and one hero OUTSIDE (dodged!)
+    const players = battle.units.filter((u) => u.team === 'player' && u.alive);
+    const hitHero = players[0];
+    const safeHero = players[1];
+    hitHero.hp = 20;
+    hitHero.maxHp = 20;
+    safeHero.hp = 20;
+    safeHero.maxHp = 20;
+    hitHero.pos = { ...tel.tiles[0] };
+    // Find a tile guaranteed NOT in tel.tiles
+    const telKeys = new Set(tel.tiles.map(posKey));
+    let safePos = { x: 0, y: 11 };
+    for (let y = battle.height - 1; y >= 0; y--) {
+      for (let x = 0; x < battle.width; x++) {
+        if (!telKeys.has(posKey({ x, y })) && !battle.units.some((u) => u.alive && u.pos.x === x && u.pos.y === y)) {
+          safePos = { x, y };
+          break;
+        }
+      }
+    }
+    safeHero.pos = safePos;
+
+    // Next Enemy Phase detonates the telegraph: hitHero takes damage, safeHero dodges cleanly!
+    battle.pendingEvents = [];
+    startPhase(battle, 'enemy');
+    expect(battle.bossTelegraphs).toHaveLength(0);
+    expect(hitHero.hp).toBeLessThan(20);
+    expect(safeHero.hp).toBe(20);
+    expect(battle.pendingEvents.some((e) => e.type === 'boss_telegraph_strike')).toBe(true);
   });
 });

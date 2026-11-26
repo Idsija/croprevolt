@@ -17,7 +17,8 @@ export type TerrainType =
   | 'water'
   | 'bridge'
   | 'lava'
-  | 'ramp';
+  | 'ramp'
+  | 'burrow';
 
 export type CoverKind = 'none' | 'crate' | 'haystack' | 'stone' | 'thorns' | 'cage' | 'beehive' | 'sprinkler';
 export type CoverLevel = 'none' | 'half' | 'full';
@@ -347,8 +348,19 @@ export type BattleEvent =
   | { type: 'heal'; unitId: string; pos: GridPos; amount: number; source: string }
   | { type: 'cover_break'; pos: GridPos; kind: Exclude<CoverKind, 'none'>; splashDamage?: number }
   | { type: 'rescue'; pos: GridPos; unitName: string }
+  | { type: 'burrow_warp'; unitId: string; from: GridPos; to: GridPos }
+  | { type: 'boss_phase'; bossId: string; bossName: string; phase: 2; pos: GridPos }
+  | { type: 'boss_telegraph_strike'; bossId: string; name: string; tiles: GridPos[]; hitIds: string[]; damage: number }
   | { type: 'unit_ko'; unitId: string; pos: GridPos; team: Team; unitName: string }
   | { type: 'banner'; text: string; tone: 'player' | 'enemy' | 'victory' | 'defeat' };
+
+export interface BossTelegraph {
+  bossId: string;
+  name: string;
+  tiles: GridPos[];
+  damage: number;
+  status?: StatusKind;
+}
 
 export type BoardTheme = 'spring' | 'greenhouse' | 'autumn';
 
@@ -376,6 +388,7 @@ export interface MapTemplate {
   }>;
   gateTiles?: GridPos[];
   cagePos?: GridPos;
+  burrowPairs?: Array<[GridPos, GridPos]>;
 }
 
 export type BattleStatus = 'ongoing' | 'victory' | 'defeat';
@@ -396,6 +409,9 @@ export interface BattleState {
   relicIds: string[];
   items: Record<string, number>;
   gateTiles: GridPos[];
+  burrowPairs?: Array<[GridPos, GridPos]>;
+  bossPhase?: 1 | 2;
+  bossTelegraphs?: BossTelegraph[];
   rescuedHeroUids: string[];
   rescuedNewBlueprintIds: string[];
   combatLog: string[];

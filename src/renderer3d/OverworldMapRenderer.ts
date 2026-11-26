@@ -129,6 +129,13 @@ export class OverworldMapRenderer {
   private elapsed = 0;
   private resizeObserver: ResizeObserver;
   private destroyed = false;
+  private leaderHopAnim: {
+    curve: THREE.QuadraticBezierCurve3;
+    startMs: number;
+    durationMs: number;
+    timer: ReturnType<typeof setTimeout>;
+    resolve: () => void;
+  } | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -255,6 +262,55 @@ export class OverworldMapRenderer {
       nv.pos.y + 0.35,
       THREE.MathUtils.clamp(nv.pos.z, this.minZ, this.maxZ)
     );
+  }
+
+  /**
+   * Animates the Squad Leader Paper Mario standee hopping along the stepping-stone trail
+   * to the target stop before entering battle/market/event!
+   */
+  public hopLeaderToNode(nodeId: string): Promise<void> {
+    const nv = this.nodeMap.get(nodeId);
+    if (this.destroyed || !this.leaderRig || !nv) {
+      return Promise.resolve();
+    }
+    if (this.leaderHopAnim) {
+      clearTimeout(this.leaderHopAnim.timer);
+      this.leaderHopAnim.resolve();
+      this.leaderHopAnim = null;
+    }
+
+    const from = this.leaderRig.root.position.clone();
+    const to = nv.pos.clone().add(new THREE.Vector3(-0.32, 0.14, 0.28));
+    const mid = new THREE.Vector3().lerpVectors(from, to, 0.5);
+    mid.y = Math.max(from.y, to.y) + 0.35;
+    const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+    this.focusNode(nodeId);
+
+    const durationMs = 460;
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (this.leaderHopAnim) {
+          clearTimeout(this.leaderHopAnim.timer);
+          this.leaderHopAnim = null;
+        }
+        if (this.leaderRig) {
+          this.leaderRig.root.position.copy(to);
+          this.leaderRig.flipGroup.rotation.y = 0;
+        }
+        resolve();
+      };
+      const timer = setTimeout(finish, durationMs + 60);
+      this.leaderHopAnim = {
+        curve,
+        startMs: performance.now(),
+        durationMs,
+        timer,
+        resolve: finish,
+      };
+    });
   }
 
   public recenter(instant = false): void {
@@ -949,12 +1005,12 @@ export class OverworldMapRenderer {
         nv.ringMat.color.set('#ffe252');
         nv.ringMat.opacity = 0.95;
         const sc = 1.08 + Math.sin(this.elapsed * 6.5) * 0.08;
-        nv.ringMesh.scale.set(sc, sc, 1);
+        nv.ringMesh.scale.set(sc, 1, sc);
       } else if (isAvail) {
         nv.ringMat.color.set(isHover ? '#ffffff' : '#ffcf48');
         nv.ringMat.opacity = 0.72 + Math.sin(this.elapsed * 5 + nv.pos.x) * 0.22;
         const sc = 1 + Math.sin(this.elapsed * 4.5 + nv.pos.z) * 0.06;
-        nv.ringMesh.scale.set(sc, sc, 1);
+        nv.ringMesh.scale.set(sc, 1, sc);
       } else if (isHover) {
         nv.ringMat.color.set('#fff3cc');
         nv.ringMat.opacity = 0.65;
@@ -975,11 +1031,26 @@ export class OverworldMapRenderer {
       }
     }
 
-    // Animate Squad Leader & Boss standees
+    // Animate Squad Leader & Boss standees (including lively 3-hop stepping-stone travel!)
     if (this.leaderRig) {
       this.leaderRig.root.rotation.y = this.camYaw;
-      this.leaderRig.tiltGroup.position.y = Math.abs(Math.sin(this.elapsed * 4.2)) * 0.09;
-      this.leaderRig.tiltGroup.rotation.z = Math.sin(this.elapsed * 2.1) * 0.04;
+      if (this.leaderHopAnim) {
+        const anim = this.leaderHopAnim;
+        const t = Math.min(1, (performance.now() - anim.startMs) / anim.durationMs);
+        const pt = anim.curve.getPoint(t);
+        this.leaderRig.root.position.copy(pt);
+        // 3 lively Paper Mario trail hops along the stones!
+        const hopArc = Math.abs(Math.sin(t * Math.PI * 3)) * 0.56;
+        this.leaderRig.tiltGroup.position.y = hopArc;
+        this.leaderRig.tiltGroup.rotation.z = Math.sin(t * Math.PI * 6) * 0.16;
+        this.leaderRig.flipGroup.rotation.y = Math.sin(t * Math.PI * 3) * 0.35;
+        if (t >= 1) {
+          anim.resolve();
+        }
+      } else {
+        this.leaderRig.tiltGroup.position.y = Math.abs(Math.sin(this.elapsed * 4.2)) * 0.09;
+        this.leaderRig.tiltGroup.rotation.z = Math.sin(this.elapsed * 2.1) * 0.04;
+      }
     }
     if (this.bossRig) {
       this.bossRig.root.rotation.y = this.camYaw;
@@ -999,6 +1070,10 @@ export class OverworldMapRenderer {
 
   public destroy(): void {
     this.destroyed = true;
+    if (this.leaderHopAnim) {
+      this.leaderHopAnim.resolve();
+      this.leaderHopAnim = null;
+    }
     cancelAnimationFrame(this.rafId);
     this.resizeObserver.disconnect();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);

@@ -21,6 +21,7 @@ import { computeDashOptions, computeTeamJumpOptions } from '../engine/pathfindin
 import type { StatusKind } from '../engine/types';
 import { type InteractionMode, PaperCraftRenderer } from '../renderer/canvas';
 import { PaperDioramaRenderer } from '../renderer3d/PaperDioramaRenderer';
+import { resolveVariantSpriteKey } from '../renderer3d/textures';
 import type {
   BattleRendererHandle,
   CameraMode3D,
@@ -47,6 +48,7 @@ import {
   selectBattleUnit,
   setHoveredTile,
   setInteractionMode,
+  setPreviewOverwatch,
   subscribeBattleEvents,
   subscribeCameraFocus,
   subscribeUndoReset,
@@ -54,6 +56,7 @@ import {
   toggleAudioMute,
   toggleAutoEndTurn,
   toggleBoardViewMode,
+  toggleEnemySpeed,
   toggleInspectEnemy,
   toggleRendererKind,
   triggerOverwatch,
@@ -232,21 +235,23 @@ const moveDestinationSummary = computed(() => {
   const destTerrain = destTile?.terrain ?? 'grass';
   const destElev = destTile?.elevation ?? 0;
   const terrainNote =
-    destTerrain === 'sunbeam'
-      ? '☀ Sunbeam (+2 ATK)'
-      : destTerrain === 'compost'
-        ? '🌿 Compost (+2 HP/turn)'
-        : destTerrain === 'mud'
-          ? '💧 Mud (2 Move cost)'
-          : destTerrain === 'gate'
-            ? '▲ Exit Gate (Win!)'
-            : destTerrain === 'bridge'
-              ? '🪵 Bridge Crossing'
-              : destTerrain === 'ramp'
-                ? '↗ Ramp (No climb penalty)'
-                : destElev > 0
-                  ? `▲ High Ground Lv.${destElev} (+2 DMG!)`
-                  : null;
+    destTerrain === 'burrow'
+      ? '🕳️ Gopher Burrow (1-Move Warp Pipe!)'
+      : destTerrain === 'sunbeam'
+        ? '☀ Sunbeam (+2 ATK)'
+        : destTerrain === 'compost'
+          ? '🌿 Compost (+2 HP/turn)'
+          : destTerrain === 'mud'
+            ? '💧 Mud (2 Move cost)'
+            : destTerrain === 'gate'
+              ? '▲ Exit Gate (Win!)'
+              : destTerrain === 'bridge'
+                ? '🪵 Bridge Crossing'
+                : destTerrain === 'ramp'
+                  ? '↗ Ramp (No climb penalty)'
+                  : destElev > 0
+                    ? `▲ High Ground Lv.${destElev} (+2 DMG!)`
+                    : null;
 
   return {
     isJump,
@@ -256,6 +261,24 @@ const moveDestinationSummary = computed(() => {
     destElev,
   };
 });
+
+const activeBossTelegraphs = computed(() => battle.value.bossTelegraphs ?? []);
+
+function isLowHpUnit(u: { alive: boolean; hp: number; maxHp: number }): boolean {
+  return u.alive && u.hp / Math.max(1, u.maxHp) <= 0.35;
+}
+
+function unitPortraitSrc(u: {
+  visualKind: string;
+  alive: boolean;
+  hp: number;
+  maxHp: number;
+  isBoss?: boolean;
+}): string {
+  const isBossEnraged = Boolean(u.isBoss && (battle.value.bossPhase ?? 1) >= 2);
+  const variant = isBossEnraged ? 'enraged' : isLowHpUnit(u) ? 'lowhp' : 'base';
+  return `/sprites/${resolveVariantSpriteKey(u.visualKind, variant)}.png`;
+}
 
 const aimTargets = computed(() => {
   void gameStore.eventQueueVersion;
@@ -710,6 +733,7 @@ function readViewState() {
     selectedUnitId: gameStore.selectedUnitId,
     inspectedEnemyId: gameStore.inspectedEnemyId,
     showAllDangerZone: gameStore.showAllDangerZone,
+    previewOverwatch: gameStore.previewOverwatch,
     mode: gameStore.mode,
     selectedItemId: gameStore.selectedItemId,
     hoveredTile: gameStore.hoveredTile ? toRaw(gameStore.hoveredTile) : null,
@@ -1014,6 +1038,17 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
+        <!-- 1x / 2x Enemy Phase Speed Toggle -->
+        <button
+          class="paper-btn tool-btn speed-btn"
+          :class="{ 'speed-fast': gameStore.enemySpeedFast }"
+          :aria-label="gameStore.enemySpeedFast ? 'Enemy speed 2x (Fast)' : 'Enemy speed 1x (Normal)'"
+          title="Toggle Farmer Phase Speed (1× / 2×)"
+          @click="toggleEnemySpeed"
+        >
+          <span>{{ gameStore.enemySpeedFast ? '2×' : '1×' }}</span>
+        </button>
+
         <!-- Global Enemy Danger Zone Toggle -->
         <button
           class="paper-btn tool-btn"
@@ -1046,6 +1081,19 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </header>
+
+    <!-- Boss Telegraphed Super-Attack Alert Pill -->
+    <div
+      v-if="activeBossTelegraphs.length > 0 && battle.status === 'ongoing'"
+      class="boss-telegraph-strip"
+      role="status"
+    >
+      <span class="bt-icon">⚠️</span>
+      <span class="bt-copy">
+        <strong>{{ activeBossTelegraphs[0].name }}</strong>
+        ({{ activeBossTelegraphs[0].damage }} DMG next Farmer Turn) — Move off red tiles!
+      </span>
+    </div>
 
     <!-- Turn-1 Sticky-Note Coachmarks -->
     <div
@@ -1147,6 +1195,13 @@ onBeforeUnmount(() => {
           <button class="paper-btn" @click="toggleAudioMute">
             <CraftIcon :name="gameStore.muted ? 'sound_off' : 'sound_on'" :size="16" />
             <span>{{ gameStore.muted ? 'SFX Off' : 'SFX On' }}</span>
+          </button>
+          <button
+            class="paper-btn"
+            :class="{ gold: gameStore.enemySpeedFast }"
+            @click="toggleEnemySpeed"
+          >
+            <span>⚡ Enemy Speed: {{ gameStore.enemySpeedFast ? '2× Fast' : '1× Normal' }}</span>
           </button>
           <button
             class="paper-btn"
@@ -1258,6 +1313,7 @@ onBeforeUnmount(() => {
             :class="{
               selected: u.id === gameStore.selectedUnitId,
               done: u.alive && isHeroDone(u.id),
+              'low-hp': isLowHpUnit(u),
               ko: !u.alive,
             }"
             :disabled="!u.alive"
@@ -1266,7 +1322,7 @@ onBeforeUnmount(() => {
           >
             <span class="mr-hotkey desktop-only">{{ idx + 1 }}</span>
             <div class="mr-portrait-box">
-              <img class="mr-portrait-img" :src="`/sprites/${u.visualKind}.png`" :alt="u.name" />
+              <img class="mr-portrait-img" :src="unitPortraitSrc(u)" :alt="u.name" />
               <span v-if="u.alive && (u.level ?? 1) > 1" class="mr-lvl-chip">L{{ u.level }}</span>
               <span v-if="u.alive && u.statuses.some((s) => s.kind === 'overwatch')" class="mr-watch-seal" title="Hero Sight Overwatch Active">
                 👁
@@ -1379,7 +1435,7 @@ onBeforeUnmount(() => {
                   <img
                     v-if="focusedUnit"
                     class="mh-sprite"
-                    :src="`/sprites/${focusedUnit.visualKind}.png`"
+                    :src="unitPortraitSrc(focusedUnit)"
                     :alt="focusedUnit.name"
                   />
                   <img
@@ -1571,7 +1627,7 @@ onBeforeUnmount(() => {
                 <div class="mh-left">
                   <img
                     class="mh-sprite"
-                    :src="`/sprites/${inspectedEnemy.visualKind}.png`"
+                    :src="unitPortraitSrc(inspectedEnemy)"
                     :alt="inspectedEnemy.name"
                   />
                   <div class="mh-copy">
@@ -1699,6 +1755,10 @@ onBeforeUnmount(() => {
                   }"
                   :disabled="selectedUnit.actions.hasAttacked || battle.phase !== 'player' || gameStore.enemyTurnRunning"
                   :title="`Hero Sight Overwatch (O) — Intercepts moving foes with ${overwatchChargesForSelected} reaction shot(s)`"
+                  @mouseenter="setPreviewOverwatch(true)"
+                  @mouseleave="setPreviewOverwatch(false)"
+                  @focus="setPreviewOverwatch(true)"
+                  @blur="setPreviewOverwatch(false)"
                   @click="handleTriggerOverwatch"
                 >
                   <span class="watch-glyph">👁</span>
@@ -3584,5 +3644,89 @@ onBeforeUnmount(() => {
 .status-chip.overwatch {
   background: #f5b82e;
   color: #3b2100;
+}
+
+.speed-btn {
+  min-width: 40px;
+  font-weight: 900;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+
+.speed-btn.speed-fast {
+  background: linear-gradient(180deg, #ffe278 0%, #f0b32c 100%);
+  color: #3f2200;
+  box-shadow: 0 3px 0 var(--ink);
+}
+
+.boss-telegraph-strip {
+  position: fixed;
+  top: calc(64px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 26;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #d93526 0%, #9c1a12 100%);
+  color: #fff6dc;
+  border: 2.5px solid #ffd166;
+  box-shadow: 0 4px 0 #3f130b, 0 10px 22px rgba(45, 6, 2, 0.45);
+  font-size: 0.8rem;
+  font-weight: 700;
+  max-width: calc(100vw - 24px);
+  pointer-events: none;
+  animation: telegraph-pulse 1.35s ease-in-out infinite;
+}
+
+.boss-telegraph-strip strong {
+  color: #ffe278;
+}
+
+@keyframes telegraph-pulse {
+  0%,
+  100% {
+    box-shadow: 0 4px 0 #3f130b, 0 0 0 0 rgba(255, 209, 102, 0.55);
+  }
+  50% {
+    box-shadow: 0 4px 0 #3f130b, 0 0 0 6px rgba(255, 209, 102, 0);
+  }
+}
+
+.mr-hero-card.low-hp {
+  border-color: #d93526;
+  background: linear-gradient(180deg, #fff1ec 0%, #ffd8cf 100%);
+  animation: lowhp-card-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes lowhp-card-pulse {
+  0%,
+  100% {
+    box-shadow: 0 4px 0 var(--ink), 0 0 0 0 rgba(217, 53, 38, 0.55);
+  }
+  50% {
+    box-shadow: 0 4px 0 var(--ink), 0 0 0 5px rgba(217, 53, 38, 0);
+  }
+}
+
+@media (max-width: 520px) {
+  .mr-action-bar.six-col {
+    gap: 4px;
+  }
+
+  .mr-action-bar.six-col .mr-act-btn {
+    padding: 6px 2px;
+  }
+
+  .mr-action-bar.six-col .act-title {
+    font-size: 0.68rem;
+    letter-spacing: -0.02em;
+  }
+
+  .mr-action-bar.six-col .act-sub {
+    font-size: 0.58rem;
+  }
 }
 </style>

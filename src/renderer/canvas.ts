@@ -58,6 +58,7 @@ export interface RendererViewState {
   selectedUnitId: string | null;
   inspectedEnemyId: string | null;
   showAllDangerZone?: boolean;
+  previewOverwatch?: boolean;
   mode: InteractionMode;
   selectedItemId: string | null;
   hoveredTile: GridPos | null;
@@ -2307,6 +2308,9 @@ export class PaperCraftRenderer {
     } else if (tile.terrain === 'ramp') {
       fill = checker ? '#cb9b5c' : '#be8d4f';
       topEdgeCol = '#7d5224';
+    } else if (tile.terrain === 'burrow') {
+      fill = checker ? '#8a623c' : '#7f5834';
+      topEdgeCol = '#2a8f85';
     }
 
     const d = m.boardDepth;

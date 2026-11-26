@@ -38,6 +38,7 @@ const TERRAIN_Y_OFFSET: Record<TerrainType, number> = {
   bridge: 0.055,
   lava: -0.095,
   ramp: 0.22,
+  burrow: 0.015,
 };
 
 export function getTerrainSurfaceY(terrain: TerrainType): number {
@@ -83,6 +84,8 @@ export class PaperDioramaWorld {
   private textures: CraftTextureLibrary;
 
   private builtBoardSignature = '';
+  private popUpStartMs = 0;
+  private readonly popUpDurationMs = 680;
 
   constructor(textures: CraftTextureLibrary) {
     this.textures = textures;
@@ -90,6 +93,12 @@ export class PaperDioramaWorld {
     this.root.add(this.sceneryGroup);
     this.root.add(this.coverGroup);
     this.buildDeskSurface();
+  }
+
+  /** Returns 0..1 progress of the Paper Mario pop-up storybook entrance unfold. */
+  public getPopUpProgress(): number {
+    if (this.popUpStartMs <= 0) return 1;
+    return Math.min(1, Math.max(0, (performance.now() - this.popUpStartMs) / this.popUpDurationMs));
   }
 
   private buildDeskSurface(): void {
@@ -128,6 +137,7 @@ export class PaperDioramaWorld {
     this.clearGroup(this.sceneryGroup);
     this.tilePickMeshes.length = 0;
     this.animatedParts.length = 0;
+    this.popUpStartMs = performance.now();
 
     const boardW = battle.width * TILE_SIZE_3D;
     const boardH = battle.height * TILE_SIZE_3D;
@@ -184,7 +194,7 @@ export class PaperDioramaWorld {
     addInkEdges(lip, 0x5c391e, 0.45);
     this.boardGroup.add(lip);
 
-    // 2. Individual 3D Terrain Tiles with Full Multi-Elevation Terraces, Ramps, Water, Bridges & Lava!
+    // 2. Individual 3D Terrain Tiles with Full Multi-Elevation Terraces, Ramps, Water, Bridges, Lava & Burrows!
     const tileFootprint = TILE_SIZE_3D - 0.022;
     const baseTileH = 0.14;
     const sideTileMat = new THREE.MeshStandardMaterial({
@@ -200,6 +210,7 @@ export class PaperDioramaWorld {
 
     const waterSurfaces: Array<{ mesh: THREE.Mesh; baseY: number; phase: number }> = [];
     const lavaMats: Array<{ mat: THREE.MeshStandardMaterial; phase: number }> = [];
+    const burrowRings: Array<{ ring: THREE.Mesh; phase: number }> = [];
 
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
@@ -229,7 +240,7 @@ export class PaperDioramaWorld {
           continue;
         }
 
-        // Standard or Elevated Terraced Block (grass, soil, mud, compost, barn_floor, gate, sunbeam)
+        // Standard or Elevated Terraced Block (grass, soil, mud, compost, barn_floor, gate, sunbeam, burrow)
         const tex = this.textures.getTerrainTexture(theme, tile.terrain, checker);
         const topMat = new THREE.MeshStandardMaterial({
           map: tex,
@@ -262,8 +273,10 @@ export class PaperDioramaWorld {
         this.boardGroup.add(mesh);
         this.tilePickMeshes.push(mesh);
 
-        // Decorative micro 3D paper tufts on empty grass/compost/sunbeam tiles
-        if (tile.terrain === 'compost') {
+        // Decorative micro 3D paper props on special terrain tiles
+        if (tile.terrain === 'burrow') {
+          this.addBurrowPipeProp(wp.x, surfaceY, wp.z, x * 11 + y * 7, burrowRings);
+        } else if (tile.terrain === 'compost') {
           this.addCompostSprout(wp.x, surfaceY, wp.z, x * 7 + y * 13);
         } else if (tile.terrain === 'sunbeam') {
           this.addSunbeamShaft(wp.x, surfaceY, wp.z);
@@ -273,7 +286,7 @@ export class PaperDioramaWorld {
       }
     }
 
-    if (waterSurfaces.length > 0 || lavaMats.length > 0) {
+    if (waterSurfaces.length > 0 || lavaMats.length > 0 || burrowRings.length > 0) {
       this.animatedParts.push({
         update: (time) => {
           for (const w of waterSurfaces) {
@@ -281,6 +294,11 @@ export class PaperDioramaWorld {
           }
           for (const l of lavaMats) {
             l.mat.emissiveIntensity = 0.72 + Math.sin(time * 3.1 + l.phase) * 0.28;
+          }
+          for (const br of burrowRings) {
+            br.ring.rotation.y = time * 1.4 + br.phase;
+            const sc = 1 + Math.sin(time * 3.8 + br.phase) * 0.06;
+            br.ring.scale.set(sc, 1, sc);
           }
         },
       });
@@ -291,9 +309,10 @@ export class PaperDioramaWorld {
       this.buildGateArchway(battle);
     }
 
-    // 4. Multi-Plane Paper Mario Diorama Scenery (Fences, Layered Hills, Trees, Barn/Greenhouse, Clouds!)
+    // 4. Multi-Plane Paper Mario Diorama Scenery + Act-Specific 3D Weather!
     this.buildPerimeterFences(boardW, boardH, theme);
     this.buildStageBackdrop(boardW, boardH, theme);
+    this.buildActWeather(boardW, boardH, theme);
   }
 
   private buildRampTile(
@@ -589,6 +608,244 @@ export class PaperDioramaWorld {
 
     this.boardGroup.add(bridgeGroup);
     this.tilePickMeshes.push(deck);
+  }
+
+  private addBurrowPipeProp(
+    x: number,
+    y: number,
+    z: number,
+    seed: number,
+    burrowRings: Array<{ ring: THREE.Mesh; phase: number }>
+  ): void {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+
+    // Sculpted earth mound lip around the tunnel mouth
+    const moundMat = new THREE.MeshStandardMaterial({
+      color: '#7f5530',
+      roughness: 0.92,
+      bumpMap: this.textures.paperBump,
+      bumpScale: 0.02,
+    });
+    const mound = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.1, 7, 16), moundMat);
+    mound.rotation.x = Math.PI / 2;
+    mound.position.y = 0.05;
+    mound.castShadow = true;
+    mound.receiveShadow = true;
+    g.add(mound);
+
+    // Dark recessed tunnel mouth disc
+    const hole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.36, 0.36, 0.04, 16),
+      new THREE.MeshBasicMaterial({ color: '#1b1108' })
+    );
+    hole.position.y = 0.015;
+    g.add(hole);
+
+    // Glowing animated turquoise warp collar ring!
+    const collarGeo = new THREE.RingGeometry(0.35, 0.44, 20);
+    collarGeo.rotateX(-Math.PI / 2);
+    const collarMat = new THREE.MeshBasicMaterial({
+      color: '#3cf0de',
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const collar = new THREE.Mesh(collarGeo, collarMat);
+    collar.position.y = 0.09;
+    g.add(collar);
+    burrowRings.push({ ring: collar, phase: seed * 0.4 });
+
+    // Cute miniature wooden signpost at corner so warp pipe reads cleanly from far away
+    const post = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.36, 0.06),
+      new THREE.MeshStandardMaterial({ color: '#8f592c', roughness: 0.88 })
+    );
+    post.position.set(0.42, 0.18, -0.38);
+    post.castShadow = true;
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(0.24, 0.12, 0.04),
+      new THREE.MeshStandardMaterial({ color: '#39d8c9', emissive: '#148f85', emissiveIntensity: 0.35, roughness: 0.65 })
+    );
+    sign.position.set(0.42, 0.32, -0.38);
+    sign.rotation.y = 0.25;
+    addInkEdges(sign, 0x263f3d, 0.7);
+    g.add(post, sign);
+
+    this.sceneryGroup.add(g);
+  }
+
+  private buildActWeather(boardW: number, boardH: number, theme: BoardTheme): void {
+    const weatherGroup = new THREE.Group();
+    const spanX = boardW + 3.2;
+    const spanZ = boardH + 2.6;
+
+    if (theme === 'spring') {
+      // 14 Drifting cream dandelion puffs + 3 fluttering 2-wing pastel paper butterflies!
+      const puffGeo = new THREE.OctahedronGeometry(0.06, 0);
+      const puffMat = new THREE.MeshBasicMaterial({
+        color: '#fffdf2',
+        transparent: true,
+        opacity: 0.82,
+      });
+      const puffs: Array<{ mesh: THREE.Mesh; bx: number; by: number; bz: number; speed: number; phase: number }> = [];
+      for (let i = 0; i < 14; i++) {
+        const m = new THREE.Mesh(puffGeo, puffMat);
+        const bx = ((i * 37) % 100) / 100 * spanX - spanX / 2;
+        const bz = ((i * 53) % 100) / 100 * spanZ - spanZ / 2;
+        const by = 1.2 + (i % 5) * 0.55;
+        m.position.set(bx, by, bz);
+        weatherGroup.add(m);
+        puffs.push({ mesh: m, bx, by, bz, speed: 0.35 + (i % 4) * 0.12, phase: i * 1.17 });
+      }
+
+      const bColors = ['#ffe066', '#ffa6c4', '#85e3ff'];
+      const wingGeo = new THREE.CircleGeometry(0.11, 5);
+      const butterflies: Array<{ group: THREE.Group; wingL: THREE.Mesh; wingR: THREE.Mesh; rx: number; rz: number; y: number; phase: number }> = [];
+      for (let i = 0; i < 3; i++) {
+        const bg = new THREE.Group();
+        const wMat = new THREE.MeshBasicMaterial({ color: bColors[i], side: THREE.DoubleSide });
+        const wingL = new THREE.Mesh(wingGeo, wMat);
+        wingL.position.x = -0.07;
+        const wingR = new THREE.Mesh(wingGeo, wMat);
+        wingR.position.x = 0.07;
+        bg.add(wingL, wingR);
+        weatherGroup.add(bg);
+        butterflies.push({
+          group: bg,
+          wingL,
+          wingR,
+          rx: 2.2 + i * 1.1,
+          rz: 2.0 + i * 0.9,
+          y: 1.65 + i * 0.45,
+          phase: i * 2.1,
+        });
+      }
+
+      this.sceneryGroup.add(weatherGroup);
+      this.animatedParts.push({
+        update: (time) => {
+          for (const p of puffs) {
+            const driftX = ((p.bx + time * p.speed + spanX / 2) % spanX) - spanX / 2;
+            p.mesh.position.set(
+              driftX,
+              p.by + Math.sin(time * 1.4 + p.phase) * 0.28,
+              p.bz + Math.cos(time * 0.9 + p.phase) * 0.35
+            );
+            p.mesh.rotation.y = time * 1.5 + p.phase;
+          }
+          for (const b of butterflies) {
+            const ang = time * 0.55 + b.phase;
+            const nx = Math.cos(ang) * b.rx;
+            const nz = Math.sin(ang * 0.85) * b.rz;
+            b.group.position.set(nx, b.y + Math.sin(time * 3.4 + b.phase) * 0.26, nz);
+            b.group.rotation.y = -ang;
+            const flap = Math.sin(time * 16 + b.phase) * 0.85;
+            b.wingL.rotation.y = flap;
+            b.wingR.rotation.y = -flap;
+          }
+        },
+      });
+    } else if (theme === 'greenhouse') {
+      // Shimmering golden pollen + warm gentle greenhouse steam puffs!
+      const pollenGeo = new THREE.OctahedronGeometry(0.05, 0);
+      const pollenMat = new THREE.MeshBasicMaterial({ color: '#ffea80', transparent: true, opacity: 0.85 });
+      const steamGeo = new THREE.SphereGeometry(0.18, 7, 6);
+      const steamMat = new THREE.MeshBasicMaterial({ color: '#fff8e6', transparent: true, opacity: 0.16, depthWrite: false });
+      const specks: Array<{ mesh: THREE.Mesh; bx: number; bz: number; phase: number }> = [];
+      const steams: Array<{ mesh: THREE.Mesh; bx: number; bz: number; phase: number }> = [];
+
+      for (let i = 0; i < 16; i++) {
+        const m = new THREE.Mesh(pollenGeo, pollenMat);
+        const bx = ((i * 41) % 100) / 100 * spanX - spanX / 2;
+        const bz = ((i * 61) % 100) / 100 * spanZ - spanZ / 2;
+        weatherGroup.add(m);
+        specks.push({ mesh: m, bx, bz, phase: i * 0.95 });
+      }
+      for (let i = 0; i < 8; i++) {
+        const s = new THREE.Mesh(steamGeo, steamMat);
+        const bx = ((i * 29) % 100) / 100 * (boardW * 0.85) - boardW * 0.425;
+        const bz = ((i * 47) % 100) / 100 * (boardH * 0.75) - boardH * 0.375;
+        weatherGroup.add(s);
+        steams.push({ mesh: s, bx, bz, phase: i * 1.4 });
+      }
+      this.sceneryGroup.add(weatherGroup);
+      this.animatedParts.push({
+        update: (time) => {
+          for (const sp of specks) {
+            const cyc = (time * 0.38 + sp.phase) % 2.6;
+            sp.mesh.position.set(
+              sp.bx + Math.sin(time * 1.3 + sp.phase) * 0.32,
+              0.7 + cyc * 1.15,
+              sp.bz + Math.cos(time * 1.1 + sp.phase) * 0.32
+            );
+            sp.mesh.rotation.y = time * 2.2;
+          }
+          for (const st of steams) {
+            const cyc = (time * 0.32 + st.phase) % 2.4;
+            st.mesh.position.set(
+              st.bx + Math.sin(time * 0.9 + st.phase) * 0.25,
+              0.35 + cyc * 1.25,
+              st.bz
+            );
+            st.mesh.scale.setScalar(0.65 + cyc * 0.55);
+          }
+        },
+      });
+    } else {
+      // AUTUMN: Tumbling cut-paper crimson/amber maple leaves + warm glowing twilight fireflies!
+      const leafGeo = new THREE.PlaneGeometry(0.18, 0.14);
+      const leafCols = ['#d94726', '#eb8826', '#f2bd33', '#b83228'];
+      const leaves: Array<{ mesh: THREE.Mesh; bx: number; bz: number; speed: number; phase: number }> = [];
+      for (let i = 0; i < 18; i++) {
+        const lm = new THREE.MeshBasicMaterial({
+          color: leafCols[i % leafCols.length],
+          side: THREE.DoubleSide,
+        });
+        const m = new THREE.Mesh(leafGeo, lm);
+        const bx = ((i * 31) % 100) / 100 * spanX - spanX / 2;
+        const bz = ((i * 59) % 100) / 100 * spanZ - spanZ / 2;
+        weatherGroup.add(m);
+        leaves.push({ mesh: m, bx, bz, speed: 0.48 + (i % 4) * 0.1, phase: i * 1.33 });
+      }
+
+      const fireflyGeo = new THREE.SphereGeometry(0.055, 6, 6);
+      const fireflies: Array<{ mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; bx: number; by: number; bz: number; phase: number }> = [];
+      for (let i = 0; i < 10; i++) {
+        const fm = new THREE.MeshBasicMaterial({ color: '#ffea6b', transparent: true, opacity: 0.9 });
+        const m = new THREE.Mesh(fireflyGeo, fm);
+        const bx = ((i * 43) % 100) / 100 * spanX - spanX / 2;
+        const bz = ((i * 67) % 100) / 100 * spanZ - spanZ / 2;
+        const by = 0.8 + (i % 4) * 0.48;
+        weatherGroup.add(m);
+        fireflies.push({ mesh: m, mat: fm, bx, by, bz, phase: i * 1.7 });
+      }
+
+      this.sceneryGroup.add(weatherGroup);
+      this.animatedParts.push({
+        update: (time) => {
+          for (const lf of leaves) {
+            const cyc = (time * lf.speed + lf.phase) % 3.6;
+            const y = 4.2 - cyc * 1.15;
+            lf.mesh.position.set(
+              lf.bx + Math.sin(time * 1.6 + lf.phase) * 0.55,
+              Math.max(0.06, y),
+              lf.bz + Math.cos(time * 1.2 + lf.phase) * 0.35
+            );
+            lf.mesh.rotation.set(time * 2.1 + lf.phase, time * 1.6, Math.sin(time * 2.8 + lf.phase) * 0.8);
+          }
+          for (const ff of fireflies) {
+            ff.mesh.position.set(
+              ff.bx + Math.sin(time * 1.1 + ff.phase) * 0.45,
+              ff.by + Math.cos(time * 1.5 + ff.phase) * 0.28,
+              ff.bz + Math.sin(time * 0.9 + ff.phase) * 0.4
+            );
+            ff.mat.opacity = 0.25 + (0.5 + 0.5 * Math.sin(time * 3.8 + ff.phase)) * 0.72;
+          }
+        },
+      });
+    }
   }
 
   private addCompostSprout(x: number, y: number, z: number, seed: number): void {
@@ -1343,6 +1600,20 @@ export class PaperDioramaWorld {
   }
 
   public update(time: number, dt: number): void {
+    // Paper Mario Pop-Up Storybook Entrance Unfold (~680ms wall-clock, non-blocking)
+    const t = this.getPopUpProgress();
+    if (t < 1) {
+      const ease = 1 - Math.pow(1 - t, 3);
+      const spring = ease + Math.sin(t * Math.PI) * 0.08 * (1 - t);
+      this.boardGroup.position.y = (1 - ease) * -0.28;
+      this.sceneryGroup.scale.set(1, Math.max(0.06, spring), 1);
+      this.coverGroup.scale.set(1, Math.max(0.06, spring), 1);
+    } else if (this.boardGroup.position.y !== 0 || this.sceneryGroup.scale.y !== 1) {
+      this.boardGroup.position.y = 0;
+      this.sceneryGroup.scale.set(1, 1, 1);
+      this.coverGroup.scale.set(1, 1, 1);
+    }
+
     for (const part of this.animatedParts) {
       part.update(time, dt);
     }

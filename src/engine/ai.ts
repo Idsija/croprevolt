@@ -1,4 +1,4 @@
-import { executeAbility, executeAttack, executeDash, executeMove } from './battle';
+import { executeAbility, executeAttack, executeDash, executeMove, scheduleBossTelegraph } from './battle';
 import { forecastAttack } from './combat';
 import { chebyshev, evaluateCover, getNeighbors, isHazardLiquid, manhattan, samePos, tileAt } from './grid';
 import { computeDashOptions, computeMovableTiles } from './pathfinding';
@@ -170,6 +170,11 @@ export function runEnemyUnitTurn(
   const finalAttack = bestAttack ?? evaluateBestAttackFromPos(state, enemy, enemy.pos);
   if (finalAttack) {
     executeAttack(state, enemy.id, finalAttack.targetPos, rng);
+  }
+
+  // 5. Act Boss Telegraphed Super-Attack (1-turn red warning pattern for next Farmer Phase!)
+  if (state.status === 'ongoing' && enemy.alive && enemy.isBoss) {
+    scheduleBossTelegraph(state, enemy);
   }
 
   return true;

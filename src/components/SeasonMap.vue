@@ -28,6 +28,7 @@ const hoveredNodeId = ref<string | null>(null);
 const showBuildModal = ref(false);
 const buildModalHeroUid = ref<string | null>(null);
 const showRelicsPopover = ref(false);
+const isTraveling = ref(false);
 
 let mapRenderer: OverworldMapRenderer | null = null;
 
@@ -122,18 +123,32 @@ function syncRenderer(): void {
   });
 }
 
+async function travelAndEnterNode(nodeId: string): Promise<void> {
+  if (isTraveling.value || !availableIds.value.has(nodeId)) return;
+  isTraveling.value = true;
+  try {
+    if (mapRenderer && !webglFailed.value) {
+      await mapRenderer.hopLeaderToNode(nodeId);
+    }
+  } finally {
+    isTraveling.value = false;
+  }
+  enterSeasonNode(nodeId);
+}
+
 function selectStop(nodeId: string, enterIfReady = false): void {
+  if (isTraveling.value) return;
   selectedNodeId.value = nodeId;
   mapRenderer?.focusNode(nodeId);
   syncRenderer();
   if (enterIfReady && availableIds.value.has(nodeId)) {
-    enterSeasonNode(nodeId);
+    void travelAndEnterNode(nodeId);
   }
 }
 
 function enterSelectedStop(): void {
-  if (!selectedNode.value || !isSelectedAvailable.value) return;
-  enterSeasonNode(selectedNode.value.id);
+  if (!selectedNode.value || !isSelectedAvailable.value || isTraveling.value) return;
+  void travelAndEnterNode(selectedNode.value.id);
 }
 
 function openHeroBuilds(uid?: string): void {
@@ -322,9 +337,10 @@ onBeforeUnmount(() => {
           <button
             v-if="isSelectedAvailable"
             class="paper-btn primary stop-go-btn"
+            :disabled="isTraveling"
             @click="enterSelectedStop"
           >
-            <span>Go →</span>
+            <span>{{ isTraveling ? 'Hopping...' : 'Go →' }}</span>
           </button>
           <span v-else-if="isSelectedCompleted" class="paper-pill stop-state done">
             ✓ Cleared

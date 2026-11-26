@@ -49,6 +49,49 @@ export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   tractor: 'left',
 };
 
+export type SpriteVariantKind = 'base' | 'hit' | 'lowhp' | 'enraged';
+
+/**
+ * Explicit registry of hand-crafted transparent variant PNGs in /sprites/.
+ * Prevents any 404 requests for units that rely on procedural 3D paper-craft overlays.
+ */
+export const AVAILABLE_VARIANT_SPRITES = new Set<string>([
+  'cow_hit',
+  'cow_lowhp',
+  'lettuce_hit',
+  'lettuce_lowhp',
+  'pea_hit',
+  'pea_lowhp',
+  'lemon_hit',
+  'lemon_lowhp',
+  'digger_hit',
+  'trimmer_hit',
+  'scarecrow_enraged',
+  'tractor_enraged',
+  'harvester_enraged',
+]);
+
+export function hasVariantSprite(
+  visualKind: string,
+  variant: Exclude<SpriteVariantKind, 'base'>
+): boolean {
+  return AVAILABLE_VARIANT_SPRITES.has(`${visualKind}_${variant}`);
+}
+
+export function resolveVariantSpriteKey(
+  visualKind: string,
+  variant: SpriteVariantKind
+): string {
+  if (variant !== 'base') {
+    const candidate = `${visualKind}_${variant}`;
+    if (AVAILABLE_VARIANT_SPRITES.has(candidate)) {
+      return candidate;
+    }
+  }
+  return visualKind;
+}
+
+
 function makeCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement('canvas');
   canvas.width = w;
@@ -352,6 +395,8 @@ export class CraftTextureLibrary {
       base = checker ? '#b83214' : '#a4280e';
     } else if (terrain === 'ramp') {
       base = checker ? '#bd8f56' : '#b2834b';
+    } else if (terrain === 'burrow') {
+      base = checker ? '#8a623c' : '#7f5834';
     }
 
     ctx.fillStyle = base;
@@ -583,6 +628,26 @@ export class CraftTextureLibrary {
       ctx.lineTo(s * 0.5, s * 0.38);
       ctx.lineTo(s * 0.68, s * 0.62);
       ctx.stroke();
+    } else if (terrain === 'burrow') {
+      // Cozy ringed gopher burrow dirt mound with deep dark tunnel & glowing teal warp ring!
+      const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 16, s * 0.5, s * 0.5, s * 0.46);
+      g.addColorStop(0, '#1e1208');
+      g.addColorStop(0.55, '#3b2412');
+      g.addColorStop(0.75, '#a06e3f');
+      g.addColorStop(1, 'rgba(138, 98, 60, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(s * 0.5, s * 0.5, s * 0.46, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Painted glowing teal portal halo so warp pipe pairs stand out immediately!
+      ctx.strokeStyle = 'rgba(56, 228, 212, 0.88)';
+      ctx.lineWidth = 7;
+      ctx.setLineDash([18, 10]);
+      ctx.beginPath();
+      ctx.arc(s * 0.5, s * 0.5, s * 0.34, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     // Crisp warm hand-inked paper tile bevel border
@@ -964,6 +1029,19 @@ export class CraftTextureLibrary {
   }
 }
 
+export interface StandeeStatusOverlay {
+  burn: THREE.Group;
+  rooted: THREE.Group;
+  acid: THREE.Group;
+  feared: THREE.Group;
+  shield: THREE.Group;
+  boosted: THREE.Group;
+  overwatch: THREE.Group;
+  lowHp: THREE.Group;
+  bandAid: THREE.Group;
+  enragedAura: THREE.Group;
+}
+
 export interface PaperStandeeRig {
   root: THREE.Group;
   flipGroup: THREE.Group;
@@ -974,7 +1052,12 @@ export interface PaperStandeeRig {
   ringMesh: THREE.Mesh;
   ringMat: THREE.MeshBasicMaterial;
   baseMat: THREE.MeshStandardMaterial;
+  promoTrimMesh: THREE.Mesh;
+  promoTrimMat: THREE.MeshStandardMaterial;
+  statusOverlay: StandeeStatusOverlay;
   height: number;
+  currentSpriteKey: string;
+  setSpriteKey: (spriteKey: string) => void;
   currentFlipYaw: number;
   targetFlipYaw: number;
   dispose: () => void;
@@ -983,8 +1066,9 @@ export interface PaperStandeeRig {
 /**
  * Builds a genuine Paper Mario 3D thick cardstock standee:
  * - Front watercolor sprite plane + 3 inner kraft-cardstock thickness slices + mirrored back plane
- * - Exact silhouette cast shadows via customDepthMaterial (alphaTest)
- * - Slotted wooden/cardboard pedestal base with team-tinted rim & animated selection ring
+ * - Dynamic variant sprite swapper (_hit / _lowhp / _enraged) with zero texture leaks
+ * - Universal 3D paper-craft status effect overlays (Burn, Rooted, Acid, Feared, Shield, Boosted, Overwatch, Low-HP, Boss Phase 2 Aura)
+ * - Slotted wooden/cardboard pedestal base with Promotion Tier trim (Ripe Bronze / Heirloom Gold) & animated selection ring
  */
 export function createPaperStandeeRig(
   visualKind: string,
@@ -1018,6 +1102,21 @@ export function createPaperStandeeRig(
   baseMesh.castShadow = true;
   baseMesh.receiveShadow = true;
   root.add(baseMesh);
+
+  // Promotion Tier Pedestal Collar Ring (hidden for seedling; Bronze for ripe; shimmering Gold for heirloom!)
+  const promoTrimGeo = new THREE.TorusGeometry(baseRadius * 0.97, 0.032, 8, 28);
+  promoTrimGeo.rotateX(Math.PI / 2);
+  const promoTrimMat = new THREE.MeshStandardMaterial({
+    color: '#e5b242',
+    emissive: '#8f5d00',
+    emissiveIntensity: 0.2,
+    roughness: 0.35,
+    metalness: 0.62,
+  });
+  const promoTrimMesh = new THREE.Mesh(promoTrimGeo, promoTrimMat);
+  promoTrimMesh.position.y = baseHeight * 0.72;
+  promoTrimMesh.visible = false;
+  root.add(promoTrimMesh);
 
   // Inner cream craft-paper disc top
   const innerDiscGeo = new THREE.CylinderGeometry(baseRadius * 0.8, baseRadius * 0.8, 0.018, 24);
@@ -1125,9 +1224,216 @@ export function createPaperStandeeRig(
 
   flipGroup.add(cardStack);
 
+  // ===== Universal 3D Paper-Craft Status & State Overlays =====
+  const statusRoot = new THREE.Group();
+  tiltGroup.add(statusRoot);
+  const ownedGeos: THREE.BufferGeometry[] = [];
+  const ownedMats: THREE.Material[] = [];
+  const trackGeo = <T extends THREE.BufferGeometry>(g: T): T => {
+    ownedGeos.push(g);
+    return g;
+  };
+  const trackMat = <T extends THREE.Material>(m: T): T => {
+    ownedMats.push(m);
+    return m;
+  };
+
+  // 1. BURN: 3 flickering cut-paper orange/gold flame cones around feet
+  const burn = new THREE.Group();
+  burn.visible = false;
+  const flameOuterMat = trackMat(
+    new THREE.MeshBasicMaterial({ color: '#ff5d1a', side: THREE.DoubleSide })
+  );
+  const flameInnerMat = trackMat(
+    new THREE.MeshBasicMaterial({ color: '#ffe14d', side: THREE.DoubleSide })
+  );
+  const flameGeo = trackGeo(new THREE.ConeGeometry(0.11, 0.34, 4));
+  const flameInnerGeo = trackGeo(new THREE.ConeGeometry(0.06, 0.21, 4));
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.4;
+    const fg = new THREE.Group();
+    fg.position.set(Math.cos(a) * (baseRadius * 0.82), baseHeight + 0.16, Math.sin(a) * (baseRadius * 0.55) + 0.08);
+    const outer = new THREE.Mesh(flameGeo, flameOuterMat);
+    const inner = new THREE.Mesh(flameInnerGeo, flameInnerMat);
+    inner.position.set(0, -0.04, 0.03);
+    fg.add(outer, inner);
+    burn.add(fg);
+  }
+  statusRoot.add(burn);
+
+  // 2. ROOTED: Coiled dark-green cardstock vines + tiny leaves hugging ankles
+  const rooted = new THREE.Group();
+  rooted.visible = false;
+  const vineMat = trackMat(new THREE.MeshStandardMaterial({ color: '#397d28', roughness: 0.85 }));
+  const vineLeafMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: '#78cf48', roughness: 0.8, side: THREE.DoubleSide })
+  );
+  const vineRingGeo = trackGeo(new THREE.TorusGeometry(baseRadius * 0.92, 0.04, 6, 18));
+  const leafGeo = trackGeo(new THREE.CircleGeometry(0.075, 5));
+  for (let i = 0; i < 2; i++) {
+    const coil = new THREE.Mesh(vineRingGeo, vineMat);
+    coil.rotation.x = Math.PI / 2 + (i === 0 ? 0.18 : -0.16);
+    coil.position.y = baseHeight + 0.14 + i * 0.16;
+    rooted.add(coil);
+  }
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const lf = new THREE.Mesh(leafGeo, vineLeafMat);
+    lf.position.set(Math.cos(a) * (baseRadius * 0.96), baseHeight + 0.22 + (i % 2) * 0.12, Math.sin(a) * (baseRadius * 0.72) + 0.08);
+    lf.rotation.set(0.3, a, 0.4);
+    rooted.add(lf);
+  }
+  statusRoot.add(rooted);
+
+  // 3. ACID: 3 rising neon-lime bubbles
+  const acid = new THREE.Group();
+  acid.visible = false;
+  const acidMat = trackMat(
+    new THREE.MeshBasicMaterial({ color: '#c4f224', transparent: true, opacity: 0.88 })
+  );
+  const bubbleGeo = trackGeo(new THREE.SphereGeometry(0.085, 8, 6));
+  for (let i = 0; i < 3; i++) {
+    const b = new THREE.Mesh(bubbleGeo, acidMat);
+    b.position.set((i - 1) * 0.24, baseHeight + 0.35 + i * 0.18, 0.14);
+    acid.add(b);
+  }
+  statusRoot.add(acid);
+
+  // 4. FEARED: Floating purple-rimmed comic "!" exclamation badge
+  const feared = new THREE.Group();
+  feared.visible = false;
+  const fearBgMat = trackMat(new THREE.MeshBasicMaterial({ color: '#9c4ed9' }));
+  const fearInkMat = trackMat(new THREE.MeshBasicMaterial({ color: '#fff9e6' }));
+  const fearBar = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.075, 0.24, 0.04)), fearInkMat);
+  fearBar.position.set(0, height + 0.36, 0.06);
+  const fearDot = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.075, 0.075, 0.04)), fearInkMat);
+  fearDot.position.set(0, height + 0.18, 0.06);
+  const fearBack = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.18, 0.18, 0.025, 12)), fearBgMat);
+  fearBack.rotation.x = Math.PI / 2;
+  fearBack.position.set(0, height + 0.28, 0.03);
+  feared.add(fearBack, fearBar, fearDot);
+  statusRoot.add(feared);
+
+  // 5. SHIELD: Translucent sky-blue origami buckler floating beside unit
+  const shield = new THREE.Group();
+  shield.visible = false;
+  const shieldMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: '#4fc3f7',
+      emissive: '#1e88e5',
+      emissiveIntensity: 0.35,
+      transparent: true,
+      opacity: 0.62,
+      roughness: 0.25,
+      side: THREE.DoubleSide,
+    })
+  );
+  const shieldMesh = new THREE.Mesh(trackGeo(new THREE.OctahedronGeometry(0.24, 0)), shieldMat);
+  shieldMesh.scale.set(0.9, 1.15, 0.38);
+  shieldMesh.position.set(baseRadius * 0.92, baseHeight + height * 0.45, 0.24);
+  shield.add(shieldMesh);
+  statusRoot.add(shield);
+
+  // 6. BOOSTED: Spinning 3-star golden Paper Mario crown above head
+  const boosted = new THREE.Group();
+  boosted.visible = false;
+  boosted.position.y = baseHeight + height * 0.98;
+  const starMat = trackMat(
+    new THREE.MeshBasicMaterial({ color: '#ffd845' })
+  );
+  const starGeo = trackGeo(new THREE.OctahedronGeometry(0.085, 0));
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    const st = new THREE.Mesh(starGeo, starMat);
+    st.position.set(Math.cos(a) * 0.34, 0, Math.sin(a) * 0.22);
+    boosted.add(st);
+  }
+  statusRoot.add(boosted);
+
+  // 7. OVERWATCH: Crisp golden spinning reticle beside the standee!
+  const overwatch = new THREE.Group();
+  overwatch.visible = false;
+  overwatch.position.set(-baseRadius * 0.95, baseHeight + height * 0.64, 0.22);
+  const owMat = trackMat(new THREE.MeshBasicMaterial({ color: '#ffcb33', side: THREE.DoubleSide }));
+  const owRing = new THREE.Mesh(trackGeo(new THREE.RingGeometry(0.14, 0.19, 18)), owMat);
+  const owH = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.42, 0.035, 0.02)), owMat);
+  const owV = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.035, 0.42, 0.02)), owMat);
+  overwatch.add(owRing, owH, owV);
+  statusRoot.add(overwatch);
+
+  // 8. LOW-HP: 2 animated comic cyan sweat droplets + toggleable 3D paper Band-Aid!
+  const lowHp = new THREE.Group();
+  lowHp.visible = false;
+  const sweatMat = trackMat(new THREE.MeshBasicMaterial({ color: '#64d8ff' }));
+  const sweatGeo = trackGeo(new THREE.ConeGeometry(0.048, 0.14, 6));
+  for (let i = 0; i < 2; i++) {
+    const drop = new THREE.Mesh(sweatGeo, sweatMat);
+    drop.position.set(i === 0 ? baseRadius * 0.72 : -baseRadius * 0.68, baseHeight + height * 0.78 + i * 0.08, 0.14);
+    drop.rotation.z = i === 0 ? -0.35 : 0.35;
+    lowHp.add(drop);
+  }
+  const bandAid = new THREE.Group();
+  bandAid.position.set(baseRadius * 0.36, baseHeight + height * 0.7, 0.08);
+  bandAid.rotation.z = -0.35;
+  const baMat = trackMat(new THREE.MeshBasicMaterial({ color: '#f3d0a0' }));
+  const baPadMat = trackMat(new THREE.MeshBasicMaterial({ color: '#fff8ea' }));
+  const baStrip1 = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.24, 0.08, 0.02)), baMat);
+  const baStrip2 = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.08, 0.24, 0.02)), baMat);
+  const baCenter = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.09, 0.09, 0.024)), baPadMat);
+  bandAid.add(baStrip1, baStrip2, baCenter);
+  lowHp.add(bandAid);
+  statusRoot.add(lowHp);
+
+  // 9. BOSS PHASE-2 ENRAGED AURA: Jagged crimson-gold flames pulsing around boss pedestal!
+  const enragedAura = new THREE.Group();
+  enragedAura.visible = false;
+  const enrRingMat = trackMat(
+    new THREE.MeshBasicMaterial({
+      color: '#ff3b1f',
+      transparent: true,
+      opacity: 0.78,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  const enrRing = new THREE.Mesh(
+    trackGeo(new THREE.RingGeometry(baseRadius * 1.15, baseRadius * 1.52, 16)),
+    enrRingMat
+  );
+  enrRing.rotation.x = -Math.PI / 2;
+  enrRing.position.y = 0.04;
+  enragedAura.add(enrRing);
+  const enrSpikeMat = trackMat(new THREE.MeshBasicMaterial({ color: '#ff7024' }));
+  const enrSpikeGeo = trackGeo(new THREE.ConeGeometry(0.09, 0.42, 4));
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const sp = new THREE.Mesh(enrSpikeGeo, enrSpikeMat);
+    sp.position.set(Math.cos(a) * (baseRadius * 1.25), 0.24, Math.sin(a) * (baseRadius * 1.25));
+    enragedAura.add(sp);
+  }
+  root.add(enragedAura);
+
+  let currentSpriteKey = visualKind;
+  const setSpriteKey = (spriteKey: string) => {
+    if (spriteKey === currentSpriteKey) return;
+    currentSpriteKey = spriteKey;
+    const pair = textures.getSpriteTexturePair(spriteKey, applyAspect);
+    frontMat.map = pair.front;
+    backMat.map = pair.back;
+    coreMat.map = pair.front;
+    depthMat.map = pair.front;
+    frontMat.needsUpdate = true;
+    backMat.needsUpdate = true;
+    coreMat.needsUpdate = true;
+    depthMat.needsUpdate = true;
+    applyAspect(pair.aspect);
+  };
+
   const dispose = () => {
     baseGeo.dispose();
     baseMat.dispose();
+    promoTrimGeo.dispose();
+    promoTrimMat.dispose();
     innerDiscGeo.dispose();
     innerDiscMat.dispose();
     slotGeo.dispose();
@@ -1139,6 +1445,8 @@ export function createPaperStandeeRig(
     backMat.dispose();
     coreMat.dispose();
     depthMat.dispose();
+    for (const g of ownedGeos) g.dispose();
+    for (const m of ownedMats) m.dispose();
   };
 
   return {
@@ -1151,9 +1459,28 @@ export function createPaperStandeeRig(
     ringMesh,
     ringMat,
     baseMat,
+    promoTrimMesh,
+    promoTrimMat,
+    statusOverlay: {
+      burn,
+      rooted,
+      acid,
+      feared,
+      shield,
+      boosted,
+      overwatch,
+      lowHp,
+      bandAid,
+      enragedAura,
+    },
     height,
+    get currentSpriteKey() {
+      return currentSpriteKey;
+    },
+    setSpriteKey,
     currentFlipYaw: 0,
     targetFlipYaw: 0,
     dispose,
   };
 }
+

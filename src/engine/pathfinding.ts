@@ -26,7 +26,20 @@ export interface ReachableNode {
 }
 
 /**
- * Computes all tiles a unit can traverse/stop on using Dijkstra over terrain + elevation move costs.
+ * Returns the paired exit tile for a Gopher Burrow Warp Pipe, if any.
+ */
+export function getLinkedBurrowDest(state: BattleState, pos: GridPos): GridPos | null {
+  if (!state.burrowPairs) return null;
+  for (const [a, b] of state.burrowPairs) {
+    if (samePos(a, pos)) return b;
+    if (samePos(b, pos)) return a;
+  }
+  return null;
+}
+
+/**
+ * Computes all tiles a unit can traverse/stop on using Dijkstra over terrain + elevation move costs,
+ * including Gopher Burrow Warp Pipes (1 Move cost to warp across elevation/rivers!).
  * Allies can be passed through; enemies, cover, water/lava, and sheer 2-level cliffs block walking.
  */
 export function computeReachableMap(state: BattleState, unit: BattleUnit): Map<string, ReachableNode> {
@@ -53,6 +66,7 @@ export function computeReachableMap(state: BattleState, unit: BattleUnit): Map<s
     const currentTile = tileAt(state, current.pos);
     if (!currentTile) continue;
 
+    // 1. Standard orthogonal steps
     for (const nextPos of getNeighbors(state, current.pos)) {
       if (!isTileWalkable(state, nextPos, unit.team, false)) continue;
       const t = tileAt(state, nextPos)!;
@@ -71,6 +85,27 @@ export function computeReachableMap(state: BattleState, unit: BattleUnit): Map<s
         };
         result.set(key, node);
         queue.push(node);
+      }
+    }
+
+    // 2. Gopher Burrow Warp Pipe! (Mario + Rabbids pipe teleport across map/cliffs for 1 Move)
+    if (currentTile.terrain === 'burrow') {
+      const warpDest = getLinkedBurrowDest(state, current.pos);
+      if (warpDest && isTileWalkable(state, warpDest, unit.team, false)) {
+        const nextCost = current.cost + 1;
+        if (nextCost <= maxMove) {
+          const key = posKey(warpDest);
+          const existing = result.get(key);
+          if (!existing || nextCost < existing.cost) {
+            const node: ReachableNode = {
+              pos: warpDest,
+              cost: nextCost,
+              path: [...current.path, warpDest],
+            };
+            result.set(key, node);
+            queue.push(node);
+          }
+        }
       }
     }
   }

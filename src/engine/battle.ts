@@ -44,6 +44,7 @@ import type {
   GridPos,
   MapTemplate,
   RosterHero,
+  StatusKind,
   Tile,
 } from './types';
 
@@ -68,6 +69,7 @@ function mirrorTemplate(map: MapTemplate): MapTemplate {
     enemySpawns: map.enemySpawns.map((e) => ({ ...e, x: fx(e.x) })),
     gateTiles: map.gateTiles?.map(flip),
     cagePos: map.cagePos ? flip(map.cagePos) : undefined,
+    burrowPairs: map.burrowPairs?.map(([a, b]) => [flip(a), flip(b)]),
   };
 }
 
@@ -328,6 +330,11 @@ export function createBattleFromMap(
     relicIds: [...relicIds],
     items: { ...items },
     gateTiles: map.gateTiles ? map.gateTiles.map((g) => ({ ...g })) : [],
+    burrowPairs: map.burrowPairs
+      ? map.burrowPairs.map(([a, b]) => [{ ...a }, { ...b }])
+      : [],
+    bossPhase: 1,
+    bossTelegraphs: [],
     rescuedHeroUids: [],
     rescuedNewBlueprintIds: [],
     combatLog: [`Battle started: ${map.name} — ${map.objectiveLabel}`],
@@ -419,7 +426,157 @@ function checkBattleEnd(state: BattleState): void {
     state.status = 'victory';
     state.pendingEvents.push({ type: 'banner', text: 'PATCH DEFENDED! VICTORY!', tone: 'victory' });
     pushLog(state, 'All farmers routed from the garden!');
+    return;
   }
+
+  checkBossPhase2(state);
+}
+
+/**
+ * Triggers a Boss's dramatic Phase 2 Enraged transformation at <= 50% HP!
+ */
+export function checkBossPhase2(state: BattleState): void {
+  if (state.status !== 'ongoing' || (state.bossPhase ?? 1) >= 2) return;
+  const boss = state.units.find((u) => u.isBoss && u.alive);
+  if (!boss) return;
+  if (boss.hp <= Math.ceil(boss.maxHp * 0.5)) {
+    state.bossPhase = 2;
+    applyStatusToUnit(boss, 'shield', 1);
+    applyStatusToUnit(boss, 'boosted', 2);
+    state.pendingEvents.push({
+      type: 'boss_phase',
+      bossId: boss.id,
+      bossName: boss.name,
+      phase: 2,
+      pos: { ...boss.pos },
+    });
+    state.pendingEvents.push({
+      type: 'banner',
+      text: `${boss.name.toUpperCase()} — PHASE 2 ENRAGED!`,
+      tone: 'enemy',
+    });
+    pushLog(state, `PHASE 2! ${boss.name} entered an enraged frenzy (Shield + Boosted)!`);
+  }
+}
+
+/**
+ * Locks a 1-turn Red Warning Telegraph pattern onto the board for an Act Boss's signature super-attack!
+ */
+export function scheduleBossTelegraph(state: BattleState, boss: BattleUnit): void {
+  if (state.status !== 'ongoing' || !boss.alive || !boss.isBoss) return;
+  const players = state.units.filter((u) => u.team === 'player' && u.alive);
+  if (players.length === 0) return;
+
+  const isPhase2 = (state.bossPhase ?? 1) >= 2;
+  const tiles: GridPos[] = [];
+  const seen = new Set<string>();
+  const addTile = (p: GridPos) => {
+    if (!inBounds(state, p)) return;
+    const k = posKey(p);
+    if (!seen.has(k)) {
+      seen.add(k);
+      tiles.push({ ...p });
+    }
+  };
+
+  let name = 'Crow Storm';
+  let damage = isPhase2 ? 5 : 4;
+  let status: StatusKind | undefined = 'feared';
+
+  if (boss.visualKind === 'tractor') {
+    name = isPhase2 ? 'Overdrive Plow' : 'Harvester Charge';
+    damage = isPhase2 ? 6 : 5;
+    status = 'burn';
+    // Target the closest hero's column with a deadly south-plowing lane
+    const anchor = [...players].sort((a, b) => manhattan(boss.pos, a.pos) - manhattan(boss.pos, b.pos))[0];
+    const cols = isPhase2 ? [anchor.pos.x, Math.min(state.width - 1, anchor.pos.x + 1)] : [anchor.pos.x];
+    for (const cx of cols) {
+      for (let dy = -1; dy <= 2; dy++) {
+        addTile({ x: cx, y: anchor.pos.y + dy });
+      }
+    }
+  } else if (boss.visualKind === 'harvester') {
+    name = isPhase2 ? 'Crimson Bramble Surge' : 'Bramble Barrage';
+    damage = isPhase2 ? 5 : 4;
+    status = 'rooted';
+    const picks = players.slice(0, isPhase2 ? 2 : 1);
+    for (const h of picks) {
+      addTile(h.pos);
+      for (const n of getNeighbors(state, h.pos)) addTile(n);
+    }
+  } else {
+    // Captain Scarecrow: Crow Storm cross (Phase 1) or full 3x3 (Phase 2)!
+    name = isPhase2 ? 'Blazing Crow Storm' : 'Crow Storm';
+    damage = isPhase2 ? 5 : 4;
+    status = 'feared';
+    const anchor = [...players].sort((a, b) => {
+      const ca = players.filter((o) => chebyshev(a.pos, o.pos) <= 1).length;
+      const cb = players.filter((o) => chebyshev(b.pos, o.pos) <= 1).length;
+      return cb - ca;
+    })[0];
+    if (isPhase2) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          addTile({ x: anchor.pos.x + dx, y: anchor.pos.y + dy });
+        }
+      }
+    } else {
+      addTile(anchor.pos);
+      for (const n of getNeighbors(state, anchor.pos)) addTile(n);
+    }
+  }
+
+  if (tiles.length === 0) return;
+  state.bossTelegraphs = [
+    ...(state.bossTelegraphs ?? []).filter((t) => t.bossId !== boss.id),
+    { bossId: boss.id, name, tiles, damage, status },
+  ];
+  pushLog(state, `WARNING! ${boss.name} is telegraphing ${name} (${damage} DMG) — dodge the red tiles!`);
+}
+
+/**
+ * Detonates any pending Boss Telegraphs at the start of Enemy Phase!
+ */
+export function resolveBossTelegraphs(state: BattleState): void {
+  const pending = state.bossTelegraphs ?? [];
+  if (pending.length === 0) return;
+  state.bossTelegraphs = [];
+
+  for (const tel of pending) {
+    const boss = getUnitById(state, tel.bossId);
+    if (!boss || !boss.alive) continue;
+
+    const hitIds: string[] = [];
+    for (const p of tel.tiles) {
+      const victim = unitAt(state, p);
+      if (victim && victim.alive && victim.team === 'player') {
+        let dmg = tel.damage;
+        if (hasStatus(victim, 'shield')) dmg = Math.max(1, dmg - 2);
+        victim.hp -= dmg;
+        if (tel.status && victim.hp > 0) {
+          applyStatusToUnit(victim, tel.status, 1);
+        }
+        hitIds.push(victim.id);
+        handleUnitKO(state, victim);
+      }
+    }
+
+    state.pendingEvents.push({
+      type: 'boss_telegraph_strike',
+      bossId: boss.id,
+      name: tel.name,
+      tiles: tel.tiles.map((t) => ({ ...t })),
+      hitIds,
+      damage: tel.damage,
+    });
+    pushLog(
+      state,
+      hitIds.length > 0
+        ? `${boss.name}'s ${tel.name} struck ${hitIds.length} hero(es) for ${tel.damage} DMG!`
+        : `${boss.name}'s ${tel.name} slammed empty ground — clean dodge!`
+    );
+  }
+  checkBattleEnd(state);
 }
 
 function handleUnitKO(state: BattleState, unit: BattleUnit): void {
@@ -817,6 +974,20 @@ export function executeMove(state: BattleState, unitId: string, dest: GridPos): 
     unitId: unit.id,
     path: node.path.map((p) => ({ ...p })),
   });
+
+  // Detect Gopher Burrow Warp Pipe hop in path!
+  for (let i = 0; i < node.path.length - 1; i++) {
+    if (manhattan(node.path[i], node.path[i + 1]) > 1) {
+      state.pendingEvents.push({
+        type: 'burrow_warp',
+        unitId: unit.id,
+        from: { ...node.path[i] },
+        to: { ...node.path[i + 1] },
+      });
+      pushLog(state, `${unit.name} zipped through a Gopher Burrow!`);
+      break;
+    }
+  }
 
   triggerOverwatchInterrupts(state, unit);
   checkBattleEnd(state);
@@ -1462,6 +1633,8 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
       text: 'FARMER PHASE',
       tone: 'enemy',
     });
+    resolveBossTelegraphs(state);
+    if (state.status !== 'ongoing') return;
   }
 
   for (const unit of state.units) {

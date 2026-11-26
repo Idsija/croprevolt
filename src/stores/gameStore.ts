@@ -65,6 +65,18 @@ import type { RendererKind } from '../renderer3d/types';
 const VIEW_MODE_KEY = 'crop_revolt_view_v2';
 const AUTO_END_KEY = 'crop_revolt_auto_end_v1';
 const RENDERER_KIND_KEY = 'crop_revolt_renderer_v1';
+const ENEMY_SPEED_KEY = 'crop_revolt_enemy_speed_v1';
+
+function loadEnemySpeedFast(): boolean {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem(ENEMY_SPEED_KEY) === '2';
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
 
 function loadInitialRendererKind(): RendererKind {
   try {
@@ -120,6 +132,7 @@ export interface GameStoreState {
   selectedUnitId: string | null;
   inspectedEnemyId: string | null;
   showAllDangerZone: boolean;
+  previewOverwatch: boolean;
   mode: InteractionMode;
   selectedItemId: string | null;
   hoveredTile: GridPos | null;
@@ -130,6 +143,7 @@ export interface GameStoreState {
   autoEndTurnEnabled: boolean;
   autoEndPending: boolean;
   enemyTurnRunning: boolean;
+  enemySpeedFast: boolean;
   muted: boolean;
   eventQueueVersion: number;
 }
@@ -148,6 +162,7 @@ export const gameStore = reactive<GameStoreState>({
   selectedUnitId: null,
   inspectedEnemyId: null,
   showAllDangerZone: false,
+  previewOverwatch: false,
   mode: 'move',
   selectedItemId: null,
   hoveredTile: null,
@@ -158,6 +173,7 @@ export const gameStore = reactive<GameStoreState>({
   autoEndTurnEnabled: loadAutoEndPref(),
   autoEndPending: false,
   enemyTurnRunning: false,
+  enemySpeedFast: loadEnemySpeedFast(),
   muted: sfx.isMuted(),
   eventQueueVersion: 0,
 });
@@ -255,6 +271,24 @@ export function toggleAllDangerZone(): boolean {
   sfx.click();
   gameStore.showAllDangerZone = !gameStore.showAllDangerZone;
   return gameStore.showAllDangerZone;
+}
+
+export function setPreviewOverwatch(on: boolean): void {
+  if (gameStore.previewOverwatch === on) return;
+  gameStore.previewOverwatch = on;
+}
+
+export function toggleEnemySpeed(): boolean {
+  sfx.click();
+  gameStore.enemySpeedFast = !gameStore.enemySpeedFast;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(ENEMY_SPEED_KEY, gameStore.enemySpeedFast ? '2' : '1');
+    }
+  } catch {
+    // ignore
+  }
+  return gameStore.enemySpeedFast;
 }
 
 export function toggleInspectEnemy(enemyId: string): void {
@@ -422,6 +456,7 @@ export function enterSeasonNode(nodeId: string): void {
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
   gameStore.showAllDangerZone = false;
+  gameStore.previewOverwatch = false;
   gameStore.enemyTurnRunning = false;
   const firstHero = battle.units.find((u) => u.team === 'player' && u.alive);
   gameStore.selectedUnitId = firstHero?.id ?? null;
@@ -444,6 +479,7 @@ export function deselectAll(playClick = false): void {
   gameStore.selectedUnitId = null;
   gameStore.inspectedEnemyId = null;
   gameStore.previewTile = null;
+  gameStore.previewOverwatch = false;
   gameStore.selectedItemId = null;
   gameStore.mode = 'move';
 }
@@ -456,6 +492,7 @@ export function clearFocusOnTabAway(): void {
   clearAutoEndTimer();
   gameStore.hoveredTile = null;
   gameStore.previewTile = null;
+  gameStore.previewOverwatch = false;
   gameStore.inspectedEnemyId = null;
   gameStore.selectedUnitId = null;
   gameStore.selectedItemId = null;
@@ -483,6 +520,7 @@ export function selectBattleUnit(unitId: string, focusCamera = true, allowToggle
   gameStore.selectedUnitId = u.id;
   gameStore.inspectedEnemyId = null;
   gameStore.previewTile = null;
+  gameStore.previewOverwatch = false;
   gameStore.selectedItemId = null;
   // Always start in default unified mode — never auto-switch into Skill/Ability!
   gameStore.mode = 'move';
@@ -544,6 +582,7 @@ export function triggerOverwatch(): boolean {
   if (!selected || !selected.alive || selected.actions.hasAttacked) return false;
 
   clearAutoEndTimer();
+  gameStore.previewOverwatch = false;
   const ok = executeOverwatch(b, selected.id);
   if (ok) {
     sfx.rescue();
@@ -1003,6 +1042,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function enemyPhaseSleep(ms: number): Promise<void> {
+  return sleep(gameStore.enemySpeedFast ? Math.max(80, Math.round(ms * 0.45)) : ms);
+}
+
 export async function endPlayerTurn(): Promise<void> {
   const b = gameStore.battle;
   if (!b || b.status !== 'ongoing' || b.phase !== 'player' || gameStore.enemyTurnRunning) return;
@@ -1014,6 +1057,7 @@ export async function endPlayerTurn(): Promise<void> {
   gameStore.enemyTurnRunning = true;
   gameStore.hoveredTile = null;
   gameStore.previewTile = null;
+  gameStore.previewOverwatch = false;
   gameStore.inspectedEnemyId = null;
   gameStore.mode = 'move';
   gameStore.selectedItemId = null;
@@ -1025,7 +1069,7 @@ export async function endPlayerTurn(): Promise<void> {
     return;
   }
 
-  await sleep(850);
+  await enemyPhaseSleep(850);
   if (session !== battleSessionId || !gameStore.battle) {
     gameStore.enemyTurnRunning = false;
     return;
@@ -1044,15 +1088,15 @@ export async function endPlayerTurn(): Promise<void> {
       // Split movement/dash from attacks/abilities so players can read every farmer's beat clearly!
       const allEvents = gameStore.battle.pendingEvents.splice(0);
       const moveEvents = allEvents.filter(
-        (ev) => ev.type === 'move' || ev.type === 'dash' || ev.type === 'jump'
+        (ev) => ev.type === 'move' || ev.type === 'dash' || ev.type === 'jump' || ev.type === 'burrow_warp'
       );
       const combatEvents = allEvents.filter(
-        (ev) => ev.type !== 'move' && ev.type !== 'dash' && ev.type !== 'jump'
+        (ev) => ev.type !== 'move' && ev.type !== 'dash' && ev.type !== 'jump' && ev.type !== 'burrow_warp'
       );
 
       if (moveEvents.length > 0) {
         dispatchBattleEvents(moveEvents);
-        await sleep(combatEvents.length > 0 ? 340 : 520);
+        await enemyPhaseSleep(combatEvents.length > 0 ? 340 : 520);
         if (session !== battleSessionId || !gameStore.battle) {
           gameStore.enemyTurnRunning = false;
           return;
@@ -1060,7 +1104,7 @@ export async function endPlayerTurn(): Promise<void> {
       }
       if (combatEvents.length > 0) {
         dispatchBattleEvents(combatEvents);
-        await sleep(560);
+        await enemyPhaseSleep(560);
       }
     }
   }

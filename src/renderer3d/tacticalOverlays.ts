@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { AdjacentCoverBadge } from '../engine/grid';
-import { getAdjacentCoverBadges, posKey, samePos, tileAt, unitAt } from '../engine/grid';
+import { getAdjacentCoverBadges, manhattan, posKey, samePos, tileAt, unitAt } from '../engine/grid';
 import type { ReachableNode } from '../engine/pathfinding';
 import type {
   BattleState,
@@ -26,6 +26,8 @@ export interface TacticalSnapshot3D {
   attackKeySet: Set<string>;
   weaponRangeKeys: Set<string>;
   isProjectingFromMove: boolean;
+  previewOverwatch: boolean;
+  overwatchRangeKeys: Set<string>;
   abilityKeySet: Set<string>;
   itemKeySet: Set<string>;
   aoePreviewKeys: Set<string>;
@@ -59,6 +61,7 @@ export class TacticalOverlaySystem3D {
   private textures: CraftTextureLibrary;
   private lastSignature = '';
   private animatedRings: THREE.Object3D[] = [];
+  private telegraphBeacons: THREE.Object3D[] = [];
   private shieldSprites: THREE.Object3D[] = [];
 
   // Shared tile plate geometry
@@ -122,6 +125,9 @@ export class TacticalOverlaySystem3D {
     const threatSig = snap.enemyThreat
       ? `${snap.enemyThreat.moveKeys.size}:${snap.enemyThreat.attackKeys.size}`
       : '-';
+    const telSig = (b.bossTelegraphs ?? [])
+      .map((t) => `${t.bossId}:${t.name}:${t.tiles.map(posKey).join(';')}`)
+      .join(',');
     const sig = [
       b.mapId,
       b.turn,
@@ -140,10 +146,13 @@ export class TacticalOverlaySystem3D {
       snap.attackKeySet.size,
       snap.weaponRangeKeys.size,
       snap.isProjectingFromMove ? 1 : 0,
+      snap.previewOverwatch ? 1 : 0,
+      snap.overwatchRangeKeys.size,
       snap.abilityKeySet.size,
       snap.itemKeySet.size,
       snap.aoePreviewKeys.size,
       threatSig,
+      telSig,
       snap.focusForecast ? `${snap.focusForecast.hitChance}:${snap.focusForecast.coverLevel}:${snap.focusForecast.canAttack ? 1 : 0}` : '-',
     ].join('|');
 
@@ -211,8 +220,58 @@ export class TacticalOverlaySystem3D {
 
   private rebuildTiles(snap: TacticalSnapshot3D): void {
     disposeGroupChildren(this.tileLayer);
+    this.telegraphBeacons = [];
     const b = snap.battle;
     if (b.status !== 'ongoing') return;
+
+    // 0. Boss Telegraphed Super-Attack Danger Zones! (Always visible so player can dodge!)
+    if (b.bossTelegraphs && b.bossTelegraphs.length > 0) {
+      const seenTel = new Set<string>();
+      const stripeGeo = new THREE.PlaneGeometry(TILE_SIZE_3D * 0.92, 0.14);
+      stripeGeo.rotateX(-Math.PI / 2);
+      const beaconGeo = new THREE.OctahedronGeometry(0.16, 0);
+      for (const tel of b.bossTelegraphs) {
+        for (const tp of tel.tiles) {
+          const k = posKey(tp);
+          if (seenTel.has(k)) continue;
+          seenTel.add(k);
+          this.addTilePlate(b, tp, 0xe02222, 0.44, 0xffd166, 0.98, 0.035);
+          const wp = this.tilePosY(b, tp, 0.042);
+
+          // Crisp diagonal red-gold hazard X stripes
+          for (const rot of [Math.PI / 4, -Math.PI / 4]) {
+            const stripe = new THREE.Mesh(
+              stripeGeo.clone(),
+              new THREE.MeshBasicMaterial({
+                color: 0xffc83b,
+                transparent: true,
+                opacity: 0.72,
+                depthWrite: false,
+              })
+            );
+            stripe.position.copy(wp);
+            stripe.rotation.y = rot;
+            this.tileLayer.add(stripe);
+          }
+
+          // Pulsing floating crimson warning beacon above the danger tile!
+          const beacon = new THREE.Mesh(
+            beaconGeo.clone(),
+            new THREE.MeshBasicMaterial({
+              color: 0xff3b24,
+              transparent: true,
+              opacity: 0.88,
+            })
+          );
+          beacon.position.set(wp.x, wp.y + 0.56, wp.z);
+          beacon.userData.baseY = wp.y + 0.56;
+          this.tileLayer.add(beacon);
+          this.telegraphBeacons.push(beacon);
+        }
+      }
+      stripeGeo.dispose();
+      beaconGeo.dispose();
+    }
 
     // 1. Enemy Danger / Threat Zones
     if (snap.enemyThreat) {
@@ -233,18 +292,29 @@ export class TacticalOverlaySystem3D {
 
     if (b.phase !== 'player' || !snap.selectedUnit) return;
 
+    // 1B. Hovering Watch -> Golden Hero Sight Overwatch Zone Preview!
+    if (snap.previewOverwatch && snap.overwatchRangeKeys.size > 0) {
+      for (const key of snap.overwatchRangeKeys) {
+        const [x, y] = key.split(',').map(Number);
+        this.addTilePlate(b, { x, y }, 0xf5be28, 0.36, 0xfff2a6, 0.96, 0.034);
+      }
+      return;
+    }
+
     // 2. Active Mode Tactical Tiles
     if (snap.mode === 'move') {
       // Blue movable tiles
       for (const node of snap.movableMap.values()) {
         const isFocused = Boolean(snap.focusTile && samePos(snap.focusTile, node.pos));
+        const tile = tileAt(b, node.pos);
+        const isBurrow = tile?.terrain === 'burrow';
         this.addTilePlate(
           b,
           node.pos,
-          0x27b0f5,
-          isFocused ? 0.52 : 0.34,
-          isFocused ? 0xc7f2ff : 0x7adeff,
-          isFocused ? 1 : 0.82,
+          isBurrow ? 0x2de0cf : 0x27b0f5,
+          isFocused ? 0.54 : isBurrow ? 0.42 : 0.34,
+          isFocused ? 0xc7f2ff : isBurrow ? 0xb5fff7 : 0x7adeff,
+          isFocused ? 1 : 0.85,
           0.026
         );
       }
@@ -377,7 +447,7 @@ export class TacticalOverlaySystem3D {
 
     const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
     if (beaded) {
-      // Crisp glowing Mario + Rabbids beaded mortar arc!
+      // Crisp glowing Mario + Rabbids beaded mortar / warp arc!
       const count = 14;
       const beadGeo = new THREE.SphereGeometry(radius * 1.45, 8, 8);
       const beadMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
@@ -450,13 +520,37 @@ export class TacticalOverlaySystem3D {
       return;
     }
 
-    // Case B: Hovering a Move tile -> Smooth glowing cyan Mario + Rabbids path ribbon!
+    // Case B: Hovering a Move tile -> Smooth glowing cyan ribbon + teal Gopher Burrow warp arcs!
     if (snap.mode === 'move' && snap.movableMap.has(focusKey)) {
       const node = snap.movableMap.get(focusKey)!;
       if (node.path.length >= 2) {
-        const pts = node.path.map((p) => this.tilePosY(b, p, 0.12));
-        this.addTubeArc(pts, 0.068, 0x45d3ff, 0.92);
-        this.addGroundRing(this.tilePosY(b, focus, 0.04), 0.32, 0.48, 0x8ce8ff);
+        let seg: THREE.Vector3[] = [this.tilePosY(b, node.path[0], 0.12)];
+        let hasWarp = false;
+        for (let i = 1; i < node.path.length; i++) {
+          const prev = node.path[i - 1];
+          const curr = node.path[i];
+          if (manhattan(prev, curr) > 1) {
+            if (seg.length >= 2) this.addTubeArc(seg, 0.068, 0x45d3ff, 0.92);
+            const fromW = this.tilePosY(b, prev, 0.14);
+            const toW = this.tilePosY(b, curr, 0.14);
+            this.addParabolicArc(fromW, toW, 1.35, 0x3cf0de, 0.062, true);
+            this.addGroundRing(this.tilePosY(b, prev, 0.05), 0.36, 0.52, 0x3cf0de);
+            this.addGroundRing(this.tilePosY(b, curr, 0.05), 0.36, 0.52, 0x3cf0de);
+            hasWarp = true;
+            seg = [this.tilePosY(b, curr, 0.12)];
+          } else {
+            seg.push(this.tilePosY(b, curr, 0.12));
+          }
+        }
+        if (seg.length >= 2) {
+          this.addTubeArc(seg, 0.068, 0x45d3ff, 0.92);
+        }
+        this.addGroundRing(
+          this.tilePosY(b, focus, 0.04),
+          0.32,
+          0.48,
+          hasWarp ? 0x3cf0de : 0x8ce8ff
+        );
       }
       return;
     }
@@ -540,9 +634,6 @@ export class TacticalOverlaySystem3D {
     const hero = snap.selectedUnit;
     if (!hero || b.phase !== 'player' || b.status !== 'ongoing') return;
 
-    // Decide which tile to display Mario + Rabbids directional cover shields around:
-    // - If hovering/previewing a valid Move or Team-Jump tile, show the cover shields you'll get THERE!
-    // - Otherwise show the cover shields currently protecting the selected hero!
     let anchorTile: GridPos = hero.pos;
     if (
       snap.mode === 'move' &&
@@ -573,7 +664,6 @@ export class TacticalOverlaySystem3D {
 
       const shield = new THREE.Mesh(shieldGeo.clone(), mat);
       shield.renderOrder = 25;
-      // Float clearly above the crate/haystack rim on the hero's side of the wall so it never clips!
       const baseHeight = badge.level === 'full' ? 1.18 : 0.84;
       shield.position.set(
         anchorWorld.x + dirX * (TILE_SIZE_3D * 0.36),
@@ -596,7 +686,17 @@ export class TacticalOverlaySystem3D {
     // Spin/breathe ground rings
     for (const ring of this.animatedRings) {
       const s = 1 + Math.sin(time * 5.2) * 0.06;
-      ring.scale.set(s, s, 1);
+      ring.scale.set(s, 1, s);
+    }
+
+    // Pulse & spin Boss Telegraph crimson warning beacons!
+    for (let i = 0; i < this.telegraphBeacons.length; i++) {
+      const bc = this.telegraphBeacons[i];
+      const baseY = (bc.userData.baseY as number) ?? 0.56;
+      bc.position.y = baseY + Math.sin(time * 6.5 + i * 0.7) * 0.12;
+      bc.rotation.y = time * 3.2;
+      const sc = 1 + Math.sin(time * 7 + i) * 0.16;
+      bc.scale.setScalar(sc);
     }
 
     // Billboard 3D cover shield badges subtly toward the camera + float softly

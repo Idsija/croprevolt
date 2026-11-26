@@ -33,6 +33,8 @@ import { TacticalOverlaySystem3D } from './tacticalOverlays';
 import {
   CraftTextureLibrary,
   createPaperStandeeRig,
+  hasVariantSprite,
+  resolveVariantSpriteKey,
   SPRITE_DEFAULT_FACING,
   type PaperStandeeRig,
 } from './textures';
@@ -65,6 +67,7 @@ interface UnitVisualEntry {
   rig: PaperStandeeRig;
   hitCylinder: THREE.Mesh;
   hitFlash: number;
+  hitPoseTimer: number;
   squash: number;
   anim: PathMoveAnim | null;
   koTimer: number; // > 0 means playing Paper Mario KO flutter tumble!
@@ -119,6 +122,7 @@ interface CachedTactics {
   attackKeySet: Set<string>;
   weaponRangeKeys: Set<string>;
   isProjectingFromMove: boolean;
+  overwatchRangeKeys: Set<string>;
   abilityKeySet: Set<string>;
   itemKeySet: Set<string>;
   aoePreviewKeys: Set<string>;
@@ -153,6 +157,10 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   private world: PaperDioramaWorld;
   private overlays: TacticalOverlaySystem3D;
 
+  private hemiLight: THREE.HemisphereLight | null = null;
+  private sunLight: THREE.DirectionalLight | null = null;
+  private rimLight: THREE.DirectionalLight | null = null;
+
   private unitGroup = new THREE.Group();
   private fxGroup = new THREE.Group();
   private unitMap = new Map<string, UnitVisualEntry>();
@@ -174,6 +182,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   private rafId = 0;
   private lastTime = 0;
   private elapsedTotal = 0;
+  private hitstopTimer = 0;
   private resizeObserver: ResizeObserver;
   private lastBoardDims = '';
   private tacticalCache: CachedTactics | null = null;
@@ -247,6 +256,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   private setupLights(): void {
     // Cozy warm diorama sky + oak desk bounce
     const hemi = new THREE.HemisphereLight(0xfff7e2, 0x8f6239, 0.96);
+    this.hemiLight = hemi;
     this.scene.add(hemi);
 
     // Golden afternoon sun casting Paper Mario standee & 3D crate shadows!
@@ -263,11 +273,13 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     sun.shadow.camera.bottom = -d;
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.025;
+    this.sunLight = sun;
     this.scene.add(sun);
 
     // Cool sky rim light so thick cardboard edges & crates separate crisply
     const rim = new THREE.DirectionalLight(0xc8e4ff, 0.42);
     rim.position.set(-9, 7, -8);
+    this.rimLight = rim;
     this.scene.add(rim);
   }
 
@@ -508,9 +520,23 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     for (const entry of this.unitMap.values()) {
       entry.anim = null;
       entry.hitFlash = 0;
+      entry.hitPoseTimer = 0;
       entry.squash = 0;
     }
+    this.hitstopTimer = 0;
     this.clearProjectiles();
+  }
+
+  private triggerUnitHit(unitId: string, bigImpact = false): void {
+    const entry = this.unitMap.get(unitId);
+    if (entry) {
+      entry.hitFlash = 1;
+      entry.hitPoseTimer = 0.44;
+      entry.squash = 1;
+    }
+    if (bigImpact) {
+      this.hitstopTimer = Math.max(this.hitstopTimer, 0.075);
+    }
   }
 
   private worldPointForTile(battle: BattleState, pos: GridPos, yLift = 0): THREE.Vector3 {
@@ -554,6 +580,16 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           break;
         }
 
+        case 'burrow_warp': {
+          const pFrom = this.worldPointForTile(b, ev.from, 0.25);
+          const pTo = this.worldPointForTile(b, ev.to, 0.25);
+          this.spawnBurst(pFrom, ['#3cf0de', '#8a5d36', '#fbf3df'], 14, 'confetti');
+          this.spawnBurst(pTo, ['#3cf0de', '#8a5d36', '#fbf3df'], 16, 'confetti');
+          this.spawnPopup(pTo.clone().add(new THREE.Vector3(0, 1.25, 0)), 'BURROW WARP!', '#084a45', '#c8fff9', 1.12);
+          sfx.jump();
+          break;
+        }
+
         case 'dash': {
           const entry = this.unitMap.get(ev.unitId);
           const pFrom = this.worldPointForTile(b, ev.from, 0);
@@ -569,11 +605,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
               leanAngle: 0.34,
             };
           }
-          const targetEntry = this.unitMap.get(ev.targetId);
-          if (targetEntry) {
-            targetEntry.hitFlash = 1;
-            targetEntry.squash = 1;
-          }
+          this.triggerUnitHit(ev.targetId, false);
           this.cameraCtrl.triggerShake(0.22, 0.18);
           this.focusOnGrid(ev.targetPos);
           this.spawnBurst(pTarget.clone().add(new THREE.Vector3(0, 0.65, 0)), ['#ff7b29', '#ffd166', '#fbf3df'], 16, 'confetti');
@@ -598,7 +630,6 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
             };
             entry.squash = 0.9;
           }
-          // Squash springboard ally!
           const allyUnit = unitAt(b, ev.allyPos);
           if (allyUnit) {
             const allyEntry = this.unitMap.get(allyUnit.id);
@@ -630,19 +661,13 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
                 leanAngle: -0.28,
               };
               entry.squash = 0.85;
+              entry.hitPoseTimer = Math.max(entry.hitPoseTimer, 0.34);
             }
             this.spawnBurst(pTo.clone().add(new THREE.Vector3(0, 0.2, 0)), ['#fbf3df', '#d9c095'], 10, 'confetti');
           } else {
-            if (entry) {
-              entry.hitFlash = 1;
-              entry.squash = 1;
-            }
+            this.triggerUnitHit(ev.unitId, true);
             if (ev.bumpedUnitId) {
-              const other = this.unitMap.get(ev.bumpedUnitId);
-              if (other) {
-                other.hitFlash = 1;
-                other.squash = 1;
-              }
+              this.triggerUnitHit(ev.bumpedUnitId, true);
             }
             this.cameraCtrl.triggerShake(0.32, 0.24);
             this.spawnBurst(pTo.clone().add(new THREE.Vector3(0, 0.65, 0)), ['#ff9f43', '#e53e30', '#fbf3df'], 20, 'plank');
@@ -655,6 +680,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         case 'hazard': {
           const p = this.worldPointForTile(b, ev.pos, 0.55);
           this.cameraCtrl.triggerShake(0.38, 0.28);
+          this.hitstopTimer = Math.max(this.hitstopTimer, 0.065);
           if (ev.kind === 'beehive') {
             this.spawnBurst(p, ['#f6c945', '#2b1b0e', '#fff2a6', '#e67e22'], 30, 'confetti');
             this.spawnPopup(p.clone().add(new THREE.Vector3(0, 0.9, 0)), 'BEEHIVE BOOM! -3', '#7a3500', '#ffe985', 1.22);
@@ -681,14 +707,10 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
             this.spawnPopup(pTo.clone().add(new THREE.Vector3(0, 0.9, 0)), 'COVER BLOCK!', '#5d4037', '#f5e8d0', 1.02);
             sfx.miss();
           } else {
-            if (ev.targetId) {
-              const te = this.unitMap.get(ev.targetId);
-              if (te) {
-                te.hitFlash = 1;
-                te.squash = 1;
-              }
-            }
             const strong = ev.matchup === 'advantage';
+            if (ev.targetId) {
+              this.triggerUnitHit(ev.targetId, strong || ev.damage >= 5);
+            }
             this.cameraCtrl.triggerShake(strong ? 0.3 : 0.16, strong ? 0.22 : 0.14);
             this.spawnBurst(
               pTo,
@@ -778,8 +800,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
 
         case 'status_tick': {
           const p = this.worldPointForTile(b, ev.pos, 0.65);
-          const entry = this.unitMap.get(ev.unitId);
-          if (entry) entry.hitFlash = 0.85;
+          this.triggerUnitHit(ev.unitId, false);
           const prefix =
             ev.status === 'burn'
               ? 'BURN'
@@ -808,6 +829,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
             entry.koTimer = 0.56;
             entry.koOrigin = entry.rig.root.position.clone();
           }
+          this.hitstopTimer = Math.max(this.hitstopTimer, 0.08);
           this.spawnBurst(p, ['#fbf3df', '#d9483b', '#f6d55c'], 22, 'confetti');
           this.spawnPopup(
             p.clone().add(new THREE.Vector3(0, 1.15, 0)),
@@ -823,11 +845,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           const pFrom = this.worldPointForTile(b, ev.from, 0.72);
           const pTo = this.worldPointForTile(b, ev.to, 0.56);
           this.spawnProjectile3D(pFrom, pTo, 'direct', ev.attackerKind);
-          const te = this.unitMap.get(ev.targetId);
-          if (te) {
-            te.hitFlash = 1;
-            te.squash = 1;
-          }
+          this.triggerUnitHit(ev.targetId, true);
           this.cameraCtrl.triggerShake(0.24, 0.18);
           this.focusOnGrid(ev.to);
           this.spawnBurst(pTo, ['#ffe052', '#ffae2b', '#fff9d6'], 20, 'confetti');
@@ -849,11 +867,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           this.spawnBurst(p, ['#ffd54f', '#ff8524', '#fbf3df'], 22, 'confetti');
           if (ev.hitIds.length > 0) {
             for (const hid of ev.hitIds) {
-              const he = this.unitMap.get(hid);
-              if (he) {
-                he.hitFlash = 1;
-                he.squash = 1;
-              }
+              this.triggerUnitHit(hid, true);
             }
             this.spawnPopup(
               p.clone().add(new THREE.Vector3(0, 1.25, 0)),
@@ -869,11 +883,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
 
         case 'terrain_hazard': {
           const p = this.worldPointForTile(b, ev.pos, 0.45);
-          const te = this.unitMap.get(ev.unitId);
-          if (te) {
-            te.hitFlash = 1;
-            te.squash = 1;
-          }
+          this.triggerUnitHit(ev.unitId, true);
           this.cameraCtrl.triggerShake(0.28, 0.22);
           if (ev.kind === 'lava') {
             this.spawnBurst(p, ['#ff521b', '#ffd54f', '#2b130c'], 26, 'confetti');
@@ -888,6 +898,54 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
             this.spawnPopup(p.clone().add(new THREE.Vector3(0, 1.1, 0)), `CLIFF DROP! -${ev.damage}`, '#6b2c0c', '#ffe2bd', 1.14);
             sfx.coverBreak();
           }
+          break;
+        }
+
+        case 'boss_phase': {
+          const p = this.worldPointForTile(b, ev.pos, 0.75);
+          const be = this.unitMap.get(ev.bossId);
+          if (be) {
+            be.hitFlash = 1;
+            be.squash = 1;
+          }
+          this.hitstopTimer = Math.max(this.hitstopTimer, 0.085);
+          this.cameraCtrl.triggerShake(0.42, 0.34);
+          this.focusOnGrid(ev.pos);
+          this.spawnBurst(p, ['#ff3b1f', '#ffd54f', '#ff8524', '#fff5d6'], 36, 'confetti');
+          this.spawnPopup(p.clone().add(new THREE.Vector3(0, 1.4, 0)), 'PHASE 2 ENRAGED!', '#6b0a00', '#ffcf80', 1.3);
+          this.banner = {
+            text: `PHASE 2: ${ev.bossName.toUpperCase()} ENRAGED!`,
+            tone: 'enemy',
+            startMs: performance.now(),
+            durationMs: 1600,
+          };
+          sfx.coverBreak();
+          break;
+        }
+
+        case 'boss_telegraph_strike': {
+          this.cameraCtrl.triggerShake(0.4, 0.3);
+          this.hitstopTimer = Math.max(this.hitstopTimer, 0.08);
+          for (const tp of ev.tiles) {
+            const pt = this.worldPointForTile(b, tp, 0.45);
+            this.spawnBurst(pt, ['#ff3b1f', '#ff9924', '#ffe066', '#3d1c12'], 12, 'confetti');
+          }
+          for (const hid of ev.hitIds) {
+            this.triggerUnitHit(hid, true);
+          }
+          if (ev.tiles.length > 0) {
+            const mid = ev.tiles[Math.floor(ev.tiles.length / 2)];
+            const pMid = this.worldPointForTile(b, mid, 1.25);
+            this.focusOnGrid(mid);
+            this.spawnPopup(
+              pMid,
+              ev.hitIds.length > 0 ? `${ev.name.toUpperCase()}! -${ev.damage}` : `${ev.name.toUpperCase()} DODGED!`,
+              ev.hitIds.length > 0 ? '#7a0a00' : '#1b5e20',
+              ev.hitIds.length > 0 ? '#ffd080' : '#dff7df',
+              1.22
+            );
+          }
+          sfx.hit(true);
           break;
         }
 
@@ -1058,6 +1116,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       view.selectedUnitId ?? '-',
       view.inspectedEnemyId ?? '-',
       view.showAllDangerZone ? 1 : 0,
+      view.previewOverwatch ? 1 : 0,
       view.mode,
       view.selectedItemId ?? '-',
       focusTile ? `${focusTile.x},${focusTile.y}` : '-',
@@ -1109,6 +1168,18 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     if (selectedUnit && weaponRangeOrigin) {
       for (const p of getWeaponRangeTiles(b, selectedUnit, weaponRangeOrigin)) {
         weaponRangeKeys.add(posKey(p));
+      }
+    }
+
+    const overwatchRangeKeys = new Set<string>();
+    if (
+      b.phase === 'player' &&
+      view.previewOverwatch &&
+      selectedUnit &&
+      !selectedUnit.actions.hasAttacked
+    ) {
+      for (const p of getWeaponRangeTiles(b, selectedUnit, selectedUnit.pos)) {
+        overwatchRangeKeys.add(posKey(p));
       }
     }
 
@@ -1203,6 +1274,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       attackKeySet,
       weaponRangeKeys,
       isProjectingFromMove,
+      overwatchRangeKeys,
       abilityKeySet,
       itemKeySet,
       aoePreviewKeys,
@@ -1217,6 +1289,8 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     const b = view.battle;
     const aliveIds = new Set<string>();
     const camYaw = this.cameraCtrl.getCurrentYaw();
+    const popUp = this.world.getPopUpProgress();
+    const popUpEase = 1 - Math.pow(1 - popUp, 3);
 
     for (const u of b.units) {
       if (!u.alive) continue;
@@ -1249,6 +1323,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           rig,
           hitCylinder,
           hitFlash: 0,
+          hitPoseTimer: 0,
           squash: 0,
           anim: null,
           koTimer: 0,
@@ -1259,7 +1334,25 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
 
       entry.hitCylinder.userData.gridPos = { x: u.pos.x, y: u.pos.y };
 
-      // Position & Paper Mario Animations
+      // 1. Expressive Variant Sprite State Machine (_hit -> Boss Phase-2 _enraged -> _lowhp -> base)!
+      if (entry.hitPoseTimer > 0) {
+        entry.hitPoseTimer = Math.max(0, entry.hitPoseTimer - dt);
+      }
+      const hpRatio = u.hp / Math.max(1, u.maxHp);
+      const isLowHp = hpRatio <= 0.35;
+      const isBossEnraged = Boolean(u.isBoss && (b.bossPhase ?? 1) >= 2);
+
+      let desiredVariant: 'base' | 'hit' | 'lowhp' | 'enraged' = 'base';
+      if (entry.hitPoseTimer > 0) {
+        desiredVariant = 'hit';
+      } else if (isBossEnraged) {
+        desiredVariant = 'enraged';
+      } else if (isLowHp) {
+        desiredVariant = 'lowhp';
+      }
+      entry.rig.setSpriteKey(resolveVariantSpriteKey(u.visualKind, desiredVariant));
+
+      // 2. Position & Paper Mario Movement Animations
       const restingPos = this.worldPointForTile(b, u.pos, 0);
       let hopY = 0;
       let tiltZ = 0;
@@ -1271,7 +1364,6 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         const t = Math.min(1, anim.elapsed / Math.max(0.01, anim.duration));
 
         if (anim.kind === 'jump' && anim.points.length >= 3) {
-          // 2-phase Team-Jump: quick hop onto ally (0..0.32), soaring spin vault to dest (0.32..1)!
           if (t < 0.32) {
             const p = t / 0.32;
             entry.rig.root.position.lerpVectors(anim.points[0], anim.points[1], p);
@@ -1300,33 +1392,68 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         entry.rig.root.position.lerp(restingPos, 1 - Math.exp(-dt * 18));
       }
 
-      // Gentle Paper Mario idle breathe + selected bounce + Tacticam vertical legibility tilt
+      // 3. Status Flags
+      const hasBurn = u.statuses.some((s) => s.kind === 'burn');
+      const hasRooted = u.statuses.some((s) => s.kind === 'rooted');
+      const hasAcid = u.statuses.some((s) => s.kind === 'acid');
+      const hasFeared = u.statuses.some((s) => s.kind === 'feared');
+      const hasShield = u.statuses.some((s) => s.kind === 'shield');
+      const hasBoosted = u.statuses.some((s) => s.kind === 'boosted');
+      const isOverwatching = u.statuses.some((s) => s.kind === 'overwatch');
+
+      // 4. Expressive Idle Breathe, Pop-Up Fold-In, Aim Lean, Hit Recoil, Low-HP Droop & Fear Shiver!
       const isSelected = u.id === view.selectedUnitId;
+      const isAimingHero = isSelected && view.mode === 'attack' && b.phase === 'player';
       const isInspected = u.id === view.inspectedEnemyId;
       const isDashTarget = tac.dashEnemyIds.has(u.id);
       const isDone = tac.doneUnitIds.has(u.id);
-      const idlePhase = this.elapsedTotal * (isSelected ? 4.4 : 2.6) + u.pos.x * 0.9 + u.pos.y * 1.3;
-      const idleBounce = entry.anim ? 0 : Math.abs(Math.sin(idlePhase)) * (isSelected ? 0.085 : 0.025);
+
+      const breatheSpeed = isLowHp ? 6.2 : isSelected ? 4.4 : 2.6;
+      const idlePhase = this.elapsedTotal * breatheSpeed + u.pos.x * 0.9 + u.pos.y * 1.3;
+      const idleBounce = entry.anim
+        ? 0
+        : Math.abs(Math.sin(idlePhase)) * (isSelected ? 0.085 : isLowHp ? 0.04 : 0.025);
+
       const camPitch = this.cameraCtrl.getCurrentPitch();
       const tacticamTiltX = -Math.max(0, (camPitch - 0.72) * 0.52);
+      const popUpFoldX = popUp < 1 ? (1 - popUpEase) * (-Math.PI * 0.45) : 0;
+      const aimLeanX = isAimingHero ? 0.13 : 0;
+      const lowHpDroopX = isLowHp && !entry.anim ? 0.08 + Math.sin(idlePhase) * 0.03 : 0;
+      const hitRecoilX = entry.hitPoseTimer > 0 ? -Math.sin((entry.hitPoseTimer / 0.44) * Math.PI) * 0.28 : 0;
 
+      const targetTiltX = tacticamTiltX + popUpFoldX + aimLeanX + lowHpDroopX + hitRecoilX;
+
+      entry.rig.tiltGroup.position.x = hasFeared
+        ? Math.sin(this.elapsedTotal * 44 + u.pos.x) * 0.036
+        : 0;
       entry.rig.tiltGroup.position.y = hopY + idleBounce;
       entry.rig.tiltGroup.rotation.x = THREE.MathUtils.lerp(
         entry.rig.tiltGroup.rotation.x,
-        tacticamTiltX,
-        1 - Math.exp(-dt * 12)
+        targetTiltX,
+        1 - Math.exp(-dt * 14)
       );
       entry.rig.tiltGroup.rotation.z =
-        tiltZ + (entry.anim ? 0 : Math.sin(idlePhase * 0.5) * (isSelected ? 0.045 : 0.018));
+        tiltZ +
+        (entry.anim ? 0 : Math.sin(idlePhase * 0.5) * (isSelected ? 0.045 : isLowHp ? 0.04 : 0.018)) +
+        (entry.hitPoseTimer > 0 ? Math.sin(entry.hitPoseTimer * 42) * 0.1 : 0);
 
-      // Squash & stretch decay
+      // Squash, Stretch & Paper-Accordion Hit Ripple
       if (entry.squash > 0) {
         entry.squash = Math.max(0, entry.squash - dt * 4.5);
       }
       const sq = Math.sin(entry.squash * Math.PI) * 0.22;
-      entry.rig.tiltGroup.scale.set(1 + sq * 0.75, 1 - sq, 1 + sq * 0.4);
+      const accordionX =
+        entry.hitPoseTimer > 0
+          ? Math.sin(entry.hitPoseTimer * 36) * 0.16 * (entry.hitPoseTimer / 0.44)
+          : 0;
+      const lowHpPantY = isLowHp && !entry.anim ? Math.sin(idlePhase) * 0.04 : 0;
+      entry.rig.tiltGroup.scale.set(
+        1 + sq * 0.75 + accordionX,
+        1 - sq - lowHpPantY,
+        1 + sq * 0.4
+      );
 
-      // Camera-aligned billboard + Paper Mario 180° flip turn when changing facing!
+      // 5. Camera-Aligned Billboard + Paper Mario 180° Flip Turn
       entry.rig.root.rotation.y = camYaw;
       const defaultFacing = SPRITE_DEFAULT_FACING[u.visualKind] ?? 'right';
       const shouldFlip = u.facing !== defaultFacing;
@@ -1338,13 +1465,103 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       );
       entry.rig.flipGroup.rotation.y = entry.rig.currentFlipYaw + extraSpinY;
 
-      // Hit-flash white glow & done-unit subtle warm desaturation (applied to both front & flipped back!)
+      // 6. Animate Universal 3D Paper-Craft Status & Low-HP Overlays!
+      const ov = entry.rig.statusOverlay;
+      ov.burn.visible = hasBurn;
+      if (hasBurn) {
+        ov.burn.children.forEach((flame, idx) => {
+          const fl = 0.85 + Math.sin(this.elapsedTotal * 14 + idx * 2.1) * 0.32;
+          flame.scale.set(0.95, fl, 0.95);
+          flame.rotation.y = this.elapsedTotal * 3.5 + idx;
+        });
+      }
+
+      ov.rooted.visible = hasRooted;
+      if (hasRooted) {
+        const pulse = 1 + Math.sin(this.elapsedTotal * 4.2) * 0.04;
+        ov.rooted.scale.set(pulse, 1, pulse);
+      }
+
+      ov.acid.visible = hasAcid;
+      if (hasAcid) {
+        ov.acid.children.forEach((bub, idx) => {
+          const cyc = (this.elapsedTotal * 1.15 + idx * 0.42) % 1.0;
+          bub.position.y = 0.25 + cyc * (entry.rig.height * 0.8);
+          bub.scale.setScalar(0.55 + Math.sin(cyc * Math.PI) * 0.65);
+        });
+      }
+
+      ov.feared.visible = hasFeared;
+      if (hasFeared) {
+        ov.feared.position.y = Math.sin(this.elapsedTotal * 9) * 0.06;
+      }
+
+      ov.shield.visible = hasShield;
+      if (hasShield) {
+        ov.shield.rotation.y = Math.sin(this.elapsedTotal * 2.2) * 0.35;
+        ov.shield.position.y = Math.sin(this.elapsedTotal * 3.6) * 0.05;
+      }
+
+      ov.boosted.visible = hasBoosted;
+      if (hasBoosted) {
+        ov.boosted.rotation.y = this.elapsedTotal * 2.8;
+        ov.boosted.position.y = 0.085 + entry.rig.height * 0.98 + Math.sin(this.elapsedTotal * 5) * 0.04;
+      }
+
+      ov.overwatch.visible = isOverwatching;
+      if (isOverwatching) {
+        ov.overwatch.rotation.z = this.elapsedTotal * 2.4;
+        const osc = 1 + Math.sin(this.elapsedTotal * 6.5) * 0.1;
+        ov.overwatch.scale.setScalar(osc);
+      }
+
+      ov.lowHp.visible = isLowHp;
+      if (isLowHp) {
+        // Show 3D Band-Aid sticker on units without a custom hand-drawn _lowhp PNG, while keeping sweat drops on ALL!
+        ov.bandAid.visible = !hasVariantSprite(u.visualKind, 'lowhp');
+        for (let i = 0; i < 2; i++) {
+          const drop = ov.lowHp.children[i];
+          if (drop) {
+            const cyc = (this.elapsedTotal * 2.1 + i * 0.5) % 1;
+            drop.position.y = 0.085 + entry.rig.height * (0.86 - cyc * 0.22);
+          }
+        }
+      }
+
+      ov.enragedAura.visible = isBossEnraged;
+      if (isBossEnraged) {
+        ov.enragedAura.rotation.y = this.elapsedTotal * 2.2;
+        const sc = 1 + Math.sin(this.elapsedTotal * 7.5) * 0.08;
+        ov.enragedAura.scale.set(sc, 1 + Math.sin(this.elapsedTotal * 9) * 0.18, sc);
+      }
+
+      // 7. Promotion Tier Pedestal Collar Trim (Ripe Bronze / Heirloom Shimmering Gold!)
+      if (u.tier === 'heirloom') {
+        entry.rig.promoTrimMesh.visible = true;
+        entry.rig.promoTrimMat.color.set('#ffcf3d');
+        entry.rig.promoTrimMat.emissive.set('#b87600');
+        entry.rig.promoTrimMat.emissiveIntensity = 0.28 + Math.sin(this.elapsedTotal * 4.5) * 0.12;
+      } else if (u.tier === 'ripe') {
+        entry.rig.promoTrimMesh.visible = true;
+        entry.rig.promoTrimMat.color.set('#cd8142');
+        entry.rig.promoTrimMat.emissive.set('#5c300c');
+        entry.rig.promoTrimMat.emissiveIntensity = 0.16;
+      } else {
+        entry.rig.promoTrimMesh.visible = false;
+      }
+
+      // 8. Hit-Flash, Boss Enraged Glow, Selected Highlight & Done Desaturation
       if (entry.hitFlash > 0) {
         entry.hitFlash = Math.max(0, entry.hitFlash - dt * 4.2);
       }
       if (entry.hitFlash > 0.02) {
         entry.rig.frontMat.emissive.setRGB(entry.hitFlash, entry.hitFlash * 0.92, entry.hitFlash * 0.85);
         entry.rig.frontMat.emissiveIntensity = entry.hitFlash * 1.1;
+        entry.rig.backMat.emissive.copy(entry.rig.frontMat.emissive);
+        entry.rig.backMat.emissiveIntensity = entry.rig.frontMat.emissiveIntensity;
+      } else if (isBossEnraged) {
+        entry.rig.frontMat.emissive.set('#ff3b14');
+        entry.rig.frontMat.emissiveIntensity = 0.14 + Math.sin(this.elapsedTotal * 6.5) * 0.08;
         entry.rig.backMat.emissive.copy(entry.rig.frontMat.emissive);
         entry.rig.backMat.emissiveIntensity = entry.rig.frontMat.emissiveIntensity;
       } else if (isSelected) {
@@ -1363,18 +1580,17 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       entry.rig.frontMat.color.set(tintHex);
       entry.rig.backMat.color.set(isDone ? '#b5a892' : '#fffaf0');
 
-      // Pedestal glowing ring state (Selected / Dash target / Inspected / Hero Sight Overwatch!)
-      const isOverwatching = u.statuses.some((s) => s.kind === 'overwatch');
+      // 9. Pedestal Glowing Ring State
       if (isSelected) {
         entry.rig.ringMat.color.set('#ffe052');
         entry.rig.ringMat.opacity = 0.78 + Math.sin(this.elapsedTotal * 6) * 0.16;
         const rs = 1 + Math.sin(this.elapsedTotal * 5) * 0.05;
-        entry.rig.ringMesh.scale.set(rs, rs, 1);
+        entry.rig.ringMesh.scale.set(rs, 1, rs);
       } else if (isOverwatching) {
         entry.rig.ringMat.color.set('#ffb824');
         entry.rig.ringMat.opacity = 0.72 + Math.sin(this.elapsedTotal * 7.5) * 0.22;
         const rs = 1.06 + Math.sin(this.elapsedTotal * 6) * 0.08;
-        entry.rig.ringMesh.scale.set(rs, rs, 1);
+        entry.rig.ringMesh.scale.set(rs, 1, rs);
       } else if (isDashTarget) {
         entry.rig.ringMat.color.set('#ff7b24');
         entry.rig.ringMat.opacity = 0.75 + Math.sin(this.elapsedTotal * 8) * 0.2;
@@ -1766,15 +1982,22 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
 
   private loop = (now: number): void => {
     this.rafId = requestAnimationFrame(this.loop);
-    const dt = Math.min(0.05, Math.max(0.001, (now - this.lastTime) / 1000));
+    const rawDt = Math.min(0.05, Math.max(0.001, (now - this.lastTime) / 1000));
     this.lastTime = now;
-    this.elapsedTotal += dt;
+
+    // Tactile ~75ms Hitstop freeze-frame on dramatic crits, KOs & boss blasts
+    let simDt = rawDt;
+    if (this.hitstopTimer > 0) {
+      this.hitstopTimer = Math.max(0, this.hitstopTimer - rawDt);
+      simDt = rawDt * 0.08;
+    }
+    this.elapsedTotal += simDt;
 
     const view = this.hooks.getState();
     if (!view) return;
     const b = view.battle;
 
-    // Sync board dimensions to camera framing whenever map changes
+    // Sync board dimensions & Act-specific lighting mood whenever map changes
     const dimSig = `${b.width}x${b.height}:${b.theme ?? 'spring'}`;
     if (dimSig !== this.lastBoardDims) {
       this.lastBoardDims = dimSig;
@@ -1783,15 +2006,43 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         b.height * TILE_SIZE_3D,
         this.cssW / Math.max(1, this.cssH)
       );
-      // Warm theme-tuned ambient background
       const bgHex =
-        b.theme === 'greenhouse' ? '#4d6654' : b.theme === 'autumn' ? '#6e3f21' : '#664022';
+        b.theme === 'greenhouse' ? '#496352' : b.theme === 'autumn' ? '#4d2b22' : '#664022';
       this.scene.background = new THREE.Color(bgHex);
       (this.scene.fog as THREE.FogExp2).color.set(bgHex);
+
+      // Act-specific Paper Mario stage lighting!
+      if (this.sunLight && this.hemiLight && this.rimLight) {
+        if (b.theme === 'autumn') {
+          this.sunLight.color.set('#ffbe78');
+          this.sunLight.intensity = 1.48;
+          this.hemiLight.color.set('#ffd6a6');
+          this.hemiLight.groundColor.set('#4f3548');
+          this.hemiLight.intensity = 0.88;
+          this.rimLight.color.set('#a8b8ff');
+          this.rimLight.intensity = 0.52;
+        } else if (b.theme === 'greenhouse') {
+          this.sunLight.color.set('#fff5d6');
+          this.sunLight.intensity = 1.62;
+          this.hemiLight.color.set('#f2ffec');
+          this.hemiLight.groundColor.set('#756640');
+          this.hemiLight.intensity = 1.0;
+          this.rimLight.color.set('#d2f5e3');
+          this.rimLight.intensity = 0.44;
+        } else {
+          this.sunLight.color.set('#fff1cf');
+          this.sunLight.intensity = 1.55;
+          this.hemiLight.color.set('#fff7e2');
+          this.hemiLight.groundColor.set('#8f6239');
+          this.hemiLight.intensity = 0.96;
+          this.rimLight.color.set('#c8e4ff');
+          this.rimLight.intensity = 0.42;
+        }
+      }
     }
 
     this.world.syncBattle(b);
-    this.world.update(this.elapsedTotal, dt);
+    this.world.update(this.elapsedTotal, simDt);
 
     const tac = this.computeTacticalCache(view);
     const focusTile = view.previewTile ?? view.hoveredTile;
@@ -1808,6 +2059,8 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       attackKeySet: tac.attackKeySet,
       weaponRangeKeys: tac.weaponRangeKeys,
       isProjectingFromMove: tac.isProjectingFromMove,
+      previewOverwatch: Boolean(view.previewOverwatch),
+      overwatchRangeKeys: tac.overwatchRangeKeys,
       abilityKeySet: tac.abilityKeySet,
       itemKeySet: tac.itemKeySet,
       aoePreviewKeys: tac.aoePreviewKeys,
@@ -1816,10 +2069,10 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     });
 
     this.updateAimCamAndFocusAnchor(view, tac);
-    this.cameraCtrl.update(dt);
+    this.cameraCtrl.update(rawDt);
     this.overlays.update(this.elapsedTotal, this.cameraCtrl.camera.position);
-    this.syncUnits(view, tac, dt);
-    this.updateEffects(dt);
+    this.syncUnits(view, tac, simDt);
+    this.updateEffects(simDt);
 
     this.renderer.render(this.scene, this.cameraCtrl.camera);
     this.drawOverlay2D(view, tac);

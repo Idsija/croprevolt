@@ -133,12 +133,16 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       rect(6, 8, 6, 10, { terrain: 'soil' }),
       rect(2, 0, 2, 2, { terrain: 'soil' }),
       rect(6, 0, 6, 2, { terrain: 'soil' }),
-      // Compost & mud banks
+      // Compost, mud banks & flanking Gopher Burrow Warp Pipes!
       [
         { x: 0, y: 5, terrain: 'compost' },
         { x: 8, y: 5, terrain: 'compost' },
         { x: 1, y: 8, terrain: 'mud' },
         { x: 7, y: 2, terrain: 'mud' },
+        { x: 0, y: 8, terrain: 'burrow', elevation: 0 },
+        { x: 0, y: 2, terrain: 'burrow', elevation: 0 },
+        { x: 8, y: 8, terrain: 'burrow', elevation: 0 },
+        { x: 8, y: 2, terrain: 'burrow', elevation: 0 },
       ],
       // Tactical cover & creek-side explosive hazards
       [
@@ -155,6 +159,10 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 4, y: 1, cover: 'stone' },
       ]
     ),
+    burrowPairs: [
+      [{ x: 0, y: 8 }, { x: 0, y: 2 }],
+      [{ x: 8, y: 8 }, { x: 8, y: 2 }],
+    ],
     playerSpawns: [
       { x: 1, y: 10 },
       { x: 3, y: 9 },
@@ -173,7 +181,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
   canyon_terrace: {
     id: 'canyon_terrace',
     name: 'Sunlit Canyon Terraces',
-    subtitle: 'Scale two-story terraced cliffs via ramps and knock farmers off high ground!',
+    subtitle: 'Scale two-story terraced cliffs via ramps or Gopher Burrows and knock farmers off high ground!',
     objective: 'defeat_all',
     objectiveLabel: 'Defeat all farmers',
     width: 10,
@@ -205,11 +213,15 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 4, y: 3, terrain: 'ramp', elevation: 1 },
         { x: 5, y: 3, terrain: 'ramp', elevation: 1 },
       ],
-      // Compost beds & sunbeams
+      // Compost beds, sunbeams & Gopher Burrow Warp Pipes launching straight onto cliffs!
       [
         { x: 0, y: 6, terrain: 'compost', elevation: 1 },
         { x: 9, y: 6, terrain: 'compost', elevation: 1 },
         { x: 4, y: 1, terrain: 'sunbeam', elevation: 2 },
+        { x: 1, y: 9, terrain: 'burrow', elevation: 0 },
+        { x: 2, y: 3, terrain: 'burrow', elevation: 1 },
+        { x: 8, y: 9, terrain: 'burrow', elevation: 0 },
+        { x: 7, y: 3, terrain: 'burrow', elevation: 1 },
       ],
       // Cover & interactive canyon props
       [
@@ -225,6 +237,10 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 6, y: 2, cover: 'stone' },
       ]
     ),
+    burrowPairs: [
+      [{ x: 1, y: 9 }, { x: 2, y: 3 }],
+      [{ x: 8, y: 9 }, { x: 7, y: 3 }],
+    ],
     playerSpawns: [
       { x: 2, y: 11 },
       { x: 4, y: 10 },
@@ -243,7 +259,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
   molten_furnace: {
     id: 'molten_furnace',
     name: 'Boiler Foundry Crucible',
-    subtitle: 'Shove farmers into glowing lava channels (-4 HP + Burn) from elevated catwalks!',
+    subtitle: 'Shove farmers into glowing lava channels (-4 HP + Burn) from elevated catwalks & burrows!',
     theme: 'greenhouse',
     objective: 'defeat_all',
     objectiveLabel: 'Defeat the foundry squad',
@@ -270,12 +286,16 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 0, y: 3, terrain: 'ramp', elevation: 0 },
         { x: 8, y: 3, terrain: 'ramp', elevation: 0 },
       ],
-      // North raised furnace dais (elevation 1)
+      // North raised furnace dais (elevation 1) + Gopher Burrow tunnels onto catwalks!
       rect(2, 1, 6, 2, { terrain: 'barn_floor', elevation: 1 }),
       [
         { x: 4, y: 3, terrain: 'ramp', elevation: 0 },
         { x: 2, y: 6, terrain: 'sunbeam', elevation: 0 },
         { x: 6, y: 6, terrain: 'sunbeam', elevation: 0 },
+        { x: 0, y: 10, terrain: 'burrow', elevation: 0 },
+        { x: 0, y: 5, terrain: 'burrow', elevation: 1 },
+        { x: 8, y: 10, terrain: 'burrow', elevation: 0 },
+        { x: 8, y: 5, terrain: 'burrow', elevation: 1 },
       ],
       // Cover, Sprinklers & Beehives positioned for explosive lava dunks!
       [
@@ -291,6 +311,10 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 5, y: 2, cover: 'crate' },
       ]
     ),
+    burrowPairs: [
+      [{ x: 0, y: 10 }, { x: 0, y: 5 }],
+      [{ x: 8, y: 10 }, { x: 8, y: 5 }],
+    ],
     playerSpawns: [
       { x: 1, y: 11 },
       { x: 3, y: 10 },
@@ -519,12 +543,16 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 4, y: 3, terrain: 'ramp', elevation: 1 },
         { x: 5, y: 3, terrain: 'ramp', elevation: 1 },
       ],
-      // Compost healers & mud flanks
+      // Compost healers, mud flanks & Gopher Burrow warp pipes!
       [
         { x: 0, y: 6, terrain: 'compost' },
         { x: 9, y: 6, terrain: 'compost' },
         { x: 2, y: 5, terrain: 'mud' },
         { x: 7, y: 5, terrain: 'mud' },
+        { x: 0, y: 9, terrain: 'burrow' },
+        { x: 0, y: 2, terrain: 'burrow' },
+        { x: 9, y: 9, terrain: 'burrow' },
+        { x: 9, y: 2, terrain: 'burrow' },
       ],
       // Boss fortress cover
       [
@@ -540,6 +568,10 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 6, y: 2, cover: 'stone' },
       ]
     ),
+    burrowPairs: [
+      [{ x: 0, y: 9 }, { x: 0, y: 2 }],
+      [{ x: 9, y: 9 }, { x: 9, y: 2 }],
+    ],
     playerSpawns: [
       { x: 2, y: 11 },
       { x: 4, y: 10 },
@@ -778,13 +810,17 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 4, y: 3, terrain: 'ramp', elevation: 1 },
         { x: 5, y: 3, terrain: 'ramp', elevation: 1 },
       ],
-      // Sunbeams & Compost
+      // Sunbeams, Compost & Gopher Burrow warp pipes onto the boiler catwalks!
       [
         { x: 2, y: 8, terrain: 'sunbeam' },
         { x: 7, y: 8, terrain: 'sunbeam' },
         { x: 4, y: 4, terrain: 'sunbeam', elevation: 1 },
         { x: 0, y: 7, terrain: 'compost' },
         { x: 9, y: 7, terrain: 'compost' },
+        { x: 0, y: 9, terrain: 'burrow' },
+        { x: 0, y: 3, terrain: 'burrow', elevation: 1 },
+        { x: 9, y: 9, terrain: 'burrow' },
+        { x: 9, y: 3, terrain: 'burrow', elevation: 1 },
       ],
       // Boss fortress interactive props
       [
@@ -798,6 +834,10 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 6, y: 2, cover: 'stone' },
       ]
     ),
+    burrowPairs: [
+      [{ x: 0, y: 9 }, { x: 0, y: 3 }],
+      [{ x: 9, y: 9 }, { x: 9, y: 3 }],
+    ],
     playerSpawns: [
       { x: 2, y: 11 },
       { x: 4, y: 10 },
@@ -849,12 +889,16 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 4, y: 3, terrain: 'ramp', elevation: 1 },
         { x: 5, y: 3, terrain: 'ramp', elevation: 1 },
       ],
-      // Compost & mud beds
+      // Compost, mud beds & Gopher Burrow warp pipes to the ridge!
       [
         { x: 0, y: 8, terrain: 'compost' },
         { x: 9, y: 8, terrain: 'compost' },
         { x: 3, y: 7, terrain: 'mud' },
         { x: 6, y: 7, terrain: 'mud' },
+        { x: 0, y: 9, terrain: 'burrow' },
+        { x: 1, y: 4, terrain: 'burrow', elevation: 1 },
+        { x: 9, y: 9, terrain: 'burrow' },
+        { x: 8, y: 4, terrain: 'burrow', elevation: 1 },
       ],
       // Orchard cover: thorny brambles, hay bales, crates, beehives & stones
       [
@@ -870,6 +914,10 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
         { x: 8, y: 3, cover: 'crate' },
       ]
     ),
+    burrowPairs: [
+      [{ x: 0, y: 9 }, { x: 1, y: 4 }],
+      [{ x: 9, y: 9 }, { x: 8, y: 4 }],
+    ],
     playerSpawns: [
       { x: 2, y: 11 },
       { x: 4, y: 10 },
