@@ -1214,7 +1214,9 @@ onBeforeUnmount(() => {
               ? 'PREP'
               : battle.phase === 'player'
                 ? `TURN ${battle.turn}`
-                : 'FARMER TURN'
+                : gameStore.enemyTurnProgress
+                  ? `FARMER ${gameStore.enemyTurnProgress.index}/${gameStore.enemyTurnProgress.total}`
+                  : 'FARMER TURN'
           }}
         </span>
         <div class="status-copy">
@@ -1352,6 +1354,15 @@ onBeforeUnmount(() => {
     <!-- Phones: the objective gets its own full-width line under the top bar -->
     <div v-if="battle.status === 'ongoing'" class="objective-strip mobile-only" role="status">
       {{ objectiveLine }}
+    </div>
+
+    <!-- Farmer Turn: say that a tap fast-forwards it -->
+    <div
+      v-if="gameStore.enemyTurnRunning && battle.status === 'ongoing' && !gameStore.enemyHurry"
+      class="hurry-hint"
+      aria-hidden="true"
+    >
+      Tap the board to fast-forward ▸▸
     </div>
 
     <!-- Boss Telegraphed Super-Attack Alert Pill -->
@@ -4384,6 +4395,37 @@ onBeforeUnmount(() => {
   background: #cfe8b5;
   color: #2f4f1a;
   font-weight: 700;
+}
+.hurry-hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(150px + var(--safe-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 24;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(40, 28, 16, 0.72);
+  color: #fff8e6;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  pointer-events: none;
+  animation: hurry-fade 2.4s ease-in-out infinite;
+}
+@keyframes hurry-fade {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hurry-hint {
+    animation: none;
+    opacity: 0.8;
+  }
 }
 .cam-mode-pill.bonds {
   background: #fff3c4;

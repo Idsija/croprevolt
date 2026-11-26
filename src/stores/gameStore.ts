@@ -158,6 +158,10 @@ export interface GameStoreState {
   autoEndTurnEnabled: boolean;
   autoEndPending: boolean;
   enemyTurnRunning: boolean;
+  /** Which farmer is acting during the Farmer Turn: 1-based index and total, or null. */
+  enemyTurnProgress: { index: number; total: number } | null;
+  /** The player tapped during the Farmer Turn: play the rest of it at top speed. */
+  enemyHurry: boolean;
   enemySpeedFast: boolean;
   muted: boolean;
   musicMuted: boolean;
@@ -189,6 +193,8 @@ export const gameStore = reactive<GameStoreState>({
   autoEndTurnEnabled: loadAutoEndPref(),
   autoEndPending: false,
   enemyTurnRunning: false,
+  enemyTurnProgress: null,
+  enemyHurry: false,
   enemySpeedFast: loadEnemySpeedFast(),
   muted: sfx.isMuted(),
   musicMuted: music.isMuted(),
@@ -427,6 +433,8 @@ function beginRun(run: RunState): void {
   gameStore.run = run;
   gameStore.battle = null;
   gameStore.enemyTurnRunning = false;
+  gameStore.enemyTurnProgress = null;
+  gameStore.enemyHurry = false;
   gameStore.selectedUnitId = null;
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
@@ -452,6 +460,8 @@ export function continueSavedRun(): void {
   gameStore.run = saved;
   gameStore.battle = null;
   gameStore.enemyTurnRunning = false;
+  gameStore.enemyTurnProgress = null;
+  gameStore.enemyHurry = false;
   gameStore.selectedUnitId = null;
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
@@ -465,6 +475,8 @@ export function returnToTitle(): void {
   lastUndoUnitId = null;
   clearAutoEndTimer();
   gameStore.enemyTurnRunning = false;
+  gameStore.enemyTurnProgress = null;
+  gameStore.enemyHurry = false;
   if (gameStore.run && gameStore.run.status !== 'victory' && gameStore.run.status !== 'defeat') {
     saveRun(gameStore.run);
     gameStore.savedRunAvailable = true;
@@ -562,6 +574,8 @@ export function enterSeasonNode(nodeId: string, travelCardId?: string): void {
   gameStore.showAllDangerZone = false;
   gameStore.previewOverwatch = false;
   gameStore.enemyTurnRunning = false;
+  gameStore.enemyTurnProgress = null;
+  gameStore.enemyHurry = false;
   const firstHero = battle.units.find((u) => u.team === 'player' && u.alive && !u.isEscortCart);
   gameStore.selectedUnitId = firstHero?.id ?? null;
 
@@ -1021,7 +1035,10 @@ export function executePreviewOption(kind: PreviewActionOption['kind'], explicit
  * cleanly deselects active unit, enemy threat zone, and preview!
  */
 export function handleOffBoardTap(): void {
-  if (gameStore.enemyTurnRunning) return;
+  if (gameStore.enemyTurnRunning) {
+    hurryEnemyTurn();
+    return;
+  }
   clearAutoEndTimer();
   if (!gameStore.battle?.prepPhase) {
     deselectAll(true);
@@ -1034,7 +1051,11 @@ export function handleOffBoardTap(): void {
 export function handleBattleTileTap(pos: GridPos, pointerType = 'mouse'): void {
   const b = gameStore.battle;
   const run = gameStore.run;
-  if (!b || !run || b.status !== 'ongoing' || b.phase !== 'player' || gameStore.enemyTurnRunning) {
+  if (gameStore.enemyTurnRunning) {
+    hurryEnemyTurn();
+    return;
+  }
+  if (!b || !run || b.status !== 'ongoing' || b.phase !== 'player') {
     return;
   }
 
@@ -1248,7 +1269,13 @@ function sleep(ms: number): Promise<void> {
 }
 
 function enemyPhaseSleep(ms: number): Promise<void> {
+  if (gameStore.enemyHurry) return sleep(Math.max(60, Math.round(ms * 0.25)));
   return sleep(gameStore.enemySpeedFast ? Math.max(80, Math.round(ms * 0.45)) : ms);
+}
+
+/** Tap anywhere during the Farmer Turn to fast-forward the rest of it. */
+export function hurryEnemyTurn(): void {
+  if (gameStore.enemyTurnRunning) gameStore.enemyHurry = true;
 }
 
 export async function endPlayerTurn(): Promise<void> {
@@ -1271,12 +1298,16 @@ export async function endPlayerTurn(): Promise<void> {
 
   if (b.status !== 'ongoing') {
     gameStore.enemyTurnRunning = false;
+    gameStore.enemyTurnProgress = null;
+    gameStore.enemyHurry = false;
     return;
   }
 
   await enemyPhaseSleep(850);
   if (session !== battleSessionId || !gameStore.battle) {
     gameStore.enemyTurnRunning = false;
+    gameStore.enemyTurnProgress = null;
+    gameStore.enemyHurry = false;
     return;
   }
 
@@ -1284,10 +1315,13 @@ export async function endPlayerTurn(): Promise<void> {
     .filter((u) => u.team === 'enemy' && u.alive)
     .map((u) => u.id);
 
+  let enemyIndex = 0;
   for (const eid of enemyIds) {
     if (session !== battleSessionId || !gameStore.battle || gameStore.battle.status !== 'ongoing') {
       break;
     }
+    enemyIndex += 1;
+    gameStore.enemyTurnProgress = { index: enemyIndex, total: enemyIds.length };
     const acted = runEnemyUnitTurn(gameStore.battle, eid);
     if (acted) {
       // Split movement/dash from attacks/abilities so players can read every farmer's beat clearly!
@@ -1314,6 +1348,8 @@ export async function endPlayerTurn(): Promise<void> {
         await enemyPhaseSleep(combatEvents.length > 0 ? 340 : 520);
         if (session !== battleSessionId || !gameStore.battle) {
           gameStore.enemyTurnRunning = false;
+          gameStore.enemyTurnProgress = null;
+          gameStore.enemyHurry = false;
           return;
         }
       }
@@ -1326,6 +1362,8 @@ export async function endPlayerTurn(): Promise<void> {
 
   if (session !== battleSessionId) {
     gameStore.enemyTurnRunning = false;
+    gameStore.enemyTurnProgress = null;
+    gameStore.enemyHurry = false;
     return;
   }
 
@@ -1341,6 +1379,8 @@ export async function endPlayerTurn(): Promise<void> {
   }
 
   gameStore.enemyTurnRunning = false;
+  gameStore.enemyTurnProgress = null;
+  gameStore.enemyHurry = false;
 }
 
 export function finalizeBattleAndProceed(): void {
