@@ -425,6 +425,7 @@ export function createBattleFromMap(
     const rng = setup.rng ?? Math.random;
     for (const unit of shuffle(regulars, rng).slice(0, setup.difficulty.veterans)) {
       promoteToVeteran(unit);
+      unit.weapon.damage += setup.difficulty.veteranDamageBonus ?? 0;
     }
   }
 

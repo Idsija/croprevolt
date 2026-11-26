@@ -1,9 +1,10 @@
 /**
- * Headless run simulator for balance checks. A simple bot plays whole runs through the
- * real engine: it travels the board, fights every battle, and takes the first reward on
- * offer. The bot is much weaker than a person (it never uses abilities, items, team jumps,
- * overwatch or skill perks), so read its numbers as a comparison between acts, floors and
- * heat levels, not as the win rate a player would get.
+ * Headless run simulator for balance checks. A bot plays whole runs through the real
+ * engine: it travels the board, fights every battle and takes the first reward on offer.
+ * In battle it dashes, moves to cover and high ground, steps off boss warning tiles, and
+ * uses abilities and items. It still plays worse than a person (no team jumps, overwatch,
+ * skill perks or market shopping), so read its numbers as a comparison between stages,
+ * maps and heat levels, and treat its run win rate as a floor for what a player gets.
  */
 import { RECRUITABLE_BLUEPRINT_IDS } from '../data/produce';
 import { runEnemyUnitTurn } from '../engine/ai';

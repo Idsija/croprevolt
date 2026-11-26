@@ -16,6 +16,8 @@ export interface BattleDifficulty {
   extraEnemies: number;
   /** Number of enemies promoted to Veterans (+50% HP, +1 damage, starts shielded). */
   veterans: number;
+  /** Extra weapon damage for Veterans only (Heat 5). */
+  veteranDamageBonus?: number;
 }
 
 export const MAX_ENEMIES_PER_BATTLE = 6;
@@ -37,7 +39,7 @@ export const TUNING = {
   /** Chance that each regular spawn is swapped for a different farmhand. */
   rerollChance: 0.5,
   /** Heat 1+: multiplier on every farmer's HP. */
-  heatHpMult: 1.1,
+  heatHpMult: 1.05,
   /** Heat 2+: elites always gain a Veteran, regular battles from this floor (0-based) on. */
   heatVeteranFloor: 3,
   /** Heat 4+: extra multiplier on boss HP. */
@@ -59,11 +61,11 @@ export interface HarvestHeatInfo {
 
 export const HARVEST_HEAT_LEVELS: HarvestHeatInfo[] = [
   { level: 0, name: 'Heat 0 · Morning Dew', desc: 'Standard storybook adventure.', seedBonusPct: 0 },
-  { level: 1, name: 'Heat 1 · High Noon', desc: 'All farmhands gain +10% Max HP. The Harvest Bell rings 1 turn sooner.', seedBonusPct: 20 },
+  { level: 1, name: 'Heat 1 · High Noon', desc: 'All farmhands gain +5% Max HP. The Harvest Bell rings 1 turn sooner.', seedBonusPct: 20 },
   { level: 2, name: 'Heat 2 · Barn Veterans', desc: 'Elites & late-floor battles field +1 Veteran farmhand. Market prices rise 25%.', seedBonusPct: 40 },
   { level: 3, name: 'Heat 3 · Brittle Crates', desc: 'Wooden crates start cracked (-2 HP). The rest after a battle heals 1 HP, not 3.', seedBonusPct: 60 },
   { level: 4, name: 'Heat 4 · Wrathful Wardens', desc: 'Act Bosses gain +10% HP & +1 telegraph DMG. The Harvest Bell rings 2 turns sooner.', seedBonusPct: 80 },
-  { level: 5, name: 'Heat 5 · Scorching Harvest', desc: 'All enemies gain +1 Weapon Damage! Market prices rise 50%.', seedBonusPct: 100 },
+  { level: 5, name: 'Heat 5 · Scorching Harvest', desc: 'Bosses and Veterans gain +1 Weapon Damage! Market prices rise 50%.', seedBonusPct: 100 },
 ];
 
 /**
@@ -110,6 +112,7 @@ export function difficultyFor(
       threat,
       hpMult: (1 + TUNING.bossHpPerAct * act) * heatHpMult * bossHeatMult,
       damageBonus: TUNING.damagePerAct * act + heatDmgBonus,
+      veteranDamageBonus: heatDmgBonus,
       extraEnemies: 0,
       veterans: TUNING.bossVeteransPerAct * act,
     };
@@ -124,7 +127,8 @@ export function difficultyFor(
   return {
     threat,
     hpMult: (1 + TUNING.hpPerThreat * (threat - 1)) * heatHpMult,
-    damageBonus: (floor >= TUNING.damageBonusFloor ? 1 : 0) + TUNING.damagePerAct * act + heatDmgBonus,
+    damageBonus: (floor >= TUNING.damageBonusFloor ? 1 : 0) + TUNING.damagePerAct * act,
+    veteranDamageBonus: heatDmgBonus,
     extraEnemies: nodeType === 'elite' ? Math.max(0, extraEnemies - 1) : extraEnemies,
     veterans: baseVeterans + heatExtraVet,
   };
