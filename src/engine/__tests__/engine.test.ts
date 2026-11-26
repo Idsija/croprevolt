@@ -294,7 +294,8 @@ describe('Crop Revolt! Tactical Engine', () => {
 
   it('computes simultaneous ally weapon ranges, enemy threat zones, and smart auto turn-end readiness', () => {
     const run = createNewRun(defaultMetaProgress());
-    const battle = createBattleFromMap('vegetable_patch', run.roster.slice(0, 2), [], run.items);
+    const pair = run.roster.filter((h) => ['potato', 'pea'].includes(h.blueprintId));
+    const battle = createBattleFromMap('vegetable_patch', pair, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
         battle.tiles[y][x].cover = null;
@@ -350,7 +351,11 @@ describe('Crop Revolt! Tactical Engine', () => {
 
   it('supports unit unclick, enemy toggle-off, tab-blur focus clear, and never auto-uses skills', () => {
     const run = createNewRun(defaultMetaProgress());
-    const battle = createBattleFromMap('vegetable_patch', run.roster.slice(0, 2), [], run.items);
+    const pair = [
+      run.roster.find((h) => h.blueprintId === 'potato')!,
+      run.roster.find((h) => h.blueprintId === 'pea')!,
+    ];
+    const battle = createBattleFromMap('vegetable_patch', pair, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
         battle.tiles[y][x].cover = null;
@@ -482,7 +487,8 @@ describe('Crop Revolt! Tactical Engine', () => {
     expect(hero.graftIds.length).toBe(MAX_GRAFTS_PER_HERO);
     expect(applyGraftToHero(run, hero.uid, 'pumpkin_rind')).toBe(false);
 
-    const battle = createBattleFromMap('vegetable_patch', run.roster.slice(0, 2), [], run.items);
+    const pair = run.roster.filter((h) => ['potato', 'pea'].includes(h.blueprintId));
+    const battle = createBattleFromMap('vegetable_patch', pair, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
         battle.tiles[y][x].cover = null;
@@ -537,7 +543,8 @@ describe('Crop Revolt! Tactical Engine', () => {
 
   it('resolves Knockback slide, +2 BUMP crunch, Beehive chain explosions, Sprinkler jets, and Sunbeam +2 ATK', () => {
     const run = createNewRun(defaultMetaProgress(), 'summer');
-    const battle = createBattleFromMap('greenhouse_entry', run.roster.slice(0, 4), [], run.items);
+    const quad = run.roster.filter((h) => ['potato', 'pea', 'lemon', 'pig'].includes(h.blueprintId));
+    const battle = createBattleFromMap('greenhouse_entry', quad, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
         battle.tiles[y][x].cover = null;
@@ -671,5 +678,51 @@ describe('Crop Revolt! Tactical Engine', () => {
 
     expect(buyMarketOffer(run, rescueOffer.id)).toBe(true);
     expect(run.roster[1].harvested).toBe(false);
+  });
+
+  it('starts runs with Stitch (cow) and Crisphead (lettuce) in the active starter squad with working traits & skills', () => {
+    const run = createNewRun(defaultMetaProgress());
+    const activeIds = run.activeSquadUids.map(
+      (uid) => run.roster.find((h) => h.uid === uid)?.blueprintId
+    );
+    expect(activeIds[0]).toBe('cow');
+    expect(activeIds[1]).toBe('lettuce');
+
+    const activeHeroes = run.activeSquadUids.map(
+      (uid) => run.roster.find((h) => h.uid === uid)!
+    );
+    const battle = createBattleFromMap('vegetable_patch', activeHeroes, [], run.items);
+    for (let y = 0; y < battle.height; y++) {
+      for (let x = 0; x < battle.width; x++) {
+        battle.tiles[y][x].cover = null;
+      }
+    }
+
+    const stitch = battle.units.find((u) => u.visualKind === 'cow')!;
+    const lettuce = battle.units.find((u) => u.visualKind === 'lettuce')!;
+    const enemy = battle.units.find((u) => u.team === 'enemy')!;
+    expect(stitch.name).toBe('Stitch');
+    expect(stitch.isAnimal).toBe(true);
+    expect(stitch.livingHalfCover).toBe(true);
+    expect(stitch.statuses.some((s) => s.kind === 'shield')).toBe(true);
+
+    // Stitch provides Living Half Cover (50%) to Crisphead behind her!
+    stitch.pos = { x: 3, y: 5 };
+    lettuce.pos = { x: 3, y: 6 };
+    enemy.pos = { x: 3, y: 3 };
+    expect(evaluateCover(battle, enemy.pos, lettuce.pos, 'player').level).toBe('half');
+    expect(forecastAttack(battle, enemy, lettuce.pos).hitChance).toBe(50);
+
+    // Crisphead's Crisp Leaf Toss hits and knocks enemy back 1 tile!
+    enemy.hp = 20;
+    enemy.maxHp = 20;
+    expect(executeAttack(battle, lettuce.id, enemy.pos, () => 0)).toBe(true);
+    expect(enemy.pos).toEqual({ x: 3, y: 2 });
+
+    // Crisphead's Dewy Refresh heals & boosts nearby allies (including Stitch)!
+    stitch.hp = 10;
+    expect(executeAbility(battle, lettuce.id, lettuce.pos)).toBe(true);
+    expect(stitch.hp).toBe(13);
+    expect(stitch.statuses.some((s) => s.kind === 'boosted')).toBe(true);
   });
 });

@@ -88,6 +88,8 @@ export type HeroSpecies =
   | 'carrot'
   | 'blackberry'
   | 'corn'
+  | 'lettuce'
+  | 'cow'
   | 'pig'
   | 'rooster'
   | 'sheep'

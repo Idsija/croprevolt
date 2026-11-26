@@ -72,10 +72,10 @@ const unlockKeys: Array<keyof MetaProgress['unlocks']> = [
       <div class="diorama-showcase">
         <div class="standee-row">
           <div class="team-left">
-            <img class="st st-1" src="/sprites/potato.png" alt="Spudnik" />
+            <img class="st st-1" src="/sprites/lettuce.png" alt="Crisphead" />
             <img class="st st-2" :src="selectedSeason === 'summer' ? '/sprites/corn.png' : '/sprites/pea.png'" alt="Hero" />
             <img class="st st-3" src="/sprites/lemon.png" alt="Zestia" />
-            <img class="st st-4" src="/sprites/pig.png" alt="Truffle Boar" />
+            <img class="st st-4" src="/sprites/cow.png" alt="Stitch" />
           </div>
           <img
             class="st st-crate"

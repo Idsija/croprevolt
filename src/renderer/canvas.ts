@@ -140,6 +140,8 @@ const STANDEE_HIT_HEIGHTS: Record<string, number> = {
   carrot: 76,
   blackberry: 68,
   corn: 76,
+  lettuce: 68,
+  cow: 74,
   pig: 70,
   rooster: 80,
   sheep: 76,
@@ -2550,6 +2552,30 @@ export class PaperCraftRenderer {
       ctx.quadraticCurveTo(8 * s, -7 * s + wing, 0, 2 * s);
       ctx.closePath();
       ctx.fill();
+      ctx.stroke();
+    } else if (proj.attackerKind === 'lettuce') {
+      // Spinning crisp ruffled lettuce leaf disc!
+      ctx.rotate(t * Math.PI * 5.5);
+      ctx.fillStyle = '#fbf3df';
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 11.5 * s, 7.5 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#7acc47';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 9.2 * s, 5.5 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#d9f7b5';
+      ctx.lineWidth = 1.5 * s;
+      ctx.beginPath();
+      ctx.moveTo(-7.5 * s, 0);
+      ctx.lineTo(7.5 * s, 0);
+      ctx.moveTo(-2 * s, 0);
+      ctx.lineTo(2 * s, -3.5 * s);
+      ctx.moveTo(-2 * s, 0);
+      ctx.lineTo(2 * s, 3.5 * s);
       ctx.stroke();
     } else if (proj.attackerKind === 'chili') {
       // Sizzling pepper ember fireball

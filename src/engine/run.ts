@@ -293,7 +293,7 @@ export function createSummerSeasonNodes(): SeasonNode[] {
 
 export function createNewRun(meta: MetaProgress, seasonId: SeasonId = 'spring'): RunState {
   const hpBonus = meta.unlocks.heirloomSoil ? 2 : 0;
-  // Starter squad: Spudnik, Snap-Pea, Zestia & Truffle Boar active + Habanero on bench (swap anytime!)
+  // Starter squad: Stitch (cow), Crisphead (lettuce), Snap-Pea & Zestia active + Spudnik, Truffle Boar & Habanero on bench!
   const roster = STARTER_BLUEPRINT_IDS.map((id) => createHeroFromBlueprint(id, hpBonus));
   const relicIds = meta.unlocks.starterRelic ? ['rich_loam'] : [];
   const items: Record<string, number> = {
