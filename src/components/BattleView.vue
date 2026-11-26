@@ -75,20 +75,35 @@ import CraftIcon, { type CraftIconName } from './CraftIcon.vue';
 import HeroBuildModal from './HeroBuildModal.vue';
 
 const COACH_STORAGE_KEY = 'crop_revolt_coach_3d_v2';
-const COACH_TIPS = [
+const COACH_TIPS_DESKTOP = [
   {
-    title: '1/3 · High Ground, Bridges & Hazards',
-    body: 'Climb ramps onto cliffs for +2 DMG High Ground & cover bypass! Knock farmers into Water (-3), Lava (-4 + Burn), or off cliffs (-2)!',
+    title: '1/3 · Move, then shoot',
+    body: 'Click a hero, click a blue tile to move, then press Weapon and click a farmer. Every hero can do both each turn.',
   },
   {
-    title: '2/3 · Move, Dash & Team-Jump',
-    body: 'Hover any Move tile for a 3D Ghost & projected sightlines! Dash orange foes mid-move, Team-Jump gold tiles, or guard with Watch (O).',
+    title: '2/3 · Dash and Team-Jump',
+    body: 'While moving, run through an orange farmer to Dash it for free damage. Gold tiles bounce you off a friend for extra distance.',
   },
   {
-    title: '3/3 · Snappy Controls & Aim Cam',
-    body: 'Right-click cancels · Right-drag or Q/E orbits 3D · Press F for Aim Cam, A/D to cycle targets, and fire right from the floating pill!',
+    title: '3/3 · End the turn',
+    body: 'When your heroes are done, press End Turn (Enter). Right-click cancels, Q/E turns the camera, F opens the Aim Cam.',
   },
 ] as const;
+const COACH_TIPS_TOUCH = [
+  {
+    title: '1/3 · Move, then shoot',
+    body: 'Tap a hero, tap a blue tile twice to move, then tap Weapon and a farmer. Every hero can do both each turn.',
+  },
+  {
+    title: '2/3 · Dash and Team-Jump',
+    body: 'Run through an orange farmer to Dash it for free damage. Gold tiles bounce you off a friend for extra distance.',
+  },
+  {
+    title: '3/3 · End the turn',
+    body: 'When your heroes are done, tap End. Drag the board to look around and pinch to zoom.',
+  },
+] as const;
+const COACH_TIPS = computed(() => (gameStore.isTouchMode ? COACH_TIPS_TOUCH : COACH_TIPS_DESKTOP));
 
 function loadCoachStep(): number {
   try {
@@ -121,7 +136,7 @@ const webglFallbackNotice = ref(false);
 let endConfirmTimer: ReturnType<typeof setTimeout> | null = null;
 
 function advanceCoach(): void {
-  if (coachStep.value < COACH_TIPS.length - 1) {
+  if (coachStep.value < COACH_TIPS.value.length - 1) {
     coachStep.value += 1;
   } else {
     dismissCoach();
@@ -480,12 +495,12 @@ const STATUS_META: Record<StatusKind, { short: string; title: string; desc: stri
   rooted: { short: 'Root', title: 'Rooted', desc: 'Tangled in vines — cannot Move, Dash, or Team-Jump.' },
   acid: { short: 'Acid', title: 'Acid', desc: 'Corroded — takes +2 bonus damage from every attack.' },
   feared: { short: 'Fear', title: 'Feared', desc: 'Rattled by crows — Move range reduced by 2 tiles.' },
-  shield: { short: 'Shld', title: 'Shield', desc: 'Braced — takes 2 less damage from incoming attacks.' },
-  boosted: { short: 'Bst', title: 'Boosted', desc: 'Fired up — deals +2 Attack and +2 Dash damage.' },
+  shield: { short: 'Shield', title: 'Shield', desc: 'Braced — takes 2 less damage from incoming attacks.' },
+  boosted: { short: 'Boost', title: 'Boosted', desc: 'Fired up — deals +2 Attack and +2 Dash damage.' },
   overwatch: {
     short: 'Watch',
-    title: 'Hero Sight',
-    desc: 'Overwatch — automatically fires a reaction shot when an enemy moves into weapon range!',
+    title: 'Watch',
+    desc: 'On Watch: fires a reaction shot when a farmer moves into weapon range.',
   },
 };
 
@@ -678,12 +693,17 @@ function inspectRelic(rid: string): void {
 const bottomHudRef = ref<HTMLElement | null>(null);
 function syncHudInsets(): void {
   if (typeof window === 'undefined') return;
-  if (window.innerWidth >= 768 || !gameStore.battle) {
+  if (!gameStore.battle) {
     activeRenderer?.setHudInsets?.(0, 0);
     return;
   }
   const prep = Boolean(gameStore.battle.prepPhase);
   const measured = bottomHudRef.value?.offsetHeight ?? 0;
+  if (window.innerWidth >= 768) {
+    // Desktop: only the tall deploy panel hides tiles, so lift the board above it while deploying.
+    activeRenderer?.setHudInsets?.(0, prep ? Math.min(measured, window.innerHeight * 0.4) : 0);
+    return;
+  }
   activeRenderer?.setHudInsets?.(84, prep ? Math.max(260, measured) : 200);
 }
 
@@ -1305,7 +1325,7 @@ onBeforeUnmount(() => {
           :class="{ over: !battle.prepPhase && battle.turn > battle.parTurns }"
           :title="`Win within ${battle.parTurns} turns for a Great Harvest, with no hero bagged for a Perfect Harvest`"
         >
-          Par {{ battle.parTurns }}
+          ⏱ Goal: {{ battle.parTurns }} turns
         </span>
         <button
           v-if="!battle.prepPhase && activeSquadBonds.length > 0"
@@ -1648,7 +1668,8 @@ onBeforeUnmount(() => {
         <div class="menu-section">
           <h4>3D Controls &amp; Board Toys</h4>
           <ul class="mini-rules">
-            <li><strong>Camera:</strong> Right-drag (or <strong>Q / E</strong>) orbits 3D view · Left-drag pans · Scroll zooms · <strong>T</strong> toggles Tacticam · <strong>R</strong> resets.</li>
+            <li v-if="gameStore.isTouchMode"><strong>Camera:</strong> Drag the board to pan · Pinch to zoom.</li>
+            <li v-else><strong>Camera:</strong> Right-drag (or <strong>Q / E</strong>) orbits 3D view · Left-drag pans · Scroll zooms · <strong>T</strong> toggles Tacticam · <strong>R</strong> resets.</li>
             <li><strong>Tactics:</strong> <strong>🍄 Mushrooms</strong> launch 3 tiles/+2 elev · <strong>🎃 Pumpkins</strong> bowl 5 tiles for 4 DMG · <strong>🪵 Bridges</strong> collapse when shot · Adjacent allies deal <strong>+1 Assist DMG</strong>!</li>
             <li><strong>Strong (+30%):</strong> Roots &gt; Sprayers · Vines &gt; Diggers · Fruits &gt; Blades.</li>
           </ul>
@@ -1756,7 +1777,7 @@ onBeforeUnmount(() => {
             <div class="mr-portrait-box">
               <img class="mr-portrait-img" :src="unitPortraitSrc(u)" :alt="u.name" />
               <span v-if="u.alive && (u.level ?? 1) > 1" class="mr-lvl-chip">L{{ u.level }}</span>
-              <span v-if="u.alive && u.statuses.some((s) => s.kind === 'overwatch')" class="mr-watch-seal" title="Hero Sight Overwatch Active">
+              <span v-if="u.alive && u.statuses.some((s) => s.kind === 'overwatch')" class="mr-watch-seal" title="On Watch">
                 👁
               </span>
               <span v-else-if="u.alive && isHeroDone(u.id)" class="mr-done-seal">
@@ -2127,7 +2148,7 @@ onBeforeUnmount(() => {
                   <div class="mh-title-row">
                     <strong>★ {{ activeAbilityBanner.name }}</strong>
                     <span class="paper-pill mini-fam">
-                      {{ activeAbilityBanner.targetHint }} · CD {{ activeAbilityBanner.cooldown }}t
+                      {{ activeAbilityBanner.targetHint }} · ready again after {{ activeAbilityBanner.cooldown }} turns
                     </span>
                   </div>
                   <small>{{ activeAbilityBanner.desc }}</small>
@@ -2175,7 +2196,7 @@ onBeforeUnmount(() => {
                         class="match-stamp"
                         :class="inspectedEnemyMatchup"
                       >
-                        {{ inspectedEnemyMatchup === 'advantage' ? `▲ You ${advantagePctLabel}` : '▼ You -20%' }}
+                        {{ inspectedEnemyMatchup === 'advantage' ? `▲ Your type ${advantagePctLabel}` : '▼ Your type -20%' }}
                       </span>
                       <span v-else class="paper-pill mini-fam">{{ getFamilyLabel(inspectedEnemy.family) }}</span>
                     </div>
@@ -2227,7 +2248,7 @@ onBeforeUnmount(() => {
                     :class="st.kind"
                     @click.stop="inspectStatus(st.kind, st.turns)"
                   >
-                    {{ STATUS_META[st.kind]?.short }} {{ st.turns }}t
+                    {{ STATUS_META[st.kind]?.short }} {{ st.turns }} {{ st.turns === 1 ? 'turn' : 'turns' }}
                   </button>
                   <button
                     v-if="selectedUnit.coopPassive"
@@ -2268,8 +2289,8 @@ onBeforeUnmount(() => {
                           : 'Move'
                     }}</span>
                     <small v-if="dashHintCount > 0 || jumpHintCount > 0" class="act-sub">
-                      {{ dashHintCount > 0 ? `⚡${remainingDashesForSelected}` : '' }}
-                      {{ jumpHintCount > 0 ? `★${jumpHintCount}` : '' }}
+                      {{ dashHintCount > 0 ? (remainingDashesForSelected > 1 ? `⚡Dash×${remainingDashesForSelected}` : '⚡Dash') : '' }}
+                      {{ jumpHintCount > 0 ? '★Jump' : '' }}
                     </small>
                   </div>
                 </button>
@@ -2299,7 +2320,7 @@ onBeforeUnmount(() => {
                     'is-active': selectedUnit.statuses.some((s) => s.kind === 'overwatch'),
                   }"
                   :disabled="selectedUnit.actions.hasAttacked || battle.phase !== 'player' || gameStore.enemyTurnRunning"
-                  :title="`Hero Sight Overwatch (O) — Intercepts moving foes with ${overwatchChargesForSelected} reaction shot(s)`"
+                  :title="`Watch (O): uses your attack to fire ${overwatchChargesForSelected} reaction shot(s) at farmers who move into range`"
                   @mouseenter="setPreviewOverwatch(true)"
                   @mouseleave="setPreviewOverwatch(false)"
                   @focus="setPreviewOverwatch(true)"
@@ -2415,7 +2436,7 @@ onBeforeUnmount(() => {
           </span>
           <span class="paper-pill">
             Turns: {{ victoryGrade ? victoryGrade.turns : battle.turn
-            }}<template v-if="battle.parTurns"> / Par {{ battle.parTurns }}</template>
+            }}<template v-if="battle.parTurns"> / goal {{ battle.parTurns }}</template>
           </span>
           <span class="paper-pill">
             Survivors: {{ battle.units.filter((u) => u.team === 'player' && u.alive && !u.isEscortCart).length }}

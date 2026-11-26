@@ -479,6 +479,7 @@ export function createBattleFromMap(
     applyRolledObjective(state, setup.objective);
   }
   state.parTurns = computeParTurns(state);
+  numberDuplicateEnemyNames(state);
   if (!prepPhase) announceSquadBonds(state);
   return state;
 }
@@ -612,6 +613,17 @@ export function finishPrepPhase(state: BattleState): boolean {
   pushLog(state, 'Squad ready! Produce Phase — Turn 1 begins!');
   announceSquadBonds(state);
   return true;
+}
+
+/** Two farmers with the same name are told apart with a number ("Barkley 2"). */
+function numberDuplicateEnemyNames(state: BattleState): void {
+  const seen = new Map<string, number>();
+  for (const unit of state.units) {
+    if (unit.team !== 'enemy') continue;
+    const n = (seen.get(unit.name) ?? 0) + 1;
+    seen.set(unit.name, n);
+    if (n > 1) unit.name = `${unit.name} ${n}`;
+  }
 }
 
 function announceSquadBonds(state: BattleState): void {
@@ -1422,7 +1434,7 @@ function triggerOverwatchInterrupts(state: BattleState, mover: BattleUnit): void
     });
     pushLog(
       state,
-      `HERO SIGHT! ${watcher.name} intercepted ${mover.name} for ${dmg} dmg${watcherFx.overwatchRoots ? ' (+Rooted!)' : ''}!`
+      `WATCH! ${watcher.name} intercepted ${mover.name} for ${dmg} dmg${watcherFx.overwatchRoots ? ' (+Rooted!)' : ''}!`
     );
     handleUnitKO(state, mover);
   }
@@ -1441,7 +1453,7 @@ export function executeOverwatch(state: BattleState, unitId: string): boolean {
   state.pendingEvents.push({
     type: 'ability',
     unitId: unit.id,
-    abilityName: `Hero Sight (×${unit.actions.overwatchCharges})`,
+    abilityName: `Watch (×${unit.actions.overwatchCharges})`,
     from: { ...unit.pos },
     to: { ...unit.pos },
     affectedIds: [unit.id],
@@ -1449,7 +1461,7 @@ export function executeOverwatch(state: BattleState, unitId: string): boolean {
   });
   pushLog(
     state,
-    `${unit.name} entered HERO SIGHT Overwatch (${unit.actions.overwatchCharges} reaction shot${unit.actions.overwatchCharges > 1 ? 's' : ''})!`
+    `${unit.name} is on Watch (${unit.actions.overwatchCharges} reaction shot${unit.actions.overwatchCharges > 1 ? 's' : ''})!`
   );
   return true;
 }
@@ -1542,9 +1554,8 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
   unit.actions.dashedEnemyIds = [...(unit.actions.dashedEnemyIds ?? []), target.id];
   unit.actions.hasDashed = nextDashes >= getMaxDashesForUnit(unit);
 
-  let dmg = opt.damage;
-  if (hasStatus(target, 'acid')) dmg += 2;
-  if (hasStatus(target, 'shield')) dmg = Math.max(1, dmg - 2);
+  // opt.damage already includes the target's Acid and Shield, so the preview matches the hit.
+  const dmg = opt.damage;
 
   target.hp -= dmg;
   if (opt.appliesStatus) {
