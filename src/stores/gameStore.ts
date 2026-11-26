@@ -57,9 +57,23 @@ import type {
 import type { InteractionMode } from '../renderer/canvas';
 import type { BoardViewMode } from '../renderer/iso';
 import { sfx } from '../renderer/sfx';
+import type { RendererKind } from '../renderer3d/types';
 
 const VIEW_MODE_KEY = 'crop_revolt_view_v2';
 const AUTO_END_KEY = 'crop_revolt_auto_end_v1';
+const RENDERER_KIND_KEY = 'crop_revolt_renderer_v1';
+
+function loadInitialRendererKind(): RendererKind {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(RENDERER_KIND_KEY);
+      if (saved === '3d' || saved === '2d') return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return '3d';
+}
 
 function loadInitialViewMode(): BoardViewMode {
   try {
@@ -108,6 +122,7 @@ export interface GameStoreState {
   hoveredTile: GridPos | null;
   previewTile: GridPos | null;
   isTouchMode: boolean;
+  rendererKind: RendererKind;
   viewMode: BoardViewMode;
   autoEndTurnEnabled: boolean;
   autoEndPending: boolean;
@@ -135,6 +150,7 @@ export const gameStore = reactive<GameStoreState>({
   hoveredTile: null,
   previewTile: null,
   isTouchMode: false,
+  rendererKind: loadInitialRendererKind(),
   viewMode: loadInitialViewMode(),
   autoEndTurnEnabled: loadAutoEndPref(),
   autoEndPending: false,
@@ -268,6 +284,19 @@ export function toggleBoardViewMode(): BoardViewMode {
     // ignore
   }
   return gameStore.viewMode;
+}
+
+export function toggleRendererKind(): RendererKind {
+  sfx.click();
+  gameStore.rendererKind = gameStore.rendererKind === '3d' ? '2d' : '3d';
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(RENDERER_KIND_KEY, gameStore.rendererKind);
+    }
+  } catch {
+    // ignore
+  }
+  return gameStore.rendererKind;
 }
 
 export function buyMetaUnlock(key: keyof MetaProgress['unlocks']): boolean {
