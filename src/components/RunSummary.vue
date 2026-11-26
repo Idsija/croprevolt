@@ -69,7 +69,7 @@ const isVictory = computed(() => run.value.status === 'victory');
       </div>
 
       <div class="actions">
-        <button class="paper-btn primary diecut act-btn" @click="startNewSeasonRun(run.seasonId)">
+        <button class="paper-btn primary diecut act-btn" @click="startNewSeasonRun()">
           <CraftIcon name="play" :size="18" /> Play Another Run
         </button>
         <button class="paper-btn gold diecut act-btn" @click="returnToTitle">
