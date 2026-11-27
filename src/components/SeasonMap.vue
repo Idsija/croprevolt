@@ -11,6 +11,7 @@ import {
   gameStore,
   pickShrineBlessing,
   returnToTitle,
+  toggleGuidedHints,
   toggleMusicMute,
 } from '../stores/gameStore';
 import AlmanacModal from './AlmanacModal.vue';
@@ -22,6 +23,21 @@ const actDef = computed(() => ACTS[run.value.act] ?? ACTS[0]);
 const actTheme = computed<BoardTheme>(() =>
   run.value.act === 1 ? 'greenhouse' : run.value.act === 2 ? 'autumn' : 'spring'
 );
+
+const coopPlayers = computed(() =>
+  run.value.coopPlayers && run.value.coopPlayers.length > 1 ? run.value.coopPlayers : null
+);
+const activeBoardPicker = computed(() => {
+  if (!coopPlayers.value) return null;
+  const idx = (run.value.activeBoardPickerIdx ?? 0) % coopPlayers.value.length;
+  return coopPlayers.value[idx] ?? coopPlayers.value[0];
+});
+function heroCoopBadge(heroUid: string) {
+  if (!coopPlayers.value) return null;
+  const ownerIdx = run.value.heroOwnerByUid?.[heroUid];
+  if (ownerIdx === undefined) return null;
+  return coopPlayers.value[ownerIdx % coopPlayers.value.length] ?? null;
+}
 
 const webglCanvasRef = ref<HTMLCanvasElement | null>(null);
 const overlayCanvasRef = ref<HTMLCanvasElement | null>(null);
@@ -433,6 +449,15 @@ onBeforeUnmount(() => {
 
       <div class="ow-top-right">
         <span
+          v-if="activeBoardPicker"
+          class="ow-coop-picker-pill"
+          :style="{ background: activeBoardPicker.color }"
+          :title="`${activeBoardPicker.name} picks this turn's Travel Card!`"
+        >
+          🎮 {{ activeBoardPicker.badge }}'s Pick!
+        </span>
+
+        <span
           v-if="(run.harvestHeat ?? 0) > 0"
           class="paper-pill ow-heat-pill"
           :title="`Harvest Heat ${run.harvestHeat}`"
@@ -496,6 +521,20 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
+    <!-- Toggleable Guided Board Tip Pill -->
+    <div v-if="(gameStore.meta.guidedHintsEnabled ?? true) && !showOwMenu" class="ow-guided-tip">
+      <span>
+        💡
+        <template v-if="activeBoardPicker">
+          <strong>{{ activeBoardPicker.name }}'s turn!</strong> Pick a Travel Card below, then tap a glowing stop on the board.
+        </template>
+        <template v-else>
+          Pick a <strong>Travel Card</strong> below, then tap any glowing stop on the board to hop &amp; claim its bonus!
+        </template>
+      </span>
+      <button class="ow-tip-hide" title="Turn off Guided Tips" @click="toggleGuidedHints">Hide</button>
+    </div>
+
     <!-- Mobile Compact Overworld Menu Popover -->
     <div v-if="showOwMenu" class="corrugated-slab ow-menu-pop">
       <div class="rp-head">
@@ -506,6 +545,9 @@ onBeforeUnmount(() => {
         <button class="paper-btn" @click="showOwMenu = false; showAlmanac = true">📖 Almanac</button>
         <button class="paper-btn" @click="toggleMusicMute">
           {{ gameStore.musicMuted ? '🔇 Music Off' : '🎵 Music On' }}
+        </button>
+        <button class="paper-btn" @click="toggleGuidedHints">
+          💡 Tips: {{ (gameStore.meta.guidedHintsEnabled ?? true) ? 'ON' : 'OFF' }}
         </button>
         <button v-if="!webglFailed" class="paper-btn" @click="recenterMap(); showOwMenu = false">
           ⌖ Recenter
@@ -544,6 +586,13 @@ onBeforeUnmount(() => {
             <img :src="`/sprites/${hero.species}.png`" :alt="hero.name" />
             <span class="ow-lvl">L{{ hero.level }}</span>
             <span v-if="hero.skillPoints > 0" class="ow-sp">+{{ hero.skillPoints }}</span>
+            <span
+              v-if="heroCoopBadge(hero.uid)"
+              class="ow-coop-dot"
+              :style="{ background: heroCoopBadge(hero.uid)!.color }"
+            >
+              {{ heroCoopBadge(hero.uid)!.badge }}
+            </span>
           </div>
           <div class="ow-hp-mini">
             <div
@@ -1626,5 +1675,71 @@ onBeforeUnmount(() => {
   font-weight: 600;
   line-height: 1.3;
   color: var(--ink);
+}
+.ow-coop-picker-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  color: #fffef6;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 0 rgba(56, 40, 22, 0.32);
+  white-space: nowrap;
+}
+.ow-guided-tip {
+  position: fixed;
+  top: calc(64px + var(--safe-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 18;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 24px));
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1.8px solid var(--ink);
+  background: rgba(255, 250, 228, 0.94);
+  box-shadow: 0 3px 0 rgba(58, 42, 22, 0.28);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink);
+  pointer-events: auto;
+}
+.ow-tip-hide {
+  border: 1.4px solid var(--ink);
+  border-radius: 999px;
+  background: #f2e4c2;
+  color: var(--ink);
+  font-size: 0.66rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ow-coop-dot {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  border: 1.5px solid var(--ink);
+  color: #fffef7;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.56rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+@media (max-width: 720px) {
+  .ow-guided-tip {
+    top: calc(56px + var(--safe-top, 0px));
+    font-size: 0.68rem;
+    padding: 4px 10px;
+  }
 }
 </style>

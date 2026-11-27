@@ -1,6 +1,6 @@
 import type { HeroSpecies, StatusKind } from '../engine/types';
 
-export type SkillPathKey = 'pathA' | 'pathB';
+export type SkillPathKey = 'pathA' | 'pathB' | 'pathC';
 
 export interface PerkEffects {
   /** Permanent base stat boosts applied on unlock (and reverted cleanly on respec!). */
@@ -80,17 +80,20 @@ export interface HeroSkillTreeDef {
   species: HeroSpecies;
   pathA: SkillPathDef;
   pathB: SkillPathDef;
+  pathC: SkillPathDef;
 }
 
-export const MAX_HERO_LEVEL = 6;
+export const MAX_HERO_LEVEL = 8;
 
 /** XP thresholds required to advance from level N -> N+1. */
 export const XP_TO_NEXT_LEVEL: Record<number, number> = {
-  1: 50,
-  2: 80,
-  3: 115,
-  4: 155,
-  5: 200,
+  1: 45,
+  2: 75,
+  3: 110,
+  4: 150,
+  5: 195,
+  6: 245,
+  7: 300,
 };
 
 export function getXpToNextLevel(level: number): number {
@@ -124,7 +127,7 @@ function makePerk(
   };
 }
 
-export const HERO_SKILL_TREES: Record<HeroSpecies, HeroSkillTreeDef> = {
+const BASE_HERO_SKILL_TREES: Record<HeroSpecies, Omit<HeroSkillTreeDef, 'pathC'>> = {
   cow: {
     species: 'cow',
     pathA: {
@@ -1342,10 +1345,146 @@ export const HERO_SKILL_TREES: Record<HeroSpecies, HeroSkillTreeDef> = {
   },
 };
 
-/** Flat registry of all 114 bespoke character perks by ID. */
+function makePathC(
+  species: HeroSpecies,
+  name: string,
+  icon: string,
+  tagline: string,
+  t1: [string, string, string, string, string, PerkEffects],
+  t2: [string, string, string, string, string, PerkEffects],
+  t3: [string, string, string, string, string, PerkEffects]
+): SkillPathDef {
+  return {
+    key: 'pathC',
+    name,
+    icon,
+    color: '#2a789c',
+    accent: '#d9f2fc',
+    tagline,
+    perks: [
+      makePerk(species, 'pathC', 1, t1[0], t1[1], t1[2], t1[3], t1[4], t1[5]),
+      makePerk(species, 'pathC', 2, t2[0], t2[1], t2[2], t2[3], t2[4], t2[5], t1[0]),
+      makePerk(species, 'pathC', 3, t3[0], t3[1], t3[2], t3[3], t3[4], t3[5], t2[0]),
+    ],
+  };
+}
+
+/** Bespoke 3rd Branch (Co-Op Combos, Mobility & Tactical Mastery) for all 19 playable heroes! */
+const PATH_C_BY_SPECIES: Record<HeroSpecies, SkillPathDef> = {
+  cow: makePathC('cow', 'Pasture Launchpad', '🤝', 'Co-Op springboard cow launching & boosting allies across cliffs',
+    ['cow_c1', 'Broad Back', '🐮', '+1 Jump · +2 Ally Jump Heal', 'Allies Team-Jumping off Stitch heal +2 HP and fly +1 tile farther!', { bonusJump: 1, allyJumpHeal: 2 }],
+    ['cow_c2', 'Bell Rally', '🔔', '+2 Assist DMG · Assist R2', 'Stitch chimes in on partner Follow-Up Assists from 2 tiles away for +2 DMG!', { bonusAssistDmg: 2, assistRange: 2 }],
+    ['cow_c3', 'Stampede Boost', '🌟', 'Ally Jump Boost + Stomp 3', 'Teammates jumping off Stitch gain Boosted (+2 ATK), and Stitch stomps landing tiles for 3 DMG!', { allyJumpBoost: true, jumpStompDmg: 3 }]
+  ),
+  pea: makePathC('pea', 'Pod Squad Volley', '🎯', 'Co-Op Overwatch & crossfire partner assist specialist',
+    ['pea_c1', 'Spotter Pod', '👀', '+1 Assist DMG · Assist R2', 'Snap-Pea follows up on teammate shots from 2 tiles away for +1 extra DMG!', { bonusAssistDmg: 1, assistRange: 2 }],
+    ['pea_c2', 'Springy Stem', '🌱', '+1 Move · +1 Jump · +1 High', 'Nimble vaulting onto high ground for +1 extra cliff damage!', { bonusMove: 1, bonusJump: 1, bonusHighGroundDmg: 1 }],
+    ['pea_c3', 'Triple Pod Sight', '👁️', '+1 Watch Shot · +2 Watch DMG', 'Watch mode fires +1 extra reaction volley dealing +2 DMG!', { bonusOverwatchShots: 1, bonusOverwatchDmg: 2 }]
+  ),
+  lemon: makePathC('lemon', 'Citrus Chain-React', '⚡', 'Explosive Acid chain combos & nimble bounce-dashes',
+    ['lemon_c1', 'Zesty Hop', '🍋', '+1 Move · +1 Jump', 'Zippy citrus footwork to line up multi-target lobbed splashes!', { bonusMove: 1, bonusJump: 1 }],
+    ['lemon_c2', 'Sour Shove', '💨', 'Dash Knockback · +2 Dash DMG', 'Dashing through enemies splashes citrus knockback for +2 Dash DMG!', { dashKnockback: true, bonusDashDmg: 2 }],
+    ['lemon_c3', 'Citric Chain-Pop', '💥', 'Acid Kill Boom · Free Skill Move', 'Casting Zestia’s skill refreshes movement, and Acid kills erupt in an AoE splash!', { acidExplosionOnKill: true, skillGrantsFreeMove: true }]
+  ),
+  rooster: makePathC('rooster', 'Barnyard Trumpeter', '🎺', 'Multi-Dash flanker who resets cooldowns & rallies allies',
+    ['rooster_c1', 'Crow Spring', '🐓', '+1 Jump · Ally Jump Boost', 'Teammates leaping off Sir Clucks land Boosted (+2 ATK)!', { bonusJump: 1, allyJumpBoost: true }],
+    ['rooster_c2', 'Talon Relay', '⚡', '+1 Dash · +2 Flank Crit', 'Chain an extra Dash and strike flanked foes for +2 Crit DMG!', { extraDashes: 1, bonusFlankCrit: 2 }],
+    ['rooster_c3', 'Dawn Encore', '🌅', 'Kill Refreshes Dash & Skill CD', 'KOing a foe refreshes Dash AND shaves off skill cooldown!', { killRefreshesDash: true, killRefundsCd: true }]
+  ),
+  carrot: makePathC('carrot', 'Root Tunnel Blitz', '🕳️', 'Aggressive cover-breaker & bump-combo bruiser',
+    ['carrot_c1', 'Taproot Charge', '🥕', '+1 Move · +2 Cover DMG', 'Sprints into trenches smashing wooden cover for +2 extra DMG!', { bonusMove: 1, bonusCoverDmg: 2 }],
+    ['carrot_c2', 'Crunch Shove', '💥', '+1 Knockback · +2 Bump DMG', 'Shoves enemies an extra tile and slams them into hazards for +2 Bump DMG!', { extraKnockback: 1, bonusBumpDmg: 2 }],
+    ['carrot_c3', 'Heirloom Wrecker', '🏆', 'One-Shot Cover + 3 Splash', 'Instantly shatters crates with a 3-DMG splinter shockwave!', { oneShotCover: true, coverBreakSplash: 3 }]
+  ),
+  lettuce: makePathC('lettuce', 'Salad Toss Combo', '🥗', 'Acrobatic Co-Op jumper & double-dash skirmisher',
+    ['lettuce_c1', 'Crisp Vault', '🦘', '+1 Jump · +2 Jump Stomp', 'Landing from a Team-Jump slams adjacent farmers for 2 DMG!', { bonusJump: 1, jumpStompDmg: 2 }],
+    ['lettuce_c2', 'Leaf Tag-Team', '🤝', '+1 Extra Dash · +2 Assist DMG', 'Bonk an extra enemy mid-move and chime in on Co-Op Assists for +2 DMG!', { extraDashes: 1, bonusAssistDmg: 2 }],
+    ['lettuce_c3', 'Tossed Salad Finale', '🌟', 'Stomp Boost + Kill Dash Reset', 'Team-Jump stomps grant Boosted (+2 ATK), and KOs refresh Dash!', { jumpStompBoost: true, killRefreshesDash: true }]
+  ),
+  strawberry: makePathC('strawberry', 'Berry Acrobat', '🍓', 'Hyper-mobile fencing & Co-Op Assist duelist',
+    ['strawberry_c1', 'Sweet Footwork', '👟', '+1 Move · Ignore Half Cover', 'Flanking lunges slip straight past Half Cover!', { bonusMove: 1, ignoreHalfCoverOnFlank: true }],
+    ['strawberry_c2', 'Riposte Assist', '⚔️', '+2 Assist DMG · +1 Flank Crit', 'Counters alongside allies for +2 Assist DMG and sharper flanks!', { bonusAssistDmg: 2, bonusFlankCrit: 1 }],
+    ['strawberry_c3', 'Crimson Encore', '💫', 'Kill Refreshes Dash + Free Move', 'Skill casts grant free movement and KOs chain straight into another Dash!', { skillGrantsFreeMove: true, killRefreshesDash: true }]
+  ),
+  potato: makePathC('potato', 'Spud Artillery', '🥔', 'Armored high-ground bunker & cover demolitionist',
+    ['potato_c1', 'Heavy Turf', '🛡️', '+3 HP · Start Shield 1T', 'Starts every battle Shielded (-2 DMG) with +3 extra HP!', { bonusHp: 3, startShieldTurns: 1 }],
+    ['potato_c2', 'Tater Toss', '💣', '+1 Range · +2 Cover DMG', 'Lobs spuds 1 tile farther while shredding barricades!', { bonusRange: 1, bonusCoverDmg: 2 }],
+    ['potato_c3', 'Baked Earth', '🌋', 'Cover Splash 3 · Thorns 2', 'Breaking cover splashes 3 DMG and melee attackers take 2 Thorns DMG!', { coverBreakSplash: 3, thornsDmg: 2 }]
+  ),
+  pig: makePathC('pig', 'Truffle Stampede', '🐷', 'Hazard-dunking rammer & Co-Op launch pad',
+    ['pig_c1', 'Mud Sprint', '💨', '+1 Move · +2 Dash DMG', 'Charges faster through mud lanes for heavier Dash bonks!', { bonusMove: 1, bonusDashDmg: 2 }],
+    ['pig_c2', 'Snout Bowling', '🎳', 'Dash Knockback · +2 Bump DMG', 'Dashes knock foes back and rack up +2 hazard Bump DMG!', { dashKnockback: true, bonusBumpDmg: 2 }],
+    ['pig_c3', 'Boarapult', '🚀', '+2 Jump · Stomp 3 + Boost', 'Leaps across the arena smashing landing tiles for 3 DMG and Boosted!', { bonusJump: 2, jumpStompDmg: 3, jumpStompBoost: true }]
+  ),
+  chili: makePathC('chili', 'Wildfire Relay', '🌶️', 'Burn-detonating pyromancer & hit-and-run runner',
+    ['chili_c1', 'Hot Heels', '🔥', '+1 Move · Dash Applies Burn', 'Sprints past farmers igniting them with Burn on Dash!', { bonusMove: 1, dashStatus: 'burn' }],
+    ['chili_c2', 'Scoville Spark', '💥', '+2 Burn Detonate · +1 Range', 'Shooting Burning targets detonates for +2 bonus DMG from 1 tile farther!', { burnDetonateBonus: 2, bonusRange: 1 }],
+    ['chili_c3', 'Inferno Encore', '🌋', 'Skill Free Move · Kill CD Reset', 'Casting skills grants a free dash-reposition and KOs refund cooldown!', { skillGrantsFreeMove: true, killRefundsCd: true }]
+  ),
+  corn: makePathC('corn', 'Popcorn Finale', '🌽', 'High-ground splash artillery & Overwatch barrage',
+    ['corn_c1', 'Tall Stalk', '▲', '+2 High Ground · +1 Jump', 'Vaults onto terraces to rain +2 High Ground kernel blasts!', { bonusHighGroundDmg: 2, bonusJump: 1 }],
+    ['corn_c2', 'Butter Shrapnel', '💥', '+2 Cover DMG · Cover Splash 2', 'Shattered crates explode in hot popcorn shrapnel for 2 AoE DMG!', { bonusCoverDmg: 2, coverBreakSplash: 2 }],
+    ['corn_c3', 'Grand Pop-Off', '🎆', '+1 Watch Shot · Skill +1 Radius', 'Expands skill blast radius AND adds +1 Overwatch volley!', { bonusOverwatchShots: 1, skillRadiusDelta: 1 }]
+  ),
+  sheep: makePathC('sheep', 'Flock Shieldwall', '🐑', 'Cleansing wool medic & Co-Op defensive anchor',
+    ['sheep_c1', 'Soft Landing', '☁️', 'Ally Jump Heal +3 · +2 HP', 'Allies Team-Jumping off Woolly heal +3 HP on takeoff!', { allyJumpHeal: 3, bonusHp: 2 }],
+    ['sheep_c2', 'Fleece Guard', '🛡️', 'Cleanse on Skill · +2 Heal', 'Skills scrub Burn/Acid/Root and restore +2 bonus HP!', { cleanseOnSkillCast: true, skillHealDelta: 2 }],
+    ['sheep_c3', 'Baa-stion', '🏰', 'Living Full Cover · Thorns 2', 'Becomes living Full Cover for allies and reflects 2 Thorns DMG!', { livingFullCover: true, thornsDmg: 2 }]
+  ),
+  goat: makePathC('goat', 'Mountain Vault', '🐐', 'Cliff-dunking ram & multi-tier acrobat',
+    ['goat_c1', 'Cliff Hopper', '⛰️', '+2 Jump · +1 High Ground', 'Vaults effortlessly up 3-tier watchtowers for extra High Ground DMG!', { bonusJump: 2, bonusHighGroundDmg: 1 }],
+    ['goat_c2', 'Ram Shove', '💢', '+1 Knockback · +2 Bump DMG', 'Sends farm machines tumbling off cliffs for +2 extra Drop/Bump DMG!', { extraKnockback: 1, bonusBumpDmg: 2 }],
+    ['goat_c3', 'Summit King', '👑', 'Jump Stomp 3 · Kill Dash Reset', 'Team-Jump stomps deal 3 DMG and KOs refresh Billy’s Dash!', { jumpStompDmg: 3, killRefreshesDash: true }]
+  ),
+  blackberry: makePathC('blackberry', 'Bramble Ambush', '🫐', 'Root-snaring marksman & Overwatch trapper',
+    ['blackberry_c1', 'Prickly Perch', '🌿', '+1 Range · +1 High Ground', 'Long-reach thorn shots punish enemies from cliffs!', { bonusRange: 1, bonusHighGroundDmg: 1 }],
+    ['blackberry_c2', 'Snare Watch', '🕸️', 'Watch Roots · +2 vs Rooted', 'Overwatch shots Root moving foes and Rooted targets take +2 DMG!', { overwatchRoots: true, rootedTargetBonus: 2 }],
+    ['blackberry_c3', 'Briar Crossfire', '🎯', '+1 Watch Shot · Assist R2 +2', 'Fires +1 extra Watch shot and supports allies from 2 tiles away!', { bonusOverwatchShots: 1, assistRange: 2, bonusAssistDmg: 2 }]
+  ),
+  mushroom: makePathC('mushroom', 'Mycelium Network', '🍄', 'Ultimate Co-Op springboard & cleansing bounce-medic',
+    ['mushroom_c1', 'Bouncy Cap', '🦘', '+2 Jump · Ally Jump Heal +2', 'Turns Cap-tain into a super-pad healing every ally who bounces off!', { bonusJump: 2, allyJumpHeal: 2 }],
+    ['mushroom_c2', 'Spore Boost', '✨', 'Ally Jump Boost · +1 Move', 'Teammates bouncing off Cap-tain land Boosted (+2 ATK)!', { allyJumpBoost: true, bonusMove: 1 }],
+    ['mushroom_c3', 'Toadstool Slam', '💥', 'Stomp 3 + Boost · Skill -1 CD', 'Landing stomps deal 3 DMG + Boosted and skills recharge 1 turn faster!', { jumpStompDmg: 3, jumpStompBoost: true, skillCdDelta: -1 }]
+  ),
+  duck: makePathC('duck', 'Slipstream Squadron', '🦆', 'Co-Op aerial flanker & water-hazard dunker',
+    ['duck_c1', 'Tailwind Stride', '💨', '+1 Move · +1 Jump', 'Glides across ponds and mud to snag prime flanks!', { bonusMove: 1, bonusJump: 1 }],
+    ['duck_c2', 'Wingman Volley', '✈️', '+2 Assist DMG · Assist R2', 'Provides long-range Wingman Follow-Up Assists from 2 tiles away!', { bonusAssistDmg: 2, assistRange: 2 }],
+    ['duck_c3', 'Splashdown Ace', '🌊', '+1 Knockback · Skill Free Move', 'Hose blasts push +1 extra tile into ponds and skills refresh movement!', { extraKnockback: 1, skillGrantsFreeMove: true }]
+  ),
+  pumpkin: makePathC('pumpkin', 'Harvest Juggernaut', '🎃', 'Unstoppable cover-smashing gourd & Co-Op fortress',
+    ['pumpkin_c1', 'Sturdy Rind', '🛡️', '+4 HP · Thorns 2', 'Thick heirloom rind adds +4 HP and pokes melee foes for 2 DMG!', { bonusHp: 4, thornsDmg: 2 }],
+    ['pumpkin_c2', 'Gourd Bowling', '🎳', 'Dash Knockback · +2 Bump DMG', 'Bowls enemies straight into hazards on Dash for +2 Bump DMG!', { dashKnockback: true, bonusBumpDmg: 2 }],
+    ['pumpkin_c3', 'Great Pumpkin', '👑', 'One-Shot Cover · Skill Push +3', 'Shatters cover instantly and Gourd Slam splashes +3 bonus DMG!', { oneShotCover: true, skillDmgDelta: 3, skillPushes: true }]
+  ),
+  blueberry: makePathC('blueberry', 'Shadow Tag-Team', '🥷', 'Chain-dashing Co-Op shinobi & flank executioner',
+    ['blueberry_c1', 'Smoke Step', '💨', '+1 Move · Ignore Half Cover', 'Slips behind fortifications ignoring Half Cover on flanks!', { bonusMove: 1, ignoreHalfCoverOnFlank: true }],
+    ['blueberry_c2', 'Twin Shuriken', '⭐', '+1 Extra Dash · +2 Flank Crit', 'Double-dashes through clusters and lands +2 Crit DMG from behind!', { extraDashes: 1, bonusFlankCrit: 2 }],
+    ['blueberry_c3', 'Phantom Combo', '⚡', 'Kill Dash & CD Reset + Assist', 'KOs reset Dash & skill cooldown while boosting Co-Op Assists by +2!', { killRefreshesDash: true, killRefundsCd: true, bonusAssistDmg: 2 }]
+  ),
+  owl: makePathC('owl', 'Midnight Overlord', '🦉', 'Perched 3-tier cliff sniper & squad command tactician',
+    ['owl_c1', 'Crow’s Nest', '▲', '+2 High Ground · +1 Jump', 'Soars onto tall watchtowers dealing +2 bonus cliff damage!', { bonusHighGroundDmg: 2, bonusJump: 1 }],
+    ['owl_c2', 'Hoot Command', '🎺', 'Ally Jump Boost · Assist R2', 'Allies leaping off Barnaby gain Boosted and Barnaby assists from 2 tiles!', { allyJumpBoost: true, assistRange: 2, bonusAssistDmg: 1 }],
+    ['owl_c3', 'Silent Apex', '🌙', '+1 Watch Shot · Watch Roots', 'Fires +1 extra Watch shot that Roots advancing contraptions cold!', { bonusOverwatchShots: 1, overwatchRoots: true, bonusOverwatchDmg: 1 }]
+  ),
+};
+
+export const HERO_SKILL_TREES: Record<HeroSpecies, HeroSkillTreeDef> = (
+  Object.keys(BASE_HERO_SKILL_TREES) as HeroSpecies[]
+).reduce(
+  (acc, sp) => {
+    acc[sp] = {
+      ...BASE_HERO_SKILL_TREES[sp],
+      pathC: PATH_C_BY_SPECIES[sp],
+    };
+    return acc;
+  },
+  {} as Record<HeroSpecies, HeroSkillTreeDef>
+);
+
+/** Flat registry of all 171 bespoke character perks across 19 heroes × 3 branches × 3 tiers. */
 export const SKILL_PERKS: Record<string, SkillPerkDef> = {};
 for (const tree of Object.values(HERO_SKILL_TREES)) {
-  for (const perk of [...tree.pathA.perks, ...tree.pathB.perks]) {
+  for (const perk of [...tree.pathA.perks, ...tree.pathB.perks, ...tree.pathC.perks]) {
     SKILL_PERKS[perk.id] = perk;
   }
 }
@@ -1358,7 +1497,7 @@ export function getHeroSkillTree(species: HeroSpecies): HeroSkillTreeDef {
 
 export function getHeroPerkDefs(species: HeroSpecies): SkillPerkDef[] {
   const tree = getHeroSkillTree(species);
-  return [...tree.pathA.perks, ...tree.pathB.perks];
+  return [...tree.pathA.perks, ...tree.pathB.perks, ...tree.pathC.perks];
 }
 
 export function canUnlockPerk(

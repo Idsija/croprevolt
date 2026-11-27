@@ -1263,4 +1263,147 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { blueprintId: 'blower', x: 7, y: 4 },
     ],
   },
+
+  // ===== NEW VARIED-SIZE SHOWCASE MAP 1: 7x11 THREE-STORY CLIFFSIDE WATCHTOWER (ELEV 0 -> 1 -> 2 -> 3!) =====
+  cliff_watchtower: {
+    id: 'cliff_watchtower',
+    name: 'Spire Cliff Watchtower',
+    subtitle: 'Ascend a soaring 3-story garden bluff (+3 Summit High Ground!), bounce past ledges & topple the ridge guard!',
+    theme: 'spring',
+    objective: 'defeat_all',
+    objectiveLabel: 'Storm the 3-story watchtower',
+    width: 7,
+    height: 11,
+    tiles: mergeTiles(
+      // Base valley creek + twin footbridges
+      rect(0, 8, 6, 8, { terrain: 'water', elevation: 0 }),
+      [
+        { x: 1, y: 8, terrain: 'bridge', elevation: 0 },
+        { x: 5, y: 8, terrain: 'bridge', elevation: 0 },
+      ],
+      // Tier 1 Terrace (Elevation 1)
+      rect(0, 5, 6, 6, { terrain: 'grass', elevation: 1 }),
+      [
+        { x: 1, y: 7, terrain: 'ramp', elevation: 0 },
+        { x: 5, y: 7, terrain: 'ramp', elevation: 0 },
+        { x: 3, y: 7, terrain: 'bounce_pad', elevation: 0 },
+      ],
+      // Tier 2 Overlook (Elevation 2)
+      rect(1, 3, 5, 4, { terrain: 'soil', elevation: 2 }),
+      [
+        { x: 2, y: 5, terrain: 'ramp', elevation: 1 },
+        { x: 4, y: 5, terrain: 'ramp', elevation: 1 },
+        { x: 0, y: 5, terrain: 'bounce_pad', elevation: 1 },
+        { x: 6, y: 5, terrain: 'bounce_pad', elevation: 1 },
+      ],
+      // Tier 3 Summit Citadel Watchtower (Elevation 3!!)
+      rect(2, 0, 4, 2, { terrain: 'barn_floor', elevation: 3 }),
+      [
+        { x: 3, y: 3, terrain: 'ramp', elevation: 2 },
+        { x: 3, y: 1, terrain: 'sunbeam', elevation: 3 },
+        { x: 0, y: 9, terrain: 'burrow', elevation: 0 },
+        { x: 1, y: 3, terrain: 'burrow', elevation: 2 },
+        { x: 6, y: 9, terrain: 'burrow', elevation: 0 },
+        { x: 5, y: 3, terrain: 'burrow', elevation: 2 },
+        { x: 3, y: 9, terrain: 'compost', elevation: 0 },
+      ],
+      // Cover, Rolling Pumpkins perched on Tier 2 & 3!
+      [
+        { x: 2, y: 9, cover: 'crate' },
+        { x: 4, y: 9, cover: 'crate' },
+        { x: 1, y: 6, cover: 'crate' },
+        { x: 5, y: 6, cover: 'haystack' },
+        { x: 3, y: 6, cover: 'beehive' },
+        { x: 2, y: 4, cover: 'pumpkin' },
+        { x: 4, y: 4, cover: 'pumpkin' },
+        { x: 2, y: 2, cover: 'stone' },
+        { x: 4, y: 2, cover: 'stone' },
+      ]
+    ),
+    burrowPairs: [
+      [{ x: 0, y: 9 }, { x: 1, y: 3 }],
+      [{ x: 6, y: 9 }, { x: 5, y: 3 }],
+    ],
+    playerSpawns: [
+      { x: 1, y: 10 },
+      { x: 2, y: 10 },
+      { x: 4, y: 10 },
+      { x: 5, y: 10 },
+    ],
+    enemySpawns: [
+      { blueprintId: 'blower', x: 3, y: 1 },
+      { blueprintId: 'sapper', x: 1, y: 4 },
+      { blueprintId: 'barrow', x: 5, y: 4 },
+      { blueprintId: 'kettlebot', x: 3, y: 5 },
+    ],
+  },
+
+  // ===== NEW VARIED-SIZE SHOWCASE MAP 2: 11x8 WIDE SUPPLY SABOTAGE CAUSEWAY (SMASH_CRATES!) =====
+  windmill_causeway: {
+    id: 'windmill_causeway',
+    name: 'Windmill Supply Causeway',
+    subtitle: 'Wide 11×8 river crossing! Smash all 3 glowing Farmer Supply Crates across stepped islands to win!',
+    theme: 'autumn',
+    objective: 'smash_crates',
+    objectiveLabel: 'Smash all 3 Farmer Supply Crates',
+    width: 11,
+    height: 8,
+    objectiveCratePositions: [
+      { x: 1, y: 1 },
+      { x: 5, y: 1 },
+      { x: 9, y: 1 },
+    ],
+    tiles: mergeTiles(
+      // Wide winding river channel splitting the 11-wide battlefield
+      rect(0, 4, 10, 4, { terrain: 'water', elevation: 0 }),
+      [
+        { x: 1, y: 4, terrain: 'bridge', elevation: 0 },
+        { x: 5, y: 4, terrain: 'bridge', elevation: 0 },
+        { x: 9, y: 4, terrain: 'bridge', elevation: 0 },
+      ],
+      // Raised North Supply Terraces (West Elev 1, Center Elev 2 Mill Deck, East Elev 1)
+      rect(0, 0, 2, 2, { terrain: 'soil', elevation: 1 }),
+      rect(4, 0, 6, 2, { terrain: 'barn_floor', elevation: 2 }),
+      rect(8, 0, 10, 2, { terrain: 'soil', elevation: 1 }),
+      // Connecting stepped ramps & mid-bank elevation 1 bridgehead
+      rect(4, 3, 6, 3, { terrain: 'grass', elevation: 1 }),
+      [
+        { x: 1, y: 3, terrain: 'ramp', elevation: 0 },
+        { x: 5, y: 3, terrain: 'ramp', elevation: 1 },
+        { x: 4, y: 3, terrain: 'ramp', elevation: 0 },
+        { x: 6, y: 3, terrain: 'ramp', elevation: 0 },
+        { x: 9, y: 3, terrain: 'ramp', elevation: 0 },
+        // Bouncy Mushrooms for dramatic Mario+Rabbids leaps across the river!
+        { x: 3, y: 5, terrain: 'bounce_pad', elevation: 0 },
+        { x: 7, y: 5, terrain: 'bounce_pad', elevation: 0 },
+        { x: 5, y: 6, terrain: 'compost', elevation: 0 },
+        { x: 3, y: 2, terrain: 'sunbeam', elevation: 0 },
+        { x: 7, y: 2, terrain: 'sunbeam', elevation: 0 },
+      ],
+      // Tactical cover, explosive beehives & rolling pumpkins around the supply depots
+      [
+        { x: 2, y: 5, cover: 'crate' },
+        { x: 5, y: 5, cover: 'crate' },
+        { x: 8, y: 5, cover: 'crate' },
+        { x: 3, y: 3, cover: 'beehive' },
+        { x: 7, y: 3, cover: 'sprinkler' },
+        { x: 2, y: 2, cover: 'pumpkin' },
+        { x: 8, y: 2, cover: 'pumpkin' },
+        { x: 4, y: 2, cover: 'haystack' },
+        { x: 6, y: 2, cover: 'haystack' },
+      ]
+    ),
+    playerSpawns: [
+      { x: 2, y: 7 },
+      { x: 4, y: 6 },
+      { x: 6, y: 6 },
+      { x: 8, y: 7 },
+    ],
+    enemySpawns: [
+      { blueprintId: 'barrow', x: 2, y: 1 },
+      { blueprintId: 'blower', x: 5, y: 2 },
+      { blueprintId: 'sapper', x: 8, y: 1 },
+      { blueprintId: 'mower', x: 3, y: 1 },
+    ],
+  },
 };

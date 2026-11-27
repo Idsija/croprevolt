@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createBattleFromMap, finishPrepPhase } from '../battle';
 import { activeBonds, bondStatuses } from '../bonds';
 import { hasStatus } from '../hooks';
-import { createNewRun, defaultMetaProgress } from '../run';
+import { createHeroFromBlueprint } from '../run';
 
 const root = { family: 'root' };
 const vine = { family: 'vine' };
@@ -28,8 +28,12 @@ describe('squad bonds', () => {
   });
 
   it('applies bonds to the deployed squad once, when Turn 1 starts', () => {
-    const run = createNewRun(defaultMetaProgress(), 'spring', 42);
-    const heroes = run.activeSquadUids.map((uid) => run.roster.find((h) => h.uid === uid)!);
+    const heroes = [
+      createHeroFromBlueprint('cow'),
+      createHeroFromBlueprint('pea'),
+      createHeroFromBlueprint('lettuce'),
+      createHeroFromBlueprint('lemon'),
+    ];
     const vines = heroes.filter((h) => h.family === 'vine');
     expect(vines.length).toBeGreaterThanOrEqual(2);
     const baseCover = vines[0].weapon.coverDamage ?? vines[0].weapon.damage;

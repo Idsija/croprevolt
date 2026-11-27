@@ -108,6 +108,7 @@ export class OverworldMapRenderer {
     speed: number;
     phase: number;
   }> = [];
+  private animatedToys: Array<(elapsed: number) => void> = [];
 
   private snapshot: OverworldSnapshot | null = null;
   private builtSignature = '';
@@ -363,6 +364,7 @@ export class OverworldMapRenderer {
     this.nodeMap.clear();
     this.pickMeshes = [];
     this.weatherMotes = [];
+    this.animatedToys = [];
     this.leaderRig = null;
     this.bossRig = null;
     this.previewPathSig = '';
@@ -691,7 +693,34 @@ export class OverworldMapRenderer {
       this.bossRig.root.scale.setScalar(0.88);
       this.bossRig.root.position.copy(bPos).add(new THREE.Vector3(0.42, 0.04, -0.26));
       this.standeeGroup.add(this.bossRig.root);
+
+      // Floating playful Golden Crown rotating above the Act Boss!
+      const crownGroup = new THREE.Group();
+      const crownMat = new THREE.MeshStandardMaterial({
+        color: '#ffd84a',
+        emissive: '#b56e00',
+        emissiveIntensity: 0.32,
+        metalness: 0.35,
+        roughness: 0.28,
+      });
+      const crownBand = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.17, 0.14, 12), crownMat);
+      crownGroup.add(crownBand);
+      for (let k = 0; k < 4; k++) {
+        const a = (k / 4) * Math.PI * 2;
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.16, 4), crownMat);
+        tip.position.set(Math.cos(a) * 0.15, 0.14, Math.sin(a) * 0.15);
+        crownGroup.add(tip);
+      }
+      crownGroup.position.set(bPos.x + 0.42, BOARD_TOP_Y + 1.55, bPos.z - 0.26);
+      this.worldGroup.add(crownGroup);
+      this.animatedToys.push((t) => {
+        crownGroup.rotation.y = t * 1.9;
+        crownGroup.position.y = BOARD_TOP_Y + 1.52 + Math.sin(t * 3.8) * 0.09;
+      });
     }
+
+    // 4B. Playful Animated 3D Storybook Tabletop Toys on each Seasonal Board!
+    this.buildPlayfulBoardToys(snap.theme);
 
     // 5. Gentle Drifting Seasonal Paper Motes above the watercolor game board!
     const moteColors =
@@ -722,6 +751,155 @@ export class OverworldMapRenderer {
         baseZ: bz,
         speed: 0.45 + Math.random() * 0.55,
         phase: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  private buildPlayfulBoardToys(theme: BoardTheme): void {
+    const creamMat = new THREE.MeshStandardMaterial({
+      map: this.textures.woodTokenMap,
+      color: '#fbf0d4',
+      roughness: 0.72,
+    });
+    const roofColor = theme === 'autumn' ? '#c94c24' : theme === 'greenhouse' ? '#2c8f78' : '#d64538';
+    const roofMat = new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.65 });
+    const woodMat = new THREE.MeshStandardMaterial({ color: '#7a4924', roughness: 0.85 });
+
+    // 1. Spinning Storybook Cardboard Windmill perched on a scenic board bluff!
+    const millCoords: Record<BoardTheme, [number, number]> = {
+      spring: [-6.8, -3.15],
+      greenhouse: [6.8, -3.2],
+      autumn: [6.75, -3.05],
+    };
+    const [mx, mz] = millCoords[theme] ?? millCoords.spring;
+    const windmill = new THREE.Group();
+    windmill.position.set(mx, BOARD_TOP_Y, mz);
+    windmill.rotation.y = mx < 0 ? 0.45 : -0.45;
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, 1.05, 10), creamMat);
+    tower.position.y = 0.525;
+    tower.castShadow = true;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(0.44, 0.48, 10), roofMat);
+    roof.position.y = 1.24;
+    roof.castShadow = true;
+    windmill.add(tower, roof);
+
+    const rotor = new THREE.Group();
+    rotor.position.set(0, 0.92, 0.34);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.14, 10), woodMat);
+    hub.rotation.x = Math.PI / 2;
+    rotor.add(hub);
+    const sailMat = new THREE.MeshStandardMaterial({
+      color: '#fff6de',
+      roughness: 0.65,
+      side: THREE.DoubleSide,
+    });
+    for (let i = 0; i < 4; i++) {
+      const arm = new THREE.Group();
+      arm.rotation.z = (i * Math.PI) / 2;
+      const spar = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.72, 0.04), woodMat);
+      spar.position.y = 0.36;
+      const sail = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.52, 0.02), sailMat);
+      sail.position.set(0.11, 0.42, 0.01);
+      arm.add(spar, sail);
+      rotor.add(arm);
+    }
+    windmill.add(rotor);
+    this.worldGroup.add(windmill);
+    this.animatedToys.push((t) => {
+      rotor.rotation.z = -t * 1.45;
+    });
+
+    // 2. Bobbing Origami Paper Sailboat / Pond Toy!
+    const boatCoords: Record<BoardTheme, [number, number]> = {
+      spring: [5.4, 3.1],
+      greenhouse: [-0.2, 0.15],
+      autumn: [-5.9, -0.5],
+    };
+    const [bx, bz] = boatCoords[theme] ?? boatCoords.spring;
+    const boat = new THREE.Group();
+    boat.position.set(bx, BOARD_TOP_Y + 0.04, bz);
+    const hull = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.16, 0.14, 6),
+      new THREE.MeshStandardMaterial({ color: '#e85b3f', roughness: 0.65 })
+    );
+    hull.scale.set(1.35, 1, 0.72);
+    hull.position.y = 0.07;
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.56, 8), woodMat);
+    mast.position.y = 0.36;
+    const canvasSail = new THREE.Mesh(
+      new THREE.ConeGeometry(0.24, 0.42, 3),
+      new THREE.MeshStandardMaterial({ color: '#fff9e6', roughness: 0.6 })
+    );
+    canvasSail.position.set(0.06, 0.4, 0);
+    canvasSail.scale.set(0.28, 1, 1);
+    boat.add(hull, mast, canvasSail);
+    this.worldGroup.add(boat);
+    this.animatedToys.push((t) => {
+      boat.position.y = BOARD_TOP_Y + 0.05 + Math.sin(t * 2.8) * 0.035;
+      boat.rotation.z = Math.sin(t * 2.2) * 0.12;
+      boat.rotation.y = Math.sin(t * 0.9) * 0.25 + 0.3;
+    });
+
+    // 3. Festive Storybook Paper Bunting Banner strung across wooden stakes!
+    const buntingCoords: Record<BoardTheme, [number, number]> = {
+      spring: [-4.7, 3.4],
+      greenhouse: [5.2, 3.3],
+      autumn: [-3.4, 3.5],
+    };
+    const [fx, fz] = buntingCoords[theme] ?? buntingCoords.spring;
+    const bunting = new THREE.Group();
+    bunting.position.set(fx, BOARD_TOP_Y, fz);
+    for (const side of [-0.72, 0.72]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.72, 8), woodMat);
+      post.position.set(side, 0.36, 0);
+      post.castShadow = true;
+      bunting.add(post);
+    }
+    const flagColors = ['#e84a3c', '#f5c23b', '#3ca6db', '#57b848', '#eb6ca8'];
+    const pennants: THREE.Mesh[] = [];
+    for (let i = 0; i < 5; i++) {
+      const frac = -0.52 + i * 0.26;
+      const dip = Math.cos(frac * 2.4) * 0.08;
+      const flag = new THREE.Mesh(
+        new THREE.ConeGeometry(0.11, 0.22, 3),
+        new THREE.MeshStandardMaterial({ color: flagColors[i % flagColors.length], roughness: 0.6 })
+      );
+      flag.rotation.z = Math.PI;
+      flag.position.set(frac, 0.62 - dip, 0);
+      bunting.add(flag);
+      pennants.push(flag);
+    }
+    this.worldGroup.add(bunting);
+    this.animatedToys.push((t) => {
+      pennants.forEach((p, idx) => {
+        p.rotation.x = Math.sin(t * 4.4 + idx * 0.9) * 0.24;
+      });
+    });
+
+    // 4. Bouncy Spotted Toadstool Cluster along the board rim!
+    const shroomPositions: Array<[number, number, number]> = [
+      [-6.9, 1.5, 0.85],
+      [-6.45, 1.85, 0.62],
+      [6.85, 1.15, 0.78],
+    ];
+    for (let i = 0; i < shroomPositions.length; i++) {
+      const [sx, sz, sc] = shroomPositions[i];
+      const shroom = new THREE.Group();
+      shroom.position.set(sx, BOARD_TOP_Y, sz);
+      shroom.scale.setScalar(sc);
+      const st = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.26, 8), creamMat);
+      st.position.y = 0.13;
+      const cap = new THREE.Mesh(
+        new THREE.SphereGeometry(0.28, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.56),
+        new THREE.MeshStandardMaterial({ map: this.textures.mushroomCapMap, roughness: 0.52 })
+      );
+      cap.position.y = 0.24;
+      cap.scale.set(1, 0.68, 1);
+      shroom.add(st, cap);
+      this.worldGroup.add(shroom);
+      this.animatedToys.push((t) => {
+        const bounce = 1 + Math.sin(t * 3.4 + i * 1.8) * 0.08;
+        shroom.scale.set(sc * (2 - bounce), sc * bounce, sc * (2 - bounce));
       });
     }
   }
@@ -998,6 +1176,10 @@ export class OverworldMapRenderer {
 
     if (this.bossRig) {
       this.bossRig.tiltGroup.position.y = Math.abs(Math.sin(this.elapsed * 2.6 + 1.2)) * 0.06;
+    }
+
+    for (const tickToy of this.animatedToys) {
+      tickToy(this.elapsed);
     }
 
     // Drifting seasonal paper weather motes

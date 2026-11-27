@@ -15,6 +15,7 @@ import { getFamilyLabel } from '../engine/hooks';
 import {
   equipWeapon,
   gameStore,
+  reassignHeroOwner,
   respecPerks,
   swapSquadMembers,
   toggleSquadMember,
@@ -38,6 +39,12 @@ onMounted(() => window.addEventListener('keydown', onModalKeyDown));
 onBeforeUnmount(() => window.removeEventListener('keydown', onModalKeyDown));
 
 const run = computed(() => gameStore.run!);
+const coopPlayers = computed(() =>
+  run.value.coopPlayers && run.value.coopPlayers.length > 1 ? run.value.coopPlayers : null
+);
+const activeTab = ref<'trees' | 'armory' | 'squad'>('trees');
+const mobileBranchIdx = ref<number>(0);
+
 const squadBonds = computed(() =>
   bondStatuses(run.value.roster.filter((h) => !h.harvested && run.value.activeSquadUids.includes(h.uid)))
 );
@@ -66,6 +73,7 @@ watch(
 
 watch(selectedUid, () => {
   swapPickerOpen.value = false;
+  mobileBranchIdx.value = 0;
 });
 
 onBeforeUnmount(() => {
@@ -97,8 +105,14 @@ const heroTree = computed(() =>
 );
 
 const heroPaths = computed<SkillPathDef[]>(() =>
-  heroTree.value ? [heroTree.value.pathA, heroTree.value.pathB] : []
+  heroTree.value ? [heroTree.value.pathA, heroTree.value.pathB, heroTree.value.pathC] : []
 );
+
+function ownerFor(heroUid: string) {
+  if (!coopPlayers.value) return null;
+  const idx = run.value.heroOwnerByUid?.[heroUid] ?? 0;
+  return coopPlayers.value[idx] ?? coopPlayers.value[0];
+}
 
 const isSelectedActive = computed(() =>
   selectedHero.value ? run.value.activeSquadUids.includes(selectedHero.value.uid) : false
@@ -404,140 +418,264 @@ function unlockedCountInPath(path: SkillPathDef): number {
             </span>
           </div>
 
-          <!-- Armory Weapon Switcher (Base vs Unlocked Alternate Weapon!) -->
-          <div v-if="selectedHeroArmory" class="armory-bar">
+          <!-- Playful Segmented Hub Tabs (Zero Wall-of-Text Scrolling!) -->
+          <div class="hub-tabs" role="tablist">
             <button
-              class="weapon-opt"
-              :class="{ equipped: selectedHeroArmory.equippedId === selectedHeroArmory.base.id }"
-              :disabled="selectedHero.harvested"
-              @click="handleEquipWeapon(selectedHeroArmory.base.id)"
+              class="hub-tab"
+              :class="{ active: activeTab === 'trees' }"
+              role="tab"
+              :aria-selected="activeTab === 'trees'"
+              @click="activeTab = 'trees'"
             >
-              <div class="wo-head">
-                <strong>🎯 {{ selectedHeroArmory.base.name }}</strong>
-                <span class="wo-badge">{{ selectedHeroArmory.equippedId === selectedHeroArmory.base.id ? 'EQUIPPED' : 'BASE' }}</span>
-              </div>
-              <small class="wo-stats">
-                {{ selectedHeroArmory.base.damage }} DMG · R{{ selectedHeroArmory.base.minRange }}-{{ selectedHeroArmory.base.maxRange }} · {{ selectedHeroArmory.base.arc.toUpperCase() }}
-                <template v-if="selectedHeroArmory.base.knockback"> · ⇄ Push</template>
-              </small>
-              <small class="wo-desc">{{ selectedHeroArmory.base.description }}</small>
+              <span>🌳 Skill Trees (3 Paths)</span>
+              <span v-if="selectedHero.skillPoints > 0" class="tab-badge">{{ selectedHero.skillPoints }} SP</span>
             </button>
-
             <button
-              class="weapon-opt alt"
-              :class="{
-                equipped: selectedHeroArmory.equippedId === selectedHeroArmory.alt.id,
-                locked: !selectedHeroArmory.altUnlocked,
-              }"
-              :disabled="selectedHero.harvested || !selectedHeroArmory.altUnlocked"
-              @click="handleEquipWeapon(selectedHeroArmory.alt.id)"
+              class="hub-tab"
+              :class="{ active: activeTab === 'armory' }"
+              role="tab"
+              :aria-selected="activeTab === 'armory'"
+              @click="activeTab = 'armory'"
             >
-              <div class="wo-head">
-                <strong>⚔️ {{ selectedHeroArmory.alt.name }}</strong>
-                <span class="wo-badge">
-                  {{
-                    selectedHeroArmory.equippedId === selectedHeroArmory.alt.id
-                      ? 'EQUIPPED'
-                      : selectedHeroArmory.altUnlocked
-                        ? 'EQUIP ALT'
-                        : '🔒 ARMORY / ELITE'
-                  }}
-                </span>
-              </div>
-              <small class="wo-stats">
-                {{ selectedHeroArmory.alt.damage }} DMG · R{{ selectedHeroArmory.alt.minRange }}-{{ selectedHeroArmory.alt.maxRange }} · {{ selectedHeroArmory.alt.arc.toUpperCase() }}
-                <template v-if="selectedHeroArmory.alt.knockback"> · ⇄ Push</template>
-                <template v-if="selectedHeroArmory.alt.appliesStatus"> · +{{ selectedHeroArmory.alt.appliesStatus.kind }}</template>
-              </small>
-              <small class="wo-desc">{{ selectedHeroArmory.alt.description }}</small>
+              <span>⚔️ Armory &amp; Skill</span>
+            </button>
+            <button
+              class="hub-tab"
+              :class="{ active: activeTab === 'squad' }"
+              role="tab"
+              :aria-selected="activeTab === 'squad'"
+              @click="activeTab = 'squad'"
+            >
+              <span>{{ coopPlayers ? '🎮 Squad & Co-Op' : '👥 Squad Lineup' }}</span>
             </button>
           </div>
 
-          <!-- Illustrated 2-Path Botanical Vine Skill Tree -->
-          <div class="tree-paths-grid">
-            <div
-              v-for="path in heroPaths"
-              :key="path.key"
-              class="path-panel"
-              :style="{
-                '--path-col': path.color,
-                '--path-bg': path.accent,
-              }"
-            >
-              <div class="path-banner">
-                <div class="pb-left">
-                  <span class="pb-icon">{{ path.icon }}</span>
-                  <div>
-                    <strong>{{ path.name }}</strong>
-                    <small>{{ path.tagline }}</small>
+          <!-- TAB 1: Illustrated 3-Branch Botanical Vine Skill Tree (9 Perks per Hero!) -->
+          <template v-if="activeTab === 'trees'">
+            <!-- Mobile Branch Pill Selector (crisp 1-branch view on phones, all 3 side-by-side on desktop!) -->
+            <div class="mobile-branch-pills">
+              <button
+                v-for="(path, bIdx) in heroPaths"
+                :key="path.key"
+                class="mb-pill"
+                :class="{ active: mobileBranchIdx === bIdx }"
+                :style="{ '--path-col': path.color, '--path-bg': path.accent }"
+                @click="mobileBranchIdx = bIdx"
+              >
+                <span>
+                  {{ path.icon }}
+                  {{
+                    heroPaths.filter((p) => p.name.split(' ')[0] === path.name.split(' ')[0]).length > 1
+                      ? path.name.split(' ').slice(-1)[0]
+                      : path.name.split(' ')[0]
+                  }}
+                </span>
+                <small>{{ unlockedCountInPath(path) }}/3</small>
+              </button>
+            </div>
+
+            <div class="tree-paths-grid three-branch">
+              <div
+                v-for="(path, bIdx) in heroPaths"
+                :key="path.key"
+                class="path-panel"
+                :class="{ 'mobile-hidden': mobileBranchIdx !== bIdx }"
+                :style="{
+                  '--path-col': path.color,
+                  '--path-bg': path.accent,
+                }"
+              >
+                <div class="path-banner">
+                  <div class="pb-left">
+                    <span class="pb-icon">{{ path.icon }}</span>
+                    <div>
+                      <strong>{{ path.name }}</strong>
+                      <small>{{ path.tagline }}</small>
+                    </div>
+                  </div>
+                  <span class="pb-prog">{{ unlockedCountInPath(path) }}/3</span>
+                </div>
+
+                <div class="vine-tree">
+                  <template v-for="(perk, idx) in path.perks" :key="perk.id">
+                    <div
+                      v-if="idx > 0"
+                      class="vine-connector"
+                      :class="{
+                        lit: selectedHero.perkIds.includes(path.perks[idx - 1].id),
+                        golden: selectedHero.perkIds.includes(perk.id),
+                      }"
+                      aria-hidden="true"
+                    >
+                      <svg viewBox="0 0 64 26" width="64" height="26">
+                        <path
+                          class="vine-stem"
+                          d="M32 0 C28 9, 36 17, 32 26"
+                          fill="none"
+                          stroke-width="3.5"
+                          stroke-linecap="round"
+                        />
+                        <ellipse class="vine-leaf" cx="24" cy="11" rx="5.5" ry="3" transform="rotate(-24 24 11)" />
+                        <ellipse class="vine-leaf" cx="40" cy="15" rx="5.5" ry="3" transform="rotate(24 40 15)" />
+                      </svg>
+                    </div>
+
+                    <button
+                      class="perk-node"
+                      :class="[
+                        perkState(perk.id),
+                        { capstone: perk.tier === 3 },
+                      ]"
+                      :disabled="perkState(perk.id) !== 'ready'"
+                      @click="handleUnlock(perk.id)"
+                    >
+                      <div class="pn-medallion">
+                        <span>{{ perk.icon }}</span>
+                      </div>
+
+                      <div class="pn-body">
+                        <div class="pn-top">
+                          <div class="pn-title-wrap">
+                            <strong>{{ perk.name }}</strong>
+                            <span v-if="perk.tier === 3" class="tier-tag cap">★ CAP</span>
+                            <span v-else class="tier-tag">T{{ perk.tier }}</span>
+                          </div>
+                          <span v-if="perkState(perk.id) === 'unlocked'" class="wax-seal done" title="Unlocked">
+                            ✓
+                          </span>
+                          <span v-else class="wax-seal cost">{{ perk.cost }} SP</span>
+                        </div>
+                        <span class="pn-short">{{ perk.shortDesc }}</span>
+                        <p class="pn-desc">{{ perk.description }}</p>
+                        <small
+                          v-if="perk.requires && !selectedHero.perkIds.includes(perk.requires)"
+                          class="req-note"
+                        >
+                          Needs: {{ SKILL_PERKS[perk.requires]?.name }}
+                        </small>
+                      </div>
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- TAB 2: Armory Weapon Switcher & Signature Skill Card -->
+          <div v-else-if="activeTab === 'armory'" class="armory-tab-wrap">
+            <div v-if="selectedHeroArmory" class="armory-bar">
+              <button
+                class="weapon-opt"
+                :class="{ equipped: selectedHeroArmory.equippedId === selectedHeroArmory.base.id }"
+                :disabled="selectedHero.harvested"
+                @click="handleEquipWeapon(selectedHeroArmory.base.id)"
+              >
+                <div class="wo-head">
+                  <strong>🎯 {{ selectedHeroArmory.base.name }}</strong>
+                  <span class="wo-badge">{{ selectedHeroArmory.equippedId === selectedHeroArmory.base.id ? 'EQUIPPED' : 'BASE' }}</span>
+                </div>
+                <small class="wo-stats">
+                  {{ selectedHeroArmory.base.damage }} DMG · R{{ selectedHeroArmory.base.minRange }}-{{ selectedHeroArmory.base.maxRange }} · {{ selectedHeroArmory.base.arc.toUpperCase() }}
+                  <template v-if="selectedHeroArmory.base.knockback"> · ⇄ Push</template>
+                </small>
+                <small class="wo-desc">{{ selectedHeroArmory.base.description }}</small>
+              </button>
+
+              <button
+                class="weapon-opt alt"
+                :class="{
+                  equipped: selectedHeroArmory.equippedId === selectedHeroArmory.alt.id,
+                  locked: !selectedHeroArmory.altUnlocked,
+                }"
+                :disabled="selectedHero.harvested || !selectedHeroArmory.altUnlocked"
+                @click="handleEquipWeapon(selectedHeroArmory.alt.id)"
+              >
+                <div class="wo-head">
+                  <strong>⚔️ {{ selectedHeroArmory.alt.name }}</strong>
+                  <span class="wo-badge">
+                    {{
+                      selectedHeroArmory.equippedId === selectedHeroArmory.alt.id
+                        ? 'EQUIPPED'
+                        : selectedHeroArmory.altUnlocked
+                          ? 'EQUIP ALT'
+                          : '🔒 ARMORY / SHED'
+                    }}
+                  </span>
+                </div>
+                <small class="wo-stats">
+                  {{ selectedHeroArmory.alt.damage }} DMG · R{{ selectedHeroArmory.alt.minRange }}-{{ selectedHeroArmory.alt.maxRange }} · {{ selectedHeroArmory.alt.arc.toUpperCase() }}
+                  <template v-if="selectedHeroArmory.alt.knockback"> · ⇄ Push</template>
+                  <template v-if="selectedHeroArmory.alt.appliesStatus"> · +{{ selectedHeroArmory.alt.appliesStatus.kind }}</template>
+                </small>
+                <small class="wo-desc">{{ selectedHeroArmory.alt.description }}</small>
+              </button>
+            </div>
+
+            <div class="skill-card-box paper-card">
+              <div class="scb-head">
+                <strong>✨ Signature Skill: {{ selectedHero.ability.name }}</strong>
+                <span class="lvl-pill">CD {{ selectedHero.ability.cooldown }}t</span>
+              </div>
+              <p>{{ selectedHero.ability.description }}</p>
+              <small v-if="selectedHero.coopPassive" class="coop-passive-note">
+                🤝 Co-Op Passive: {{ selectedHero.coopPassive }}
+              </small>
+            </div>
+          </div>
+
+          <!-- TAB 3: Squad Lineup & Local Co-Op Player Ownership -->
+          <div v-else class="squad-tab-wrap">
+            <div v-if="coopPlayers" class="coop-assign-panel paper-card">
+              <div class="cap-head">
+                <strong>🎮 Couch Co-Op Hero Assignment</strong>
+                <small>Tap P1–P{{ coopPlayers.length }} to assign who controls each active hero!</small>
+              </div>
+              <div class="cap-rows">
+                <div v-for="hero in activeSquadHeroes" :key="hero.uid" class="cap-row">
+                  <div class="cap-hero">
+                    <img :src="`/sprites/${hero.species}.png`" :alt="hero.name" />
+                    <strong>{{ hero.name }}</strong>
+                  </div>
+                  <div class="cap-btns">
+                    <button
+                      v-for="cp in coopPlayers"
+                      :key="cp.idx"
+                      class="cap-pill"
+                      :class="{ active: ownerFor(hero.uid)?.idx === cp.idx }"
+                      :style="ownerFor(hero.uid)?.idx === cp.idx ? { background: cp.color, color: '#fffdf5' } : {}"
+                      @click="reassignHeroOwner(hero.uid, cp.idx)"
+                    >
+                      {{ cp.badge }}
+                    </button>
                   </div>
                 </div>
-                <span class="pb-prog">{{ unlockedCountInPath(path) }}/3</span>
               </div>
+            </div>
 
-              <div class="vine-tree">
-                <template v-for="(perk, idx) in path.perks" :key="perk.id">
-                  <!-- Illustrated Botanical Vine Connector between Tier 1 -> 2 -> 3 -->
-                  <div
-                    v-if="idx > 0"
-                    class="vine-connector"
-                    :class="{
-                      lit: selectedHero.perkIds.includes(path.perks[idx - 1].id),
-                      golden: selectedHero.perkIds.includes(perk.id),
-                    }"
-                    aria-hidden="true"
-                  >
-                    <svg viewBox="0 0 64 26" width="64" height="26">
-                      <path
-                        class="vine-stem"
-                        d="M32 0 C28 9, 36 17, 32 26"
-                        fill="none"
-                        stroke-width="3.5"
-                        stroke-linecap="round"
-                      />
-                      <ellipse class="vine-leaf" cx="24" cy="11" rx="5.5" ry="3" transform="rotate(-24 24 11)" />
-                      <ellipse class="vine-leaf" cx="40" cy="15" rx="5.5" ry="3" transform="rotate(24 40 15)" />
-                    </svg>
+            <div class="lineup-panel paper-card">
+              <strong>🌾 Active Field Squad ({{ activeSquadHeroes.length }}/4)</strong>
+              <div class="isp-grid">
+                <div v-for="hero in activeSquadHeroes" :key="hero.uid" class="isp-card static-card">
+                  <img :src="`/sprites/${hero.species}.png`" :alt="hero.name" />
+                  <div class="isp-copy">
+                    <strong>{{ hero.name.split(' ')[0] }}</strong>
+                    <small>L{{ hero.level }} · {{ hero.hp }}/{{ hero.maxHp }} HP</small>
                   </div>
-
-                  <!-- Illustrated Perk Node Card -->
-                  <button
-                    class="perk-node"
-                    :class="[
-                      perkState(perk.id),
-                      { capstone: perk.tier === 3 },
-                    ]"
-                    :disabled="perkState(perk.id) !== 'ready'"
-                    @click="handleUnlock(perk.id)"
+                  <span
+                    v-if="ownerFor(hero.uid)"
+                    class="owner-chip"
+                    :style="{ background: ownerFor(hero.uid)!.color }"
                   >
-                    <div class="pn-medallion">
-                      <span>{{ perk.icon }}</span>
-                    </div>
-
-                    <div class="pn-body">
-                      <div class="pn-top">
-                        <div class="pn-title-wrap">
-                          <strong>{{ perk.name }}</strong>
-                          <span v-if="perk.tier === 3" class="tier-tag cap">★ CAPSTONE</span>
-                          <span v-else class="tier-tag">Tier {{ perk.tier }}</span>
-                        </div>
-                        <span v-if="perkState(perk.id) === 'unlocked'" class="wax-seal done" title="Unlocked">
-                          ✓
-                        </span>
-                        <span v-else class="wax-seal cost">{{ perk.cost }} SP</span>
-                      </div>
-                      <span class="pn-short">{{ perk.shortDesc }}</span>
-                      <p class="pn-desc">{{ perk.description }}</p>
-                      <small
-                        v-if="perk.requires && !selectedHero.perkIds.includes(perk.requires)"
-                        class="req-note"
-                      >
-                        Requires: {{ SKILL_PERKS[perk.requires]?.name }}
-                      </small>
-                    </div>
-                  </button>
-                </template>
+                    {{ ownerFor(hero.uid)!.badge }}
+                  </span>
+                </div>
               </div>
+              <small v-if="benchHeroes.length > 0" class="bench-hint">
+                Select any Bench hero on the left and tap <strong>⇄ Swap Into Squad</strong> to bring them in!
+              </small>
+              <small v-else class="bench-hint">
+                All recruited heroes are deployed! Unlock more allies in the Greenhouse, Vaults &amp; Carnival Barn.
+              </small>
             </div>
           </div>
         </div>
@@ -560,8 +698,8 @@ function unlockedCountInPath(path: SkillPathDef): number {
 }
 
 .build-sheet {
-  width: min(1020px, 100%);
-  max-height: min(92dvh, 760px);
+  width: min(1140px, 100%);
+  max-height: min(92dvh, 780px);
   display: flex;
   flex-direction: column;
   padding: 16px 18px 18px;
@@ -1391,6 +1529,184 @@ function unlockedCountInPath(path: SkillPathDef): number {
   color: var(--ink);
 }
 
+.hub-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.hub-tab {
+  border: 2px solid var(--ink);
+  border-radius: 11px;
+  padding: 7px 8px;
+  background: #f2e4c7;
+  color: var(--ink-soft);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: transform 0.12s ease, background-color 0.12s ease;
+}
+
+.hub-tab.active {
+  background: linear-gradient(180deg, #ffe788 0%, #f5c23b 100%);
+  color: var(--ink);
+  box-shadow: 0 3px 0 var(--ink);
+}
+
+.tab-badge {
+  background: #d83b28;
+  color: #fffef5;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 0.64rem;
+}
+
+.mobile-branch-pills {
+  display: none;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mb-pill {
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  background: #f5e8cc;
+  padding: 5px 6px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.mb-pill.active {
+  background: var(--path-bg);
+  border-color: var(--path-col);
+  color: var(--path-col);
+  box-shadow: 0 2px 0 var(--path-col);
+}
+
+.tree-paths-grid.three-branch {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.armory-tab-wrap,
+.squad-tab-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skill-card-box,
+.coop-assign-panel,
+.lineup-panel {
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scb-head,
+.cap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.skill-card-box p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.coop-passive-note {
+  color: #21662b;
+  font-weight: 800;
+  font-size: 0.76rem;
+}
+
+.cap-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cap-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: #fbf2de;
+  border: 1.6px solid rgba(74, 44, 23, 0.35);
+  border-radius: 10px;
+  padding: 6px 9px;
+}
+
+.cap-hero {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cap-hero img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.cap-btns {
+  display: flex;
+  gap: 5px;
+}
+
+.cap-pill {
+  border: 1.8px solid var(--ink);
+  border-radius: 8px;
+  background: #fffdf5;
+  color: var(--ink);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 900;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+.owner-chip {
+  color: #fffef5;
+  border: 1.5px solid var(--ink);
+  border-radius: 7px;
+  padding: 1px 6px;
+  font-size: 0.66rem;
+  font-weight: 900;
+}
+
+.static-card {
+  cursor: default;
+}
+
+.bench-hint {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 960px) {
+  .tree-paths-grid.three-branch {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 820px) {
   .build-sheet {
     padding: 12px 10px 10px;
@@ -1457,8 +1773,17 @@ function unlockedCountInPath(path: SkillPathDef): number {
     padding: 2px 7px;
   }
 
+  .mobile-branch-pills {
+    display: grid;
+  }
+
+  .path-panel.mobile-hidden {
+    display: none;
+  }
+
   .armory-bar,
-  .tree-paths-grid {
+  .tree-paths-grid,
+  .tree-paths-grid.three-branch {
     grid-template-columns: 1fr;
   }
 

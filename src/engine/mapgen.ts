@@ -57,13 +57,13 @@ export const ACTS: ActDef[] = [
     trailTitle: 'Spring Meadow Tabletop',
     trailHint: 'Play a Travel Card to march along the brook, clover hills & orchard toward Captain Scarecrow.',
     mapPools: {
-      skirmish: ['creek_crossing', 'duck_pond_meadow', 'canyon_terrace', 'barnyard_siege', 'vegetable_patch'],
+      skirmish: ['cliff_watchtower', 'windmill_causeway', 'creek_crossing', 'duck_pond_meadow', 'canyon_terrace', 'barnyard_siege', 'vegetable_patch'],
       escape: ['patch_breakout', 'harvest_railroad'],
       barn_rescue: ['barn_raid'],
-      elite: ['tool_shed_ambush', 'molten_furnace'],
+      elite: ['cliff_watchtower', 'tool_shed_ambush', 'molten_furnace'],
     },
     subtitles: {
-      skirmish: 'Skirmish / Siege — Seize high ground, bounce pads & hold the patch!',
+      skirmish: 'Skirmish / Sabotage — Seize 3-story cliffs, smash Supply Crates & bounce across!',
       escape: 'Breakout / Escort — Reach the Gate or escort the Golden Seed Cart!',
       barn_rescue: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
       elite: 'Elite Fight — High-stakes battle for rare Graft, Alt Weapon & Relic',
@@ -97,13 +97,13 @@ export const ACTS: ActDef[] = [
     trailTitle: 'Sunlit Conservatory Tabletop',
     trailHint: 'Chart a route across arched canal bridges & sunflower loops to Baron Combine’s Glasshouse.',
     mapPools: {
-      skirmish: ['botanical_rotunda', 'greenhouse_entry', 'molten_furnace', 'canyon_terrace', 'barnyard_siege'],
+      skirmish: ['botanical_rotunda', 'windmill_causeway', 'cliff_watchtower', 'greenhouse_entry', 'molten_furnace', 'canyon_terrace', 'barnyard_siege'],
       escape: ['irrigation_run', 'harvest_railroad'],
       barn_rescue: ['barn_raid'],
-      elite: ['apiary_ambush', 'molten_furnace'],
+      elite: ['apiary_ambush', 'molten_furnace', 'cliff_watchtower'],
     },
     subtitles: {
-      skirmish: 'Skirmish / Siege — Use Sunbeams (+2 ATK), Catwalks & Rolling Pumpkins',
+      skirmish: 'Skirmish / Sabotage — Use Sunbeams (+2 ATK), 3-story Bluffs & Rolling Pumpkins',
       escape: 'Breakout / Escort — Blast Sprinklers or escort the Golden Seed Cart!',
       barn_rescue: 'Barn Rescue — Smash the Burlap Cage to free a bagged ally!',
       elite: 'Elite Fight — Chain-detonate Beehives for rare Graft, Alt Weapon & Relic',
@@ -138,10 +138,10 @@ export const ACTS: ActDef[] = [
     trailTitle: 'Autumn Harvest Tabletop',
     trailHint: 'Traverse Pumpkin Hollow, mossy walls & timber bridges to reach Lord Bramblecoat’s Keep.',
     mapPools: {
-      skirmish: ['cider_mill_yard', 'duck_pond_meadow', 'botanical_rotunda', 'canyon_terrace', 'creek_crossing', 'barnyard_siege'],
+      skirmish: ['windmill_causeway', 'cider_mill_yard', 'cliff_watchtower', 'duck_pond_meadow', 'botanical_rotunda', 'canyon_terrace', 'creek_crossing', 'barnyard_siege'],
       escape: ['patch_breakout', 'harvest_railroad', 'irrigation_run'],
       barn_rescue: ['barn_raid'],
-      elite: ['cider_mill_yard', 'molten_furnace', 'tool_shed_ambush', 'apiary_ambush'],
+      elite: ['cider_mill_yard', 'cliff_watchtower', 'molten_furnace', 'tool_shed_ambush', 'apiary_ambush'],
     },
     subtitles: {
       skirmish: 'Skirmish / Siege — Clear the harvest crew or hold the orchard patch!',

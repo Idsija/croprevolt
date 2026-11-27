@@ -9,6 +9,7 @@ import { leaveEvent, openEventNode, resolveEventChoice } from '../engine/events'
 import { ACTS, HARVEST_BELL_LIMIT } from '../engine/mapgen';
 import {
   createBattleFromMap,
+  createBattleFromTemplate,
   executeAbility,
   executeAttack,
   executeDash,
@@ -36,6 +37,7 @@ import {
   computeMovableTiles,
   computeTeamJumpOptions,
 } from '../engine/pathfinding';
+import { endlessDifficultyFor, generateEndlessFloorMap } from '../engine/proceduralMap';
 import {
   applyBattleOutcomeToRun,
   applyGraftToHero,
@@ -47,18 +49,25 @@ import {
   claimWeaponReward,
   clearSavedRun,
   createDailyRun,
+  createEndlessRun,
   rerollGraftChoices,
   createNewRun,
   equipHeroWeapon,
   finishRewardsAndReturnToMap,
+  leaveEndlessBonusRoom,
   loadMetaProgress,
   loadSavedRun,
+  openEndlessBonusRoom,
   openShrineNode,
   openVaultNode,
+  purchaseHeroUnlock,
   purchaseMetaUnlock,
+  resolveEndlessBonusChoice,
   respecHeroPerks,
   saveMetaProgress,
   saveRun,
+  setGuidedHintsEnabled,
+  setHeroCoopOwner,
   toggleHeroActiveSquad,
   unlockHeroPerk,
 } from '../engine/run';
@@ -170,6 +179,16 @@ export interface GameStoreState {
   muted: boolean;
   musicMuted: boolean;
   eventQueueVersion: number;
+  /** Selected Local Co-Op player count on the Cover Hub (1 = Solo, 2–4 = Pass-and-Play). */
+  selectedCoopCount: number;
+  /** Celebratory cardboard handoff banner when passing turn to another couch player. */
+  coopHandoffBanner: {
+    playerIdx: number;
+    badge: string;
+    name: string;
+    color: string;
+    heroNames: string[];
+  } | null;
 }
 
 const initialMeta = loadMetaProgress();
@@ -205,6 +224,8 @@ export const gameStore = reactive<GameStoreState>({
   muted: sfx.isMuted(),
   musicMuted: music.isMuted(),
   eventQueueVersion: 0,
+  selectedCoopCount: 1,
+  coopHandoffBanner: null,
 });
 
 export function syncAdaptiveMusic(): void {
@@ -413,6 +434,69 @@ export function buyMetaUnlock(key: keyof MetaProgress['unlocks']): boolean {
   return ok;
 }
 
+export function buyHeroUnlock(blueprintId: string): boolean {
+  const ok = purchaseHeroUnlock(gameStore.meta, blueprintId);
+  if (ok) sfx.rescue();
+  return ok;
+}
+
+export function toggleGuidedHints(): boolean {
+  sfx.click();
+  const next = !(gameStore.meta.guidedHintsEnabled ?? true);
+  setGuidedHintsEnabled(gameStore.meta, next);
+  return next;
+}
+
+export function setSelectedCoopCount(count: number): void {
+  sfx.click();
+  gameStore.selectedCoopCount = Math.max(1, Math.min(4, Math.floor(count)));
+}
+
+export function dismissCoopHandoff(): void {
+  gameStore.coopHandoffBanner = null;
+}
+
+export function toggleCoopFreeOrder(): boolean {
+  const b = gameStore.battle;
+  if (!b?.coopPlayers || b.coopPlayers.length <= 1) return false;
+  sfx.click();
+  b.coopFreeOrder = !b.coopFreeOrder;
+  if (b.coopFreeOrder) gameStore.coopHandoffBanner = null;
+  return Boolean(b.coopFreeOrder);
+}
+
+export function reassignHeroOwner(heroUid: string, playerIdx: number): boolean {
+  const run = gameStore.run;
+  if (!run) return false;
+  const ok = setHeroCoopOwner(run, heroUid, playerIdx);
+  if (!ok) return false;
+  if (gameStore.battle) {
+    const unit = gameStore.battle.units.find((u) => u.rosterUid === heroUid);
+    if (unit) unit.ownerPlayerIdx = playerIdx;
+  }
+  sfx.click();
+  saveRun(run);
+  return true;
+}
+
+function triggerCoopHandoffBanner(b: BattleState, playerIdx: number): void {
+  if (!b.coopPlayers || b.coopPlayers.length <= 1 || b.coopFreeOrder) return;
+  const player = b.coopPlayers[playerIdx];
+  if (!player) return;
+  const heroNames = b.units
+    .filter((u) => u.team === 'player' && u.alive && !u.isEscortCart && u.ownerPlayerIdx === playerIdx)
+    .map((u) => u.name);
+  if (heroNames.length === 0) return;
+  b.activeCoopPlayerIdx = playerIdx;
+  gameStore.coopHandoffBanner = {
+    playerIdx,
+    badge: player.badge,
+    name: player.name,
+    color: player.color,
+    heroNames,
+  };
+}
+
 export function startDailyRun(): void {
   const run = createDailyRun();
   // Starting uses up the day's scored attempt, so a bad start can't be rerolled.
@@ -420,14 +504,22 @@ export function startDailyRun(): void {
   beginRun(run);
 }
 
-/** Start the same kind of run again: today's daily after a daily, a standard run otherwise. */
+/** Start the same kind of run again: today's daily, Endless Harvest, or a standard Campaign run. */
 export function playAgain(): void {
+  const coop = gameStore.run?.coopPlayers?.length ?? gameStore.selectedCoopCount ?? 1;
   if (gameStore.run?.mode === 'daily') startDailyRun();
-  else startNewSeasonRun();
+  else if (gameStore.run?.mode === 'endless') startEndlessRun(coop);
+  else startNewSeasonRun('spring', coop);
 }
 
-export function startNewSeasonRun(seasonId: SeasonId = 'spring'): void {
-  beginRun(createNewRun(gameStore.meta, seasonId, undefined, gameStore.meta.selectedHeat ?? 0));
+export function startNewSeasonRun(seasonId: SeasonId = 'spring', coopCount?: number): void {
+  const players = coopCount ?? gameStore.selectedCoopCount ?? 1;
+  beginRun(createNewRun(gameStore.meta, seasonId, undefined, gameStore.meta.selectedHeat ?? 0, players));
+}
+
+export function startEndlessRun(coopCount?: number): void {
+  const players = coopCount ?? gameStore.selectedCoopCount ?? 1;
+  beginRun(createEndlessRun(gameStore.meta, players, undefined, gameStore.meta.selectedHeat ?? 0));
 }
 
 function beginRun(run: RunState): void {
@@ -438,6 +530,7 @@ function beginRun(run: RunState): void {
   clearSavedRun();
   gameStore.run = run;
   gameStore.battle = null;
+  gameStore.coopHandoffBanner = null;
   gameStore.enemyTurnRunning = false;
   gameStore.enemyTurnProgress = null;
   gameStore.enemyHurry = false;
@@ -461,10 +554,11 @@ export function continueSavedRun(): void {
   lastUndoUnitId = null;
   clearAutoEndTimer();
   if (saved.status === 'battle') {
-    saved.status = 'map';
+    saved.status = saved.mode === 'endless' ? 'endless_hub' : 'map';
   }
   gameStore.run = saved;
   gameStore.battle = null;
+  gameStore.coopHandoffBanner = null;
   gameStore.enemyTurnRunning = false;
   gameStore.enemyTurnProgress = null;
   gameStore.enemyHurry = false;
@@ -483,6 +577,7 @@ export function returnToTitle(): void {
   gameStore.enemyTurnRunning = false;
   gameStore.enemyTurnProgress = null;
   gameStore.enemyHurry = false;
+  gameStore.coopHandoffBanner = null;
   if (gameStore.run && gameStore.run.status !== 'victory' && gameStore.run.status !== 'defeat') {
     saveRun(gameStore.run);
     gameStore.savedRunAvailable = true;
@@ -497,6 +592,100 @@ export function returnToTitle(): void {
   syncAdaptiveMusic();
 }
 
+export function enterEndlessOption(optionId: string): void {
+  const run = gameStore.run;
+  if (!run || run.mode !== 'endless' || !run.endless) return;
+  const option = run.endless.nextOptions.find((o) => o.id === optionId);
+  if (!option) return;
+
+  sfx.click();
+  battleSessionId += 1;
+  lastUndoUnitId = null;
+  clearAutoEndTimer();
+  gameStore.coopHandoffBanner = null;
+
+  if (option.kind === 'bonus') {
+    openEndlessBonusRoom(run, option);
+    saveRun(run);
+    syncAdaptiveMusic();
+    return;
+  }
+
+  const floor = run.endless.floor;
+  const mapTemplate = generateEndlessFloorMap(floor, option);
+  run.endless.pendingMapTemplate = mapTemplate;
+  run.status = 'battle';
+
+  const activeHeroes = run.activeSquadUids
+    .map((uid) => run.roster.find((h) => h.uid === uid && !h.harvested))
+    .filter((h): h is NonNullable<typeof h> => Boolean(h));
+
+  const harvestedHero = run.roster.find((h) => h.harvested);
+  const ownedBps = new Set(run.roster.map((h) => h.blueprintId));
+  const fallbackBp = RECRUITABLE_BLUEPRINT_IDS.find((bp) => !ownedBps.has(bp)) ?? 'carrot';
+  const heat = run.harvestHeat ?? 0;
+  const pendingBuff = run.nextBattleBuff ?? null;
+
+  const battle = createBattleFromTemplate(
+    mapTemplate,
+    activeHeroes,
+    run.relicIds,
+    run.items,
+    harvestedHero ? { hero: harvestedHero } : { blueprintId: fallbackBp },
+    {
+      difficulty: endlessDifficultyFor(floor, heat),
+      theme: mapTemplate.theme,
+      enablePrepPhase: true,
+      harvestHeat: heat,
+      nextBattleBuff: pendingBuff,
+      coopPlayers: run.coopPlayers,
+      heroOwnerByUid: run.heroOwnerByUid,
+    }
+  );
+  run.nextBattleBuff = null;
+
+  gameStore.battle = battle;
+  gameStore.mode = 'move';
+  gameStore.selectedItemId = null;
+  gameStore.hoveredTile = null;
+  gameStore.previewTile = null;
+  gameStore.inspectedEnemyId = null;
+  gameStore.showAllDangerZone = false;
+  gameStore.previewOverwatch = false;
+  gameStore.enemyTurnRunning = false;
+  gameStore.enemyTurnProgress = null;
+  gameStore.enemyHurry = false;
+  const firstHero = battle.units.find((u) => u.team === 'player' && u.alive && !u.isEscortCart);
+  gameStore.selectedUnitId = firstHero?.id ?? null;
+
+  saveRun(run);
+  syncAdaptiveMusic();
+  setTimeout(() => flushBattleEvents(), 60);
+}
+
+export function claimEndlessBonus(
+  choice: 'wheel' | 'recruit' | 'weapon' | 'sp' | 'satchel' | 'soak' | 'vigor' | 'swift'
+): string | null {
+  const run = gameStore.run;
+  if (!run) return null;
+  const result = resolveEndlessBonusChoice(run, gameStore.meta, choice);
+  if (result) {
+    sfx.rescue();
+    saveRun(run);
+    saveMetaProgress(gameStore.meta);
+  }
+  return result;
+}
+
+export function closeEndlessBonusRoom(): void {
+  const run = gameStore.run;
+  if (!run) return;
+  sfx.click();
+  leaveEndlessBonusRoom(run);
+  saveRun(run);
+  syncAdaptiveMusic();
+}
+
 export function enterSeasonNode(nodeId: string, travelCardId?: string): void {
   const run = gameStore.run;
   if (!run) return;
@@ -506,6 +695,7 @@ export function enterSeasonNode(nodeId: string, travelCardId?: string): void {
   battleSessionId += 1;
   lastUndoUnitId = null;
   clearAutoEndTimer();
+  gameStore.coopHandoffBanner = null;
 
   // Apply boardgame Travel Card movement (advances boardTurn, awards card bonus, draws replacement card)
   if (travelCardId) {
@@ -566,6 +756,8 @@ export function enterSeasonNode(nodeId: string, travelCardId?: string): void {
       nextBattleBuff: pendingBuff,
       bossEmpowered,
       objective: rollObjectiveForNode(run.seed, node),
+      coopPlayers: run.coopPlayers,
+      heroOwnerByUid: run.heroOwnerByUid,
     }
   );
   // Consume one-battle Travel Card / Shrine boost once battle starts
@@ -647,6 +839,10 @@ export function selectBattleUnit(unitId: string, focusCamera = true, allowToggle
   gameStore.previewTile = null;
   gameStore.previewOverwatch = false;
   gameStore.selectedItemId = null;
+  gameStore.coopHandoffBanner = null;
+  if (b.coopPlayers && b.coopPlayers.length > 1 && typeof u.ownerPlayerIdx === 'number') {
+    b.activeCoopPlayerIdx = u.ownerPlayerIdx;
+  }
   // Always start in default unified mode — never auto-switch into Skill/Ability!
   gameStore.mode = 'move';
   if (focusCamera) requestCameraFocus(u.pos);
@@ -664,6 +860,9 @@ export function confirmPrepPhase(): boolean {
     const firstHero = b.units.find((u) => u.team === 'player' && u.alive && !u.isEscortCart);
     if (firstHero && !gameStore.selectedUnitId) {
       gameStore.selectedUnitId = firstHero.id;
+    }
+    if (b.coopPlayers && b.coopPlayers.length > 1 && firstHero) {
+      triggerCoopHandoffBanner(b, firstHero.ownerPlayerIdx ?? 0);
     }
     flushBattleEvents();
   }
@@ -904,17 +1103,20 @@ export function getActionOptionsForTile(pos: GridPos | null): PreviewActionOptio
     return options;
   }
 
-  // Empty tile, collapsible bridge, or destructible cover (including Rolling Pumpkins!)
+  // Empty tile, collapsible bridge, or destructible cover (including Rolling Pumpkins & Supply Crates!)
   if (gameStore.mode === 'attack') {
     const fc = forecastAttack(b, selected, pos);
     if (fc.canAttack) {
+      const tileCov = b.tiles[pos.y]?.[pos.x]?.cover;
       const label = fc.isPumpkinTarget
         ? `Bowl Pumpkin! (4 DMG lane)`
         : fc.isBridgeTarget
           ? `Collapse Bridge (-${fc.coverDamage})`
-          : fc.coverDamage && b.tiles[pos.y]?.[pos.x]?.cover
-            ? `Smash Cover (-${fc.coverDamage})`
-            : `Lob Here (-${fc.finalDamage})`;
+          : tileCov?.isObjectiveCrate
+            ? `Smash Supply Crate (-${fc.coverDamage})`
+            : fc.coverDamage && tileCov
+              ? `Smash Cover (-${fc.coverDamage})`
+              : `Lob Here (-${fc.finalDamage})`;
       options.push({
         kind: 'attack',
         label,
@@ -934,20 +1136,23 @@ export function getActionOptionsForTile(pos: GridPos | null): PreviewActionOptio
     return options;
   }
 
-  // Clicking destructible cover (including Rolling Pumpkins!) or a Collapsible Wooden Bridge directly
+  // Clicking destructible cover (including Rolling Pumpkins & Supply Crates!) or a Collapsible Wooden Bridge directly
   // while in default mode also offers quick Smash/Bowl/Collapse if in attack range!
   const coverFc = forecastAttack(b, selected, pos);
   if (
     coverFc.canAttack &&
     (b.tiles[pos.y]?.[pos.x]?.cover?.destructible || coverFc.isBridgeTarget)
   ) {
+    const tileCov = b.tiles[pos.y]?.[pos.x]?.cover;
     options.push({
       kind: 'attack',
       label: coverFc.isPumpkinTarget
         ? `Bowl Pumpkin! (4 DMG)`
         : coverFc.isBridgeTarget
           ? `Collapse Bridge (-${coverFc.coverDamage})`
-          : `Smash Cover (-${coverFc.coverDamage})`,
+          : tileCov?.isObjectiveCrate
+            ? `Smash Supply Crate (-${coverFc.coverDamage})`
+            : `Smash Cover (-${coverFc.coverDamage})`,
       tone: 'danger',
     });
   }
@@ -985,6 +1190,7 @@ export function getPreviewActionOptions(): PreviewActionOption[] {
  * - NEVER auto-switches into 'ability' mode!
  * - Always returns to default unified 'move' mode so skills are ONLY used intentionally.
  * - Auto-advances to the next ready hero only when the current hero has NO remaining actions.
+ * - In Local Co-Op (2P–4P), finishes the active couch player's heroes first, then triggers a celebratory handoff banner!
  */
 function autoAdvanceAfterAction(unitId: string, actionPos?: GridPos): void {
   const b = gameStore.battle;
@@ -998,16 +1204,33 @@ function autoAdvanceAfterAction(unitId: string, actionPos?: GridPos): void {
     // Stay on this unit in neutral unified mode (never auto-select Skill!)
     gameStore.mode = 'move';
   } else {
-    // Hero has finished all meaningful actions -> smoothly advance to next ready ally (if any)
-    const nextReady = b.units.find(
-      (other) => other.id !== unitId && unitHasMeaningfulAction(b, other)
-    );
+    const isCoop = Boolean(b.coopPlayers && b.coopPlayers.length > 1);
+    const curOwner = u?.ownerPlayerIdx ?? b.activeCoopPlayerIdx ?? 0;
+    const sameOwnerNext = isCoop
+      ? b.units.find(
+          (other) =>
+            other.id !== unitId &&
+            other.ownerPlayerIdx === curOwner &&
+            unitHasMeaningfulAction(b, other)
+        )
+      : undefined;
+    const nextReady =
+      sameOwnerNext ??
+      b.units.find((other) => other.id !== unitId && unitHasMeaningfulAction(b, other));
+
     lastAutoAdvanceAt = Date.now();
     lastAutoAdvancePos = actionPos ? { ...actionPos } : null;
     if (nextReady) {
       gameStore.selectedUnitId = nextReady.id;
       gameStore.mode = 'move';
       requestCameraFocus(nextReady.pos);
+      if (
+        isCoop &&
+        typeof nextReady.ownerPlayerIdx === 'number' &&
+        nextReady.ownerPlayerIdx !== curOwner
+      ) {
+        triggerCoopHandoffBanner(b, nextReady.ownerPlayerIdx);
+      }
     } else {
       gameStore.selectedUnitId = null;
       gameStore.mode = 'move';
@@ -1444,6 +1667,9 @@ export async function endPlayerTurn(): Promise<void> {
     gameStore.selectedUnitId = firstAlive?.id ?? null;
     gameStore.mode = 'move';
     if (firstAlive) requestCameraFocus(firstAlive.pos);
+    if (gameStore.battle.coopPlayers && gameStore.battle.coopPlayers.length > 1 && firstAlive) {
+      triggerCoopHandoffBanner(gameStore.battle, firstAlive.ownerPlayerIdx ?? 0);
+    }
 
     const now = gameStore.battle;
     const lines = recapBefore
@@ -1479,6 +1705,7 @@ export function finalizeBattleAndProceed(): void {
   sfx.click();
   applyBattleOutcomeToRun(run, b, gameStore.meta);
   gameStore.battle = null;
+  gameStore.coopHandoffBanner = null;
   gameStore.selectedUnitId = null;
   gameStore.previewTile = null;
   gameStore.inspectedEnemyId = null;
@@ -1523,10 +1750,11 @@ export function pickRelic(relicId: string): boolean {
 export function pickRecruit(blueprintId: string): boolean {
   if (!gameStore.run) return false;
   const bonusHp = gameStore.meta.unlocks.heirloomSoil ? 2 : 0;
-  const ok = claimRecruitReward(gameStore.run, blueprintId, bonusHp);
+  const ok = claimRecruitReward(gameStore.run, blueprintId, bonusHp, gameStore.meta);
   if (ok) {
     sfx.rescue();
     saveRun(gameStore.run);
+    saveMetaProgress(gameStore.meta);
   }
   return ok;
 }

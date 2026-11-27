@@ -1,8 +1,13 @@
 import { ALL_GRAFT_IDS, GRAFT_REGISTRY } from '../data/grafts';
 import { ALL_ITEM_IDS, ITEM_REGISTRY } from '../data/items';
-import { PRODUCE_BLUEPRINTS, RECRUITABLE_BLUEPRINT_IDS, STARTER_BLUEPRINT_IDS } from '../data/produce';
+import {
+  HERO_UNLOCK_CATALOG,
+  PRODUCE_BLUEPRINTS,
+  RECRUITABLE_BLUEPRINT_IDS,
+  STARTER_BLUEPRINT_IDS,
+} from '../data/produce';
 import { MAP_TEMPLATES } from '../data/maps';
-import { ALL_RELIC_IDS } from '../data/relics';
+import { ALL_RELIC_IDS, RELIC_REGISTRY } from '../data/relics';
 import { canUnlockPerk, getXpToNextLevel, MAX_HERO_LEVEL, SKILL_PERKS } from '../data/skills';
 import {
   ALL_ALT_WEAPON_IDS,
@@ -14,6 +19,7 @@ import { battleRng, getHeatSeedMultiplier, heatRunRules, MAX_HARVEST_HEAT } from
 import { loadDailyState, recordDailyFinish } from './daily';
 import { recordRunHistory } from './history';
 import { PAR_TUNING, gradeBattle } from './par';
+import { rollEndlessFloorOptions } from './proceduralMap';
 import { dailyKeyFor, dailySeedFor, recordRunScore } from './score';
 import {
   ACTS,
@@ -29,6 +35,8 @@ import {
 import type {
   RunPerks,
   BattleState,
+  CoopPlayer,
+  EndlessFloorOption,
   HeroLevelUpSummary,
   MarketOffer,
   MetaProgress,
@@ -44,13 +52,61 @@ import type {
 const META_STORAGE_KEY = 'crop_revolt_meta_v1';
 const RUN_STORAGE_KEY = 'crop_revolt_run_v1';
 
+export const COOP_PLAYER_PRESETS: CoopPlayer[] = [
+  { idx: 0, name: 'Player 1', badge: 'P1', color: '#d84840' },
+  { idx: 1, name: 'Player 2', badge: 'P2', color: '#2b78d4' },
+  { idx: 2, name: 'Player 3', badge: 'P3', color: '#e09a1e' },
+  { idx: 3, name: 'Player 4', badge: 'P4', color: '#2e9b5c' },
+];
+
+export function createCoopPlayers(count: number): CoopPlayer[] | undefined {
+  const n = Math.max(1, Math.min(4, Math.floor(count)));
+  if (n <= 1) return undefined;
+  return COOP_PLAYER_PRESETS.slice(0, n).map((p) => ({ ...p }));
+}
+
+export function assignCoopHeroOwners(run: RunState): void {
+  const players = run.coopPlayers;
+  if (!players || players.length <= 1) return;
+  if (!run.heroOwnerByUid) run.heroOwnerByUid = {};
+  const count = players.length;
+
+  // Spread active squad heroes evenly across players P1..PN first
+  run.activeSquadUids.forEach((uid, i) => {
+    const existing = run.heroOwnerByUid![uid];
+    if (typeof existing !== 'number' || existing < 0 || existing >= count) {
+      run.heroOwnerByUid![uid] = i % count;
+    }
+  });
+  // Ensure every bench/recruited hero also gets an owner
+  run.roster.forEach((hero, i) => {
+    const existing = run.heroOwnerByUid![hero.uid];
+    if (typeof existing !== 'number' || existing < 0 || existing >= count) {
+      run.heroOwnerByUid![hero.uid] = i % count;
+    }
+  });
+}
+
+export function setHeroCoopOwner(run: RunState, heroUid: string, playerIdx: number): boolean {
+  const players = run.coopPlayers;
+  if (!players || players.length <= 1) return false;
+  if (playerIdx < 0 || playerIdx >= players.length) return false;
+  if (!run.roster.some((h) => h.uid === heroUid)) return false;
+  if (!run.heroOwnerByUid) run.heroOwnerByUid = {};
+  run.heroOwnerByUid[heroUid] = playerIdx;
+  return true;
+}
+
 export function defaultMetaProgress(): MetaProgress {
   return {
     heirloomSeeds: 0,
     runsPlayed: 0,
     runsWon: 0,
+    bestEndlessFloor: 0,
     maxHeatUnlocked: 1,
     selectedHeat: 0,
+    unlockedHeroIds: [...STARTER_BLUEPRINT_IDS],
+    guidedHintsEnabled: true,
     unlocks: {
       extraItemSatchel: false,
       heirloomSoil: false,
@@ -72,11 +128,18 @@ export function loadMetaProgress(): MetaProgress {
     const raw = localStorage.getItem(META_STORAGE_KEY);
     if (!raw) return defaultMetaProgress();
     const parsed = JSON.parse(raw) as Partial<MetaProgress>;
+    const defaults = defaultMetaProgress();
+    const mergedHeroes = Array.from(
+      new Set([...STARTER_BLUEPRINT_IDS, ...(parsed.unlockedHeroIds ?? [])])
+    );
     return {
-      ...defaultMetaProgress(),
+      ...defaults,
       ...parsed,
+      unlockedHeroIds: mergedHeroes,
+      guidedHintsEnabled: parsed.guidedHintsEnabled ?? true,
+      bestEndlessFloor: parsed.bestEndlessFloor ?? 0,
       unlocks: {
-        ...defaultMetaProgress().unlocks,
+        ...defaults.unlocks,
         ...(parsed.unlocks ?? {}),
       },
     };
@@ -92,6 +155,36 @@ export function saveMetaProgress(meta: MetaProgress): void {
   } catch {
     // Ignore storage quota errors
   }
+}
+
+export function unlockHeroPermanently(meta: MetaProgress, blueprintId: string): boolean {
+  if (!PRODUCE_BLUEPRINTS[blueprintId]) return false;
+  if (!Array.isArray(meta.unlockedHeroIds)) {
+    meta.unlockedHeroIds = [...STARTER_BLUEPRINT_IDS];
+  }
+  if (meta.unlockedHeroIds.includes(blueprintId)) return false;
+  meta.unlockedHeroIds.push(blueprintId);
+  saveMetaProgress(meta);
+  return true;
+}
+
+export function purchaseHeroUnlock(meta: MetaProgress, blueprintId: string): boolean {
+  const entry = HERO_UNLOCK_CATALOG.find((e) => e.id === blueprintId);
+  if (!entry) return false;
+  if (!Array.isArray(meta.unlockedHeroIds)) {
+    meta.unlockedHeroIds = [...STARTER_BLUEPRINT_IDS];
+  }
+  if (meta.unlockedHeroIds.includes(blueprintId)) return false;
+  if (meta.heirloomSeeds < entry.cost) return false;
+  meta.heirloomSeeds -= entry.cost;
+  meta.unlockedHeroIds.push(blueprintId);
+  saveMetaProgress(meta);
+  return true;
+}
+
+export function setGuidedHintsEnabled(meta: MetaProgress, enabled: boolean): void {
+  meta.guidedHintsEnabled = enabled;
+  saveMetaProgress(meta);
 }
 
 export function loadSavedRun(): RunState | null {
@@ -243,10 +336,11 @@ export function createNewRun(
   meta: MetaProgress,
   seasonId: SeasonId = 'spring',
   seed: number = randomSeed(),
-  harvestHeat?: number
+  harvestHeat?: number,
+  coopCount = 1
 ): RunState {
   const hpBonus = meta.unlocks.heirloomSoil ? 2 : 0;
-  // Starter squad: Stitch, Crisphead, Snap-Pea & Zestia active + Spudnik, Truffle Boar, Habanero on bench!
+  // Starter iconic goofy squad: Stitch (Cow), Snap-Pea, Zestia (Lemon), Sir Clucks (Rooster) active + Cruncher (Carrot) on bench!
   const roster = STARTER_BLUEPRINT_IDS.map((id) => createHeroFromBlueprint(id, hpBonus));
   if (meta.unlocks.seasonedSeedlings) {
     for (const hero of roster) hero.skillPoints += 1;
@@ -271,6 +365,7 @@ export function createNewRun(
   const rng = actRng(seed >>> 0, act);
   const nodes = generateActNodes(act, rng, mapDisplayName);
   const startId = nodes.find((n) => n.type === 'start')?.id ?? startNodeId(act);
+  const coopPlayers = createCoopPlayers(coopCount);
 
   const run: RunState = {
     id: `run_${Date.now()}`,
@@ -279,6 +374,10 @@ export function createNewRun(
     act,
     seed: seed >>> 0,
     harvestHeat: resolvedHeat,
+    mode: 'standard',
+    coopPlayers,
+    heroOwnerByUid: coopPlayers ? {} : undefined,
+    activeBoardPickerIdx: coopPlayers ? 0 : undefined,
     unlockedWeaponIds: [...STARTER_UNLOCKED_WEAPONS],
     recruitBonusHp: hpBonus,
     seenEventIds: [],
@@ -303,6 +402,33 @@ export function createNewRun(
     enemiesDefeated: 0,
     pendingReward: null,
     status: 'map',
+  };
+  assignCoopHeroOwners(run);
+  return run;
+}
+
+/**
+ * Endless Harvest Mode: progressively harder procedural floors with varied grid sizes,
+ * dramatic elevation 0–3, Boss Showdowns every 4th floor, and interactive Bonus Rooms in-between!
+ */
+export function createEndlessRun(
+  meta: MetaProgress,
+  coopCount = 1,
+  seed: number = randomSeed(),
+  harvestHeat?: number
+): RunState {
+  const run = createNewRun(meta, 'spring', seed, harvestHeat, coopCount);
+  run.mode = 'endless';
+  run.seasonName = 'Endless Harvest · Floor 1';
+  run.status = 'endless_hub';
+  run.nodes = [];
+  run.currentNodeId = null;
+  run.completedNodeIds = [];
+  run.endless = {
+    floor: 1,
+    nextOptions: rollEndlessFloorOptions(1, run.seed, false),
+    activeBonus: null,
+    pendingMapTemplate: null,
   };
   return run;
 }
@@ -468,6 +594,9 @@ export function applyTravelCardMove(
 
   run.boardTurn = (run.boardTurn ?? 0) + 1;
   run.travelHand = drawTravelHand(rng);
+  if (run.coopPlayers && run.coopPlayers.length > 1) {
+    run.activeBoardPickerIdx = ((run.activeBoardPickerIdx ?? 0) + 1) % run.coopPlayers.length;
+  }
   return path;
 }
 
@@ -800,7 +929,7 @@ export function awardBattleXpAndLevels(
         hero.maxHp += 2;
         hero.hp = Math.min(hero.maxHp, hero.hp + 2);
         bonusHp += 2;
-        if (hero.level === 3 || hero.level === 5) {
+        if (hero.level === 3 || hero.level === 5 || hero.level === 7) {
           hero.weapon = { ...hero.weapon, damage: hero.weapon.damage + 1 };
           bonusAttack += 1;
         }
@@ -877,6 +1006,7 @@ export function applyBattleOutcomeToRun(
     }
   }
   for (const bpId of battle.rescuedNewBlueprintIds) {
+    unlockHeroPermanently(meta, bpId);
     if (!run.roster.some((h) => h.blueprintId === bpId)) {
       const bonusHp = meta.unlocks.heirloomSoil ? 2 : 0;
       const newHero = createHeroFromBlueprint(bpId, bonusHp);
@@ -886,6 +1016,7 @@ export function applyBattleOutcomeToRun(
       }
     }
   }
+  assignCoopHeroOwners(run);
 
   // Keep activeSquadUids pointing to non-harvested heroes (auto-sub from bench if needed!)
   run.activeSquadUids = run.activeSquadUids.filter((uid) => {
@@ -903,6 +1034,10 @@ export function applyBattleOutcomeToRun(
 
   if (battle.status === 'defeat' || run.activeSquadUids.length === 0) {
     run.status = 'defeat';
+    if (run.mode === 'endless' && run.endless) {
+      const cleared = Math.max(0, run.endless.floor - 1);
+      meta.bestEndlessFloor = Math.max(meta.bestEndlessFloor ?? 0, cleared);
+    }
     const heatMult = getHeatSeedMultiplier(run.harvestHeat ?? 0);
     const consolationSeeds = Math.round(Math.max(10, run.seeds + defeatedEnemies * 2) * heatMult);
     meta.heirloomSeeds += consolationSeeds;
@@ -937,6 +1072,55 @@ export function applyBattleOutcomeToRun(
     if (!hero.harvested) {
       hero.hp = Math.min(hero.maxHp, hero.hp + breatherHeal);
     }
+  }
+
+  // Endless Harvest Mode victory: scale rewards, update Best Endless Floor, advance floor & roll next choices!
+  if (run.mode === 'endless' && run.endless) {
+    const clearedFloor = run.endless.floor;
+    const isBoss = battle.objective === 'boss' || clearedFloor % 4 === 0;
+    meta.bestEndlessFloor = Math.max(meta.bestEndlessFloor ?? 0, clearedFloor);
+    // Bank bonus Heirloom Seeds on every Endless Boss milestone so Endless fuels the Greenhouse!
+    if (isBoss) {
+      meta.heirloomSeeds += 18 + clearedFloor * 2;
+    }
+    saveMetaProgress(meta);
+
+    const syntheticType: NodeType = isBoss ? 'boss' : clearedFloor % 3 === 0 ? 'elite' : 'skirmish';
+    const { xpEarned, levelUps } = awardBattleXpAndLevels(run, battle, syntheticType);
+    const rng = battleRng(run.seed, `endless_reward:${clearedFloor}`);
+    const syntheticNode: SeasonNode = {
+      id: `endless_floor_${clearedFloor}`,
+      stage: clearedFloor,
+      lane: 0,
+      type: syntheticType,
+      name: battle.mapName,
+      subtitle: '',
+      nextIds: [],
+      completed: true,
+    };
+    const reward = generateRewardForNode(run, syntheticNode, rng);
+    reward.xpEarned = xpEarned;
+    reward.levelUps = levelUps;
+    reward.battleGrade = battleGrade;
+    reward.seedsEarned += battleGrade.bonusSeeds + clearedFloor * 2;
+    run.seeds += reward.seedsEarned;
+    if (reward.itemGrant) {
+      run.items[reward.itemGrant.itemId] =
+        (run.items[reward.itemGrant.itemId] ?? 0) + reward.itemGrant.count;
+    }
+
+    const nextFloor = clearedFloor + 1;
+    run.endless.floor = nextFloor;
+    run.endless.pendingMapTemplate = null;
+    run.endless.activeBonus = null;
+    run.endless.nextOptions = rollEndlessFloorOptions(nextFloor, run.seed, false);
+    run.seasonName = `Endless Harvest · Floor ${nextFloor}`;
+    if (run.coopPlayers && run.coopPlayers.length > 1) {
+      run.activeBoardPickerIdx = ((run.activeBoardPickerIdx ?? 0) + 1) % run.coopPlayers.length;
+    }
+    run.pendingReward = reward;
+    run.status = 'reward';
+    return;
   }
 
   // Award XP & Level-Ups to the squad!
@@ -991,6 +1175,162 @@ export function applyBattleOutcomeToRun(
   } else {
     run.status = 'map';
   }
+}
+
+/**
+ * Interactive Endless Bonus Room entry (Carnival Barn, Tinkerer's Shed, Hot Spring Meadow).
+ */
+export function openEndlessBonusRoom(run: RunState, option: EndlessFloorOption): boolean {
+  if (!run.endless || option.kind !== 'bonus' || !option.bonusKind) return false;
+  run.endless.activeBonus = {
+    kind: option.bonusKind,
+    title: option.title,
+    claimed: false,
+  };
+  run.status = 'bonus_room';
+  return true;
+}
+
+export function resolveEndlessBonusChoice(
+  run: RunState,
+  meta: MetaProgress,
+  choice: 'wheel' | 'recruit' | 'weapon' | 'sp' | 'satchel' | 'soak' | 'vigor' | 'swift'
+): string | null {
+  const bonus = run.endless?.activeBonus;
+  if (!run.endless || !bonus || bonus.claimed) return null;
+  const rng = battleRng(run.seed, `bonus:${run.endless.floor}:${bonus.kind}:${choice}`);
+  let message = '';
+
+  if (bonus.kind === 'carnival') {
+    if (choice === 'wheel') {
+      const roll = Math.floor(rng() * 4);
+      if (roll === 0) {
+        run.seeds += 22;
+        message = '🎡 JACKPOT! +22 Run Seeds showered from the Carnival Wheel!';
+      } else if (roll === 1) {
+        const owned = new Set(run.relicIds);
+        const avail = ALL_RELIC_IDS.filter((id) => !owned.has(id));
+        if (avail.length > 0) {
+          const picked = avail[Math.floor(rng() * avail.length)];
+          run.relicIds.push(picked);
+          const def = RELIC_REGISTRY[picked];
+          message = `🎡 RELIC PRIZE! Won ${def?.icon ?? '✨'} ${def?.name ?? picked}!`;
+        } else {
+          run.seeds += 25;
+          message = '🎡 GOLDEN SEED JACKPOT! +25 Run Seeds!';
+        }
+      } else if (roll === 2) {
+        for (const h of run.roster) {
+          if (!h.harvested) h.skillPoints += 1;
+        }
+        message = '🎡 SKILL BONANZA! Every living hero gained +1 Skill Point!';
+      } else {
+        run.items.fertilizer_bomb = (run.items.fertilizer_bomb ?? 0) + 1;
+        run.items.cider_flask = (run.items.cider_flask ?? 0) + 1;
+        for (const h of run.roster) {
+          if (!h.harvested) h.hp = h.maxHp;
+        }
+        message = '🎡 FEAST PRIZE! Full Squad Heal + Fertilizer Bomb + Cider Flask!';
+      }
+    } else if (choice === 'recruit') {
+      const ownedBps = new Set(run.roster.map((h) => h.blueprintId));
+      const lockedPool = RECRUITABLE_BLUEPRINT_IDS.filter(
+        (id) => !ownedBps.has(id) && !(meta.unlockedHeroIds ?? []).includes(id)
+      );
+      const anyPool = RECRUITABLE_BLUEPRINT_IDS.filter((id) => !ownedBps.has(id));
+      const pool = lockedPool.length > 0 ? lockedPool : anyPool;
+      if (pool.length > 0) {
+        const picked = pool[Math.floor(rng() * pool.length)];
+        const newlyUnlocked = unlockHeroPermanently(meta, picked);
+        const hero = createHeroFromBlueprint(picked, meta.unlocks.heirloomSoil ? 2 : 0);
+        run.roster.push(hero);
+        if (run.activeSquadUids.length < 4) run.activeSquadUids.push(hero.uid);
+        assignCoopHeroOwners(run);
+        message = `🎪 NEW ALLY! ${hero.name} (${hero.title}) joined your squad${newlyUnlocked ? ' & permanently unlocked in the Greenhouse!' : '!'}`;
+      } else {
+        for (const h of run.roster) {
+          if (!h.harvested) h.skillPoints += 1;
+        }
+        message = '🎪 FULL HOUSE! Roster complete — everyone earned +1 Skill Point!';
+      }
+    }
+  } else if (bonus.kind === 'tinkerer') {
+    if (choice === 'weapon') {
+      const locked = getLockedWeaponPool(run);
+      if (locked.length > 0) {
+        const wid = locked[Math.floor(rng() * locked.length)];
+        unlockRunWeapon(run, wid);
+        const entry = ALT_WEAPON_REGISTRY[wid];
+        run.seeds += 8;
+        message = `🛠️ FORGED! Unlocked ${entry?.weapon.name ?? wid} in the Armory + 8 Seeds!`;
+      } else {
+        run.seeds += 18;
+        message = '🛠️ MASTERWORK! All weapons owned — received +18 Seeds!';
+      }
+    } else if (choice === 'sp') {
+      for (const h of run.roster) {
+        if (!h.harvested) h.skillPoints += 1;
+      }
+      message = '🛠️ TRAINING BENCH! Every living hero gained +1 Skill Point!';
+    } else if (choice === 'satchel') {
+      run.items.fertilizer_bomb = (run.items.fertilizer_bomb ?? 0) + 2;
+      run.items.honey_pot = (run.items.honey_pot ?? 0) + 1;
+      run.items.acorn_smoke = (run.items.acorn_smoke ?? 0) + 1;
+      message = '🛠️ SATCHEL STOCKED! +2 Fertilizer Bombs, +1 Honey Pot & +1 Acorn Smoke!';
+    }
+  } else if (bonus.kind === 'hotspring') {
+    if (choice === 'soak') {
+      let revived = 0;
+      for (const h of run.roster) {
+        if (h.harvested) {
+          h.harvested = false;
+          revived += 1;
+        }
+        h.hp = h.maxHp;
+      }
+      for (const h of run.roster) {
+        if (run.activeSquadUids.length >= 4) break;
+        if (!h.harvested && !run.activeSquadUids.includes(h.uid)) {
+          run.activeSquadUids.push(h.uid);
+        }
+      }
+      assignCoopHeroOwners(run);
+      message =
+        revived > 0
+          ? `💧 STEAMY SOAK! Full 100% HP Heal & rescued ${revived} bagged hero(es)!`
+          : '💧 STEAMY SOAK! Every hero restored to 100% HP!';
+    } else if (choice === 'vigor') {
+      for (const h of run.roster) {
+        if (!h.harvested) {
+          h.maxHp += 2;
+          h.hp = Math.min(h.maxHp, h.hp + 4);
+        }
+      }
+      message = '💧 MINERAL SPRINGS! Every living hero gained +2 Permanent Max HP & +4 HP!';
+    } else if (choice === 'swift') {
+      run.nextBattleBuff = {
+        boost: true,
+        shield: true,
+        moveBonus: (run.nextBattleBuff?.moveBonus ?? 0) + 1,
+      };
+      message = '💧 SPRING BLESSING! Next battle starts Boosted (+2 ATK), Shielded & +1 Move!';
+    }
+  }
+
+  if (!message) return null;
+  bonus.claimed = true;
+  bonus.wheelResult = message;
+  return message;
+}
+
+export function leaveEndlessBonusRoom(run: RunState): void {
+  if (!run.endless) {
+    run.status = 'map';
+    return;
+  }
+  run.endless.activeBonus = null;
+  run.endless.nextOptions = rollEndlessFloorOptions(run.endless.floor, run.seed, true);
+  run.status = 'endless_hub';
 }
 
 function getTierForGraftCount(count: number): PromotionTier {
@@ -1053,12 +1393,21 @@ export function claimRelicReward(run: RunState, relicId: string): boolean {
   return true;
 }
 
-export function claimRecruitReward(run: RunState, blueprintId: string, bonusMaxHp = 0): boolean {
+export function claimRecruitReward(
+  run: RunState,
+  blueprintId: string,
+  bonusMaxHp = 0,
+  meta?: MetaProgress
+): boolean {
   if (run.roster.some((h) => h.blueprintId === blueprintId)) return false;
   const hero = createHeroFromBlueprint(blueprintId, bonusMaxHp);
   run.roster.push(hero);
   if (run.activeSquadUids.length < 4) {
     run.activeSquadUids.push(hero.uid);
+  }
+  assignCoopHeroOwners(run);
+  if (meta) {
+    unlockHeroPermanently(meta, blueprintId);
   }
   if (run.pendingReward) {
     run.pendingReward.claimedRecruit = true;
@@ -1190,5 +1539,5 @@ export function respecHeroPerks(run: RunState, heroUid: string): boolean {
 
 export function finishRewardsAndReturnToMap(run: RunState): void {
   run.pendingReward = null;
-  run.status = 'map';
+  run.status = run.mode === 'endless' ? 'endless_hub' : 'map';
 }

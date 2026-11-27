@@ -109,13 +109,14 @@ export function forecastAttack(
   const matchup = getMatchup(attacker.family, defender.family);
   const mult = getMatchupMultiplier(matchup, attacker.team, state.relicIds);
 
-  // Elevation Advantage (Mario + Rabbids High Ground + Copper Weathervane + hero perch bonuses!)
+  // Elevation Advantage (Mario + Rabbids High Ground + Summit +3 for 2+ stories + Copper Weathervane + perks!)
   const attackerElev = attackerTile?.elevation ?? 0;
   const defenderElev = targetTile?.elevation ?? 0;
   const elevationDiff = attackerElev - defenderElev;
   const weathervaneBonus =
     attacker.team === 'player' && hasRelic(state.relicIds, 'copper_weathervane') ? 1 : 0;
-  const highGroundBonus = elevationDiff > 0 ? 2 + weathervaneBonus + fx.bonusHighGroundDmg : 0;
+  const baseHighGround = elevationDiff >= 2 ? 3 : elevationDiff > 0 ? 2 : 0;
+  const highGroundBonus = elevationDiff > 0 ? baseHighGround + weathervaneBonus + fx.bonusHighGroundDmg : 0;
 
   // Discrete Mario + Rabbids cover resolution (including Living Cover + High Ground + Wind Slicer override!)
   let coverEval = evaluateCover(state, attacker.pos, defender.pos, defender.team);
@@ -172,7 +173,14 @@ export function forecastAttack(
       const d = manhattan(u.pos, defender.pos);
       const effRange = allyFx.assistRange + (hasTrophy ? 1 : 0);
       if (d <= effRange) {
-        const assistAmt = 1 + allyFx.bonusAssistDmg + (hasTrophy ? 2 : 0);
+        const isCrossPlayer = Boolean(
+          state.coopPlayers &&
+            state.coopPlayers.length > 1 &&
+            attacker.ownerPlayerIdx !== undefined &&
+            u.ownerPlayerIdx !== undefined &&
+            attacker.ownerPlayerIdx !== u.ownerPlayerIdx
+        );
+        const assistAmt = 1 + allyFx.bonusAssistDmg + (hasTrophy ? 2 : 0) + (isCrossPlayer ? 1 : 0);
         if (assistAmt > bestAssistDmg) {
           bestAssistDmg = assistAmt;
           bestAlly = u;
@@ -366,10 +374,11 @@ export function unitHasMeaningfulAction(state: BattleState, unit: BattleUnit): b
     );
     if (hasShootableEnemy) return true;
 
-    // Objective Barn Rescue Cage within weapon reach counts as a meaningful attack target!
+    // Objective Barn Rescue Cage or Supply Sabotage Crate within weapon reach counts as a meaningful attack target!
     for (let y = 0; y < state.height; y++) {
       for (let x = 0; x < state.width; x++) {
-        if (state.tiles[y][x].cover?.isObjectiveCage && forecastAttack(state, unit, { x, y }).canAttack) {
+        const cov = state.tiles[y][x].cover;
+        if ((cov?.isObjectiveCage || cov?.isObjectiveCrate) && forecastAttack(state, unit, { x, y }).canAttack) {
           return true;
         }
       }

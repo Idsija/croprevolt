@@ -116,7 +116,12 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
 
   it('triggers Water Splash (-3 + douse Burn), Lava Plunge (-4 + Burn), and Cliff Drop (-2) knockbacks', () => {
     const run = createNewRun(defaultMetaProgress());
-    const squad = run.roster.filter((h) => ['potato', 'pea', 'lemon', 'cow'].includes(h.blueprintId));
+    const squad = [
+      createHeroFromBlueprint('potato'),
+      createHeroFromBlueprint('pea'),
+      createHeroFromBlueprint('lemon'),
+      createHeroFromBlueprint('cow'),
+    ];
     const battle = createBattleFromMap('molten_furnace', squad, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
@@ -220,9 +225,10 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
   it('supports unique per-hero Skill Trees, cross-species guards, Multi-Dash, Tater Quake Stomp, Morning Mist, and Free Respec', () => {
     const meta = defaultMetaProgress();
     const run = createNewRun(meta);
-    const spudHero = run.roster.find((h) => h.blueprintId === 'potato')!;
+    const spudHero = createHeroFromBlueprint('potato');
+    const lettuceHero = createHeroFromBlueprint('lettuce');
+    run.roster.push(spudHero, lettuceHero);
     const cowHero = run.roster.find((h) => h.blueprintId === 'cow')!;
-    const lettuceHero = run.roster.find((h) => h.blueprintId === 'lettuce')!;
 
     // Heroes start at Level 1 with 1 SP; cannot unlock another species' perk or skip prerequisite!
     expect(spudHero.level).toBe(1);
@@ -767,7 +773,8 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     const run = createNewRun(meta, 'spring', 4242);
     const cowHero = run.roster.find((h) => h.blueprintId === 'cow')!;
     const lemonHero = run.roster.find((h) => h.blueprintId === 'lemon')!;
-    const lettuceHero = run.roster.find((h) => h.blueprintId === 'lettuce')!;
+    const lettuceHero = createHeroFromBlueprint('lettuce');
+    run.roster.push(lettuceHero);
 
     // 1. Free Respec refunds 100% SP and reverts permanent stat boosts cleanly!
     const baseCowHp = cowHero.maxHp;
@@ -860,23 +867,25 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     expect(bystander.statuses.some((s) => s.kind === 'acid')).toBe(true);
   });
 
-  it('supports all 19 heroes (114 bespoke perks & 19 Armory weapons), new allies, new enemies, and all 3 watercolor boards', () => {
+  it('supports all 19 heroes (171 bespoke perks across 3 branches & 19 Armory weapons), new allies, new enemies, and all 3 watercolor boards', () => {
     const allHeroes = Object.values(PRODUCE_BLUEPRINTS);
     expect(allHeroes).toHaveLength(19);
-    expect(ALL_SKILL_PERK_IDS).toHaveLength(114);
+    expect(ALL_SKILL_PERK_IDS).toHaveLength(171);
 
     for (const bp of allHeroes) {
       const tree = HERO_SKILL_TREES[bp.species];
       expect(tree).toBeDefined();
       expect(tree.pathA.perks).toHaveLength(3);
       expect(tree.pathB.perks).toHaveLength(3);
+      expect(tree.pathC.perks).toHaveLength(3);
       expect(ALT_WEAPONS_BY_SPECIES[bp.species]).toBeDefined();
     }
 
-    // New Allies: Strawbina (starter bench + unlocked alt weapon), Cap-tain Shroom (launchpadCoop), Quackers (ignoresMud + knockback)
+    // New Allies: Strawbina (unlockable/recruitable + alt weapon), Cap-tain Shroom (launchpadCoop), Quackers (ignoresMud + knockback)
     const run = createNewRun(defaultMetaProgress());
-    const strawbina = run.roster.find((h) => h.species === 'strawberry')!;
-    expect(strawbina).toBeDefined();
+    const strawbina = createHeroFromBlueprint('strawberry');
+    run.roster.push(strawbina);
+    run.unlockedWeaponIds = [...(run.unlockedWeaponIds ?? []), 'berry_scatter'];
     expect(equipHeroWeapon(run, strawbina.uid, 'berry_scatter')).toBe(true);
     expect(strawbina.weapon.id).toBe('berry_scatter');
 

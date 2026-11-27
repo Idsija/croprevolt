@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { HERO_UNLOCK_CATALOG, PRODUCE_BLUEPRINTS, STARTER_BLUEPRINT_IDS } from '../data/produce';
 import { HARVEST_HEAT_LEVELS, MAX_HARVEST_HEAT } from '../engine/difficulty';
 import {
   fetchTopScores,
@@ -10,19 +11,23 @@ import {
   savePlayerName,
   type OnlineScoreRow,
 } from '../engine/onlineScores';
-import { META_UNLOCK_COSTS } from '../engine/run';
+import { COOP_PLAYER_PRESETS, META_UNLOCK_COSTS } from '../engine/run';
 import { activeStreak, loadDailyState } from '../engine/daily';
 import { dailyKeyFor, loadScores, topDailyScores, topStandardScores } from '../engine/score';
 import type { MetaProgress } from '../engine/types';
 import { TitleBackdropRenderer } from '../renderer3d/TitleBackdropRenderer';
 import {
+  buyHeroUnlock,
   buyMetaUnlock,
   continueSavedRun,
   gameStore,
+  setSelectedCoopCount,
   setSelectedHeat,
   startDailyRun,
+  startEndlessRun,
   startNewSeasonRun,
   toggleAudioMute,
+  toggleGuidedHints,
   toggleMusicMute,
 } from '../stores/gameStore';
 import AlmanacModal from './AlmanacModal.vue';
@@ -30,6 +35,13 @@ import CraftIcon from './CraftIcon.vue';
 import CropRevoltLogo from './CropRevoltLogo.vue';
 
 const activeModal = ref<'none' | 'shed' | 'guide' | 'almanac' | 'scores'>('none');
+const shedTab = ref<'greenhouse' | 'upgrades'>('greenhouse');
+const heatDrawerOpen = ref(false);
+
+const unlockedHeroSet = computed(() => new Set(gameStore.meta.unlockedHeroIds ?? STARTER_BLUEPRINT_IDS));
+const totalHeroesCount = Object.keys(PRODUCE_BLUEPRINTS).length;
+const unlockedHeroesCount = computed(() => unlockedHeroSet.value.size);
+const coopChoices = [1, 2, 3, 4] as const;
 
 const todayKey = dailyKeyFor();
 const fmt = (n: number) => n.toLocaleString('en-US');
@@ -119,7 +131,14 @@ const unlockKeys = Object.keys(META_UNLOCK_COSTS) as Array<keyof MetaProgress['u
 
 watch([activeModal, scoreTab, scoreScope], refreshOnlineBoard);
 
+function onTitleKeyDown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && activeModal.value !== 'none') {
+    activeModal.value = 'none';
+  }
+}
+
 onMounted(() => {
+  window.addEventListener('keydown', onTitleKeyDown);
   // Send any scores that could not be uploaded when their run ended.
   if (online) void flushQueuedScores(online);
   if (!backdropCanvasRef.value) return;
@@ -133,6 +152,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onTitleKeyDown);
   backdropRenderer?.destroy();
   backdropRenderer = null;
 });
@@ -144,12 +164,22 @@ onBeforeUnmount(() => {
     <canvas ref="backdropCanvasRef" class="title-webgl-bg"></canvas>
     <div v-if="webglReady" class="title-vignette"></div>
 
-    <!-- Top floating audio & seed pills -->
+    <!-- Top floating audio, hints & seed pills -->
     <div class="top-bar">
-      <button class="paper-pill seed-badge" @click="activeModal = 'shed'">
-        <CraftIcon name="seed" :size="15" />
-        <span>{{ gameStore.meta.heirloomSeeds }} Seeds</span>
-      </button>
+      <div class="top-left-pills">
+        <button class="paper-pill seed-badge" @click="shedTab = 'greenhouse'; activeModal = 'shed'">
+          <CraftIcon name="seed" :size="15" />
+          <span>{{ gameStore.meta.heirloomSeeds }} Seeds</span>
+        </button>
+        <button
+          class="paper-pill hints-pill"
+          :class="{ on: gameStore.meta.guidedHintsEnabled ?? true }"
+          title="Toggle step-by-step playful UI tips"
+          @click="toggleGuidedHints"
+        >
+          💡 Tips: {{ (gameStore.meta.guidedHintsEnabled ?? true) ? 'ON' : 'OFF' }}
+        </button>
+      </div>
       <div class="audio-controls">
         <button
           class="paper-btn icon-only music-btn"
@@ -180,7 +210,7 @@ onBeforeUnmount(() => {
       <div class="title-lockup">
         <CropRevoltLogo />
         <p class="tagline">
-          3D Paper-Craft Tactical Roguelite — Produce vs. Farmers
+          Goofy Paper-Craft Tactics · 1–4P Local Co-Op &amp; Endless Harvest
         </p>
       </div>
 
@@ -188,10 +218,10 @@ onBeforeUnmount(() => {
       <div v-if="!webglReady" class="diorama-showcase">
         <div class="standee-row">
           <div class="team-left">
-            <img class="st st-1" src="/sprites/lettuce.png" alt="Crisphead" />
-            <img class="st st-2" src="/sprites/pea.png" alt="Hero" />
+            <img class="st st-1" src="/sprites/cow.png" alt="Stitch" />
+            <img class="st st-2" src="/sprites/pea.png" alt="Snap-Pea" />
             <img class="st st-3" src="/sprites/lemon.png" alt="Zestia" />
-            <img class="st st-4" src="/sprites/cow.png" alt="Stitch" />
+            <img class="st st-4" src="/sprites/rooster.png" alt="Sir Clucks" />
           </div>
           <img
             class="st st-crate"
@@ -199,17 +229,9 @@ onBeforeUnmount(() => {
             alt="Garden Prop"
           />
           <div class="team-right">
-            <img
-              class="st st-5"
-              src="/sprites/digger.png"
-              alt="Hazard or Farmer"
-            />
-            <img class="st st-trim" src="/sprites/trimmer.png" alt="Snips McGee" />
-            <img
-              class="st st-6"
-              src="/sprites/scarecrow.png"
-              alt="Captain Scarecrow"
-            />
+            <img class="st st-5" src="/sprites/barrow.png" alt="Chug-Barrow" />
+            <img class="st st-trim" src="/sprites/blower.png" alt="Gale-O-Matic" />
+            <img class="st st-6" src="/sprites/scarecrow.png" alt="Captain Scarecrow" />
           </div>
         </div>
         <div class="cardboard-grass-strip">
@@ -217,10 +239,46 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Harvest Heat Ascension Selector (0-5) -->
-      <div class="heat-panel">
+      <!-- Couch Co-Op Selector (1P–4P) + Collapsible Heat Chip -->
+      <div class="setup-bar">
+        <div class="coop-selector" role="group" aria-label="Local Co-Op Players">
+          <span class="setup-lbl">🎮 Players</span>
+          <div class="coop-pills">
+            <button
+              v-for="cnt in coopChoices"
+              :key="cnt"
+              class="coop-pill"
+              :class="{ active: gameStore.selectedCoopCount === cnt }"
+              @click="setSelectedCoopCount(cnt)"
+            >
+              <span class="coop-lbl-full">{{ cnt === 1 ? '1P Solo' : `${cnt}P Co-Op` }}</span>
+              <span class="coop-lbl-short">{{ cnt === 1 ? '1P' : `${cnt}P` }}</span>
+              <span v-if="cnt > 1" class="coop-dots">
+                <i
+                  v-for="p in COOP_PLAYER_PRESETS.slice(0, cnt)"
+                  :key="p.idx"
+                  class="cdot"
+                  :style="{ background: p.color }"
+                ></i>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <button
+          class="heat-toggle-btn"
+          :class="{ open: heatDrawerOpen, hot: currentHeat > 0 }"
+          @click="heatDrawerOpen = !heatDrawerOpen"
+        >
+          <span>🔥 Heat {{ currentHeat }}</span>
+          <span>{{ heatDrawerOpen ? '▴' : '▾' }}</span>
+        </button>
+      </div>
+
+      <!-- Collapsible Harvest Heat Ascension Drawer (0-5) -->
+      <div v-if="heatDrawerOpen" class="heat-panel">
         <div class="heat-top">
-          <strong>🔥 Harvest Heat</strong>
+          <strong>🔥 Harvest Heat Ascension</strong>
           <span class="heat-bonus" v-if="currentHeatInfo.seedBonusPct > 0">
             +{{ currentHeatInfo.seedBonusPct }}% Heirloom Seeds
           </span>
@@ -245,7 +303,7 @@ onBeforeUnmount(() => {
         <small class="heat-desc">{{ currentHeatInfo.name }} — {{ currentHeatInfo.desc }}</small>
       </div>
 
-      <!-- Primary Thumb-Ready CTA Stack -->
+      <!-- Primary Mode Cards & Continue Banner -->
       <div class="cta-stack">
         <button
           v-if="gameStore.savedRunAvailable"
@@ -256,21 +314,33 @@ onBeforeUnmount(() => {
           <span>Continue Saved Run</span>
         </button>
 
-        <button
-          class="paper-btn primary diecut cta-main"
-          @click="startNewSeasonRun()"
-        >
-          <CraftIcon name="play" :size="18" />
-          <span>
-            {{ gameStore.savedRunAvailable ? 'Start Fresh Run' : 'Play Run' }}
-            <template v-if="currentHeat > 0"> (Heat {{ currentHeat }})</template>
-          </span>
-        </button>
+        <!-- Illustrated Two-Column Primary Modes: Campaign Board vs Endless Harvest -->
+        <div class="mode-cards-grid">
+          <button class="mode-card campaign-card" @click="startNewSeasonRun()">
+            <div class="mc-top">
+              <span class="mc-ico">🗺️</span>
+              <span class="mc-pill">3 Seasons</span>
+            </div>
+            <strong>Campaign Board</strong>
+            <small>Storybook maps, travel cards &amp; Act Bosses</small>
+          </button>
+
+          <button class="mode-card endless-card" @click="startEndlessRun()">
+            <div class="mc-top">
+              <span class="mc-ico">♾️</span>
+              <span class="mc-pill gold">
+                {{ (gameStore.meta.bestEndlessFloor ?? 0) > 0 ? `Best Fl.${gameStore.meta.bestEndlessFloor}` : 'NEW!' }}
+              </span>
+            </div>
+            <strong>Endless Harvest</strong>
+            <small>Varied grids, 3-story cliffs, bosses &amp; bonus rooms!</small>
+          </button>
+        </div>
 
         <div class="secondary-row daily-row">
           <button class="paper-btn sky diecut daily-btn" @click="startDailyRun()">
             <span class="daily-copy">
-              <strong>Daily Run</strong>
+              <strong>📅 Daily Garden</strong>
               <small>{{ dailyHint }}</small>
             </span>
             <span v-if="dailyStreak > 0" class="streak-chip" :title="`${dailyStreak}-day streak`">
@@ -284,10 +354,9 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="secondary-row three-col">
-          <button class="paper-btn sec-btn" @click="activeModal = 'shed'">
-            <CraftIcon name="shed" :size="15" />
-            <span>Seed Shed</span>
-            <span class="mini-count">{{ gameStore.meta.heirloomSeeds }}</span>
+          <button class="paper-btn sec-btn" @click="shedTab = 'greenhouse'; activeModal = 'shed'">
+            <span>🌱 Greenhouse</span>
+            <span class="mini-count">{{ unlockedHeroesCount }}/{{ totalHeroesCount }}</span>
           </button>
 
           <button class="paper-btn gold sec-btn" @click="activeModal = 'almanac'">
@@ -401,14 +470,14 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <!-- Seed Shed Meta-Progression Modal -->
+    <!-- Seed Shed & Hero Greenhouse Meta-Progression Modal -->
     <div v-if="activeModal === 'shed'" class="modal-backdrop" @click.self="activeModal = 'none'">
-      <section class="paper-card modal-sheet scroll-soft">
+      <section class="paper-card modal-sheet wide-sheet scroll-soft">
         <div class="washi-tape"></div>
         <div class="modal-head">
           <div>
-            <h2>Seed Shed Upgrades</h2>
-            <small>Permanent Heirloom perks unlocked across runs</small>
+            <h2>Seed Shed &amp; Greenhouse</h2>
+            <small>Unlock goofy Produce &amp; Animal Heroes + permanent farm perks!</small>
           </div>
           <button class="paper-btn icon-only" aria-label="Close" @click="activeModal = 'none'">
             <CraftIcon name="close" :size="17" />
@@ -420,11 +489,84 @@ onBeforeUnmount(() => {
             <CraftIcon name="seed" :size="14" /> {{ gameStore.meta.heirloomSeeds }} Heirloom Seeds
           </span>
           <span class="paper-pill">
-            <CraftIcon name="trophy" :size="14" /> {{ gameStore.meta.runsWon }} / {{ gameStore.meta.runsPlayed }} Wins
+            🌱 {{ unlockedHeroesCount }}/{{ totalHeroesCount }} Heroes
+          </span>
+          <span class="paper-pill" v-if="(gameStore.meta.bestEndlessFloor ?? 0) > 0">
+            ♾️ Best Fl.{{ gameStore.meta.bestEndlessFloor }}
           </span>
         </div>
 
-        <div class="unlock-list">
+        <!-- Clean Segmented Hub Tabs -->
+        <div class="shed-tabs" role="tablist">
+          <button
+            class="paper-btn shed-tab"
+            :class="{ primary: shedTab === 'greenhouse' }"
+            role="tab"
+            :aria-selected="shedTab === 'greenhouse'"
+            @click="shedTab = 'greenhouse'"
+          >
+            🌱 Hero Greenhouse ({{ unlockedHeroesCount }}/{{ totalHeroesCount }})
+          </button>
+          <button
+            class="paper-btn shed-tab"
+            :class="{ gold: shedTab === 'upgrades' }"
+            role="tab"
+            :aria-selected="shedTab === 'upgrades'"
+            @click="shedTab = 'upgrades'"
+          >
+            🛠️ Farm Upgrades
+          </button>
+        </div>
+
+        <!-- Tab 1: Hero Greenhouse Unlocks -->
+        <div v-if="shedTab === 'greenhouse'" class="greenhouse-wrap">
+          <div class="starter-ribbon">
+            <strong>★ Iconic Starter Squad (Always Ready):</strong>
+            <div class="starter-mini-row">
+              <span v-for="sid in STARTER_BLUEPRINT_IDS" :key="sid" class="starter-chip">
+                <img :src="`/sprites/${PRODUCE_BLUEPRINTS[sid].species}.png`" :alt="PRODUCE_BLUEPRINTS[sid].name" />
+                <span>{{ PRODUCE_BLUEPRINTS[sid].name.split(' ')[0] }}</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="greenhouse-grid">
+            <div
+              v-for="entry in HERO_UNLOCK_CATALOG"
+              :key="entry.id"
+              class="gh-card"
+              :class="{ unlocked: unlockedHeroSet.has(entry.id) }"
+            >
+              <div class="gh-port">
+                <img
+                  :src="`/sprites/${PRODUCE_BLUEPRINTS[entry.id].species}.png`"
+                  :alt="PRODUCE_BLUEPRINTS[entry.id].name"
+                  :class="{ silhouette: !unlockedHeroSet.has(entry.id) }"
+                />
+              </div>
+              <div class="gh-copy">
+                <strong>{{ PRODUCE_BLUEPRINTS[entry.id].name }}</strong>
+                <small>{{ entry.tagline }}</small>
+              </div>
+              <span v-if="unlockedHeroSet.has(entry.id)" class="paper-pill owned-pill gh-pill">
+                ✓ Unlocked
+              </span>
+              <button
+                v-else
+                class="paper-btn gold buy-btn gh-buy"
+                :disabled="gameStore.meta.heirloomSeeds < entry.cost"
+                @click="buyHeroUnlock(entry.id)"
+              >
+                <CraftIcon name="seed" :size="13" />
+                <span>{{ entry.cost }}</span>
+              </button>
+            </div>
+          </div>
+          <small class="gh-tip">💡 Tip: Rescuing a hero from a Barn Cage or Carnival Barn also unlocks them here for FREE!</small>
+        </div>
+
+        <!-- Tab 2: Permanent Farm Upgrades -->
+        <div v-else class="unlock-list">
           <div
             v-for="key in unlockKeys"
             :key="key"
@@ -808,14 +950,16 @@ onBeforeUnmount(() => {
 }
 
 .secondary-row.three-col {
-  grid-template-columns: 1.15fr 1fr 0.85fr;
+  grid-template-columns: 1.38fr 0.92fr 0.72fr;
   gap: 6px;
 }
 
 .sec-btn {
   min-height: 40px;
-  font-size: 0.82rem;
+  font-size: 0.81rem;
   padding-inline: 8px;
+  white-space: nowrap;
+  gap: 5px;
 }
 
 .mini-count {
@@ -1111,10 +1255,354 @@ onBeforeUnmount(() => {
   object-fit: contain;
 }
 
+.top-left-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hints-pill {
+  cursor: pointer;
+  background: #f0e4c8;
+  color: var(--ink-soft);
+  padding: 5px 10px;
+  font-size: 0.74rem;
+}
+
+.hints-pill.on {
+  background: #dff7cf;
+  color: #1f5c16;
+}
+
+.setup-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: rgba(255, 250, 236, 0.92);
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  padding: 5px 7px;
+}
+
+.coop-selector {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-lbl {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.coop-pills {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+}
+
+.coop-pill {
+  flex: 1;
+  border: 1.6px solid rgba(74, 44, 23, 0.45);
+  border-radius: 8px;
+  background: #f6ebd2;
+  color: var(--ink);
+  padding: 4px 3px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1;
+}
+
+.coop-pill.active {
+  background: linear-gradient(180deg, #ffe788 0%, #f5be38 100%);
+  border-color: var(--ink);
+  box-shadow: 0 2px 0 var(--ink);
+}
+
+.coop-dots {
+  display: flex;
+  gap: 2px;
+}
+
+.cdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  display: inline-block;
+}
+
+.heat-toggle-btn {
+  border: 1.8px solid var(--ink);
+  border-radius: 9px;
+  background: #efe0bf;
+  color: var(--ink);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 5px 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.heat-toggle-btn.hot {
+  background: linear-gradient(180deg, #ffab4c 0%, #e65a24 100%);
+  color: #fffef5;
+}
+
+.mode-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mode-card {
+  border: 2.2px solid var(--ink);
+  border-radius: 13px;
+  padding: 10px 10px 9px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  box-shadow: 0 4px 0 rgba(56, 29, 9, 0.42);
+  transition: transform 0.13s ease, box-shadow 0.13s ease;
+}
+
+.mode-card:hover {
+  transform: translateY(-2px);
+}
+
+.mode-card.campaign-card {
+  background: linear-gradient(180deg, #dff6cf 0%, #b5e398 100%);
+}
+
+.mode-card.endless-card {
+  background: linear-gradient(180deg, #fff1bd 0%, #f5ce66 100%);
+}
+
+.mc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.mc-ico {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.mc-pill {
+  background: rgba(255, 252, 240, 0.9);
+  border: 1.4px solid var(--ink);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 0.62rem;
+  font-weight: 900;
+  color: var(--ink);
+}
+
+.mc-pill.gold {
+  background: #4a2c17;
+  color: #ffe782;
+}
+
+.mode-card strong {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.96rem;
+  color: var(--ink);
+}
+
+.mode-card small {
+  font-size: 0.7rem;
+  color: #3f2814;
+  line-height: 1.24;
+  font-weight: 700;
+}
+
+.wide-sheet {
+  max-width: 620px;
+}
+
+.shed-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.shed-tab {
+  min-height: 40px;
+  font-size: 0.84rem;
+}
+
+.greenhouse-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.starter-ribbon {
+  background: #ecf7e0;
+  border: 1.8px solid #3f7e24;
+  border-radius: 11px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: #215214;
+}
+
+.starter-mini-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.starter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #fffdf5;
+  border: 1.5px solid #4a2c17;
+  border-radius: 999px;
+  padding: 2px 8px 2px 4px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.74rem;
+  color: var(--ink);
+}
+
+.starter-chip img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.greenhouse-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.gh-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fbf2de;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  padding: 7px 8px;
+}
+
+.gh-card.unlocked {
+  background: #e9f7dd;
+  border-color: #3f7e24;
+}
+
+.gh-port {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: #efe0bf;
+  border: 1.5px solid var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.gh-port img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.gh-port img.silhouette {
+  filter: grayscale(0.45) contrast(0.9);
+  opacity: 0.85;
+}
+
+.gh-copy {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.gh-copy strong {
+  display: block;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.82rem;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gh-copy small {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  line-height: 1.2;
+}
+
+.gh-buy {
+  min-width: 54px;
+  padding: 5px 7px;
+  font-size: 0.76rem;
+}
+
+.gh-pill {
+  font-size: 0.68rem;
+  padding: 3px 7px;
+}
+
+.gh-tip {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.coop-lbl-short {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .coop-lbl-full {
+    display: none;
+  }
+  .coop-lbl-short {
+    display: inline;
+  }
+}
+
 @media (max-width: 480px) {
   .cover-card {
-    padding: 18px 14px 15px;
-    gap: 11px;
+    padding: 15px 12px 13px;
+    gap: 9px;
+  }
+  .setup-lbl {
+    display: none;
+  }
+  .greenhouse-grid {
+    grid-template-columns: 1fr;
   }
   .st-1 { height: 50px; }
   .st-2 { height: 55px; }

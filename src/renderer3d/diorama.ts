@@ -14,6 +14,7 @@ export interface CoverPropVisual {
   maxHp: number;
   height: number;
   isObjectiveCage: boolean;
+  isObjectiveCrate: boolean;
   /** Animated child parts (orbiting bees, spinning sprinkler arm, cage wiggle) */
   bees?: THREE.Group;
   spinner?: THREE.Object3D;
@@ -1687,19 +1688,48 @@ export class PaperDioramaWorld {
     };
 
     if (cover.kind === 'crate') {
-      height = 0.66;
+      height = cover.isObjectiveCrate ? 0.78 : 0.66;
       const mat = new THREE.MeshStandardMaterial({
         map: cover.hp < cover.maxHp ? this.textures.crateDamagedMap : this.textures.crateMap,
-        roughness: 0.86,
+        color: cover.isObjectiveCrate ? '#ffefc4' : '#ffffff',
+        emissive: cover.isObjectiveCrate ? '#7a4300' : '#000000',
+        emissiveIntensity: cover.isObjectiveCrate ? 0.16 : 0,
+        roughness: 0.82,
         bumpMap: this.textures.paperBump,
         bumpScale: 0.018,
       });
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.84, height, 0.84), mat);
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.86, height, 0.86), mat);
       box.position.y = height / 2;
       markPickable(box);
-      addInkEdges(box, 0x452a16, 0.72);
+      addInkEdges(box, cover.isObjectiveCrate ? 0x7c2d06 : 0x452a16, 0.78);
       crateMesh = box;
       group.add(box);
+
+      if (cover.isObjectiveCrate) {
+        // Festive crimson & gold farmer supply straps + spinning target diamond beacon!
+        const strapMat = new THREE.MeshStandardMaterial({
+          color: '#e0422f',
+          roughness: 0.52,
+          emissive: '#6e140a',
+          emissiveIntensity: 0.22,
+        });
+        const strapX = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.14, 0.9), strapMat);
+        strapX.position.y = height * 0.56;
+        group.add(strapX);
+        const beacon = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.18, 0),
+          new THREE.MeshStandardMaterial({
+            color: '#ffe04a',
+            emissive: '#c97b00',
+            emissiveIntensity: 0.45,
+            roughness: 0.25,
+          })
+        );
+        beacon.position.y = height + 0.34;
+        addInkEdges(beacon, 0x5c2e04, 0.7);
+        group.add(beacon);
+        spinner = beacon;
+      }
     } else if (cover.kind === 'cage') {
       height = 0.78;
       const sideMat = new THREE.MeshStandardMaterial({ map: this.textures.cageSideMap, roughness: 0.88 });
@@ -1970,6 +2000,7 @@ export class PaperDioramaWorld {
       maxHp: cover.maxHp,
       height,
       isObjectiveCage: Boolean(cover.isObjectiveCage),
+      isObjectiveCrate: Boolean(cover.isObjectiveCrate),
       bees,
       spinner,
       crateMesh,
@@ -2010,6 +2041,9 @@ export class PaperDioramaWorld {
       }
       if (cv.spinner) {
         cv.spinner.rotation.y = time * 2.6;
+        if (cv.isObjectiveCrate) {
+          cv.spinner.position.y = cv.height + 0.34 + Math.sin(time * 4.2 + cv.pos.x) * 0.07;
+        }
       }
       if (cv.isObjectiveCage) {
         // Gentle anxious rescue wiggle!

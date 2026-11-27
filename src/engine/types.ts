@@ -30,7 +30,7 @@ export type StatusKind = 'burn' | 'rooted' | 'acid' | 'shield' | 'boosted' | 'fe
 
 export type PromotionTier = 'seedling' | 'ripe' | 'heirloom';
 
-export type ObjectiveType = 'defeat_all' | 'rout' | 'reach_gate' | 'barn_rescue' | 'boss' | 'survive' | 'escort';
+export type ObjectiveType = 'defeat_all' | 'rout' | 'reach_gate' | 'barn_rescue' | 'boss' | 'survive' | 'escort' | 'smash_crates';
 
 export type VisualStyleId = 'papercraft';
 
@@ -51,6 +51,8 @@ export interface CoverObject {
   maxHp: number;
   destructible: boolean;
   isObjectiveCage?: boolean;
+  /** Marked glowing Farm Supply Crate to smash on 'smash_crates' (Supply Sabotage) maps! */
+  isObjectiveCrate?: boolean;
   captiveUnitId?: string;
   captiveHero?: RosterHero;
 }
@@ -59,7 +61,7 @@ export interface Tile {
   x: number;
   y: number;
   terrain: TerrainType;
-  /** Stepped diorama height: 0 = ground/river, 1 = raised terrace, 2 = high bluff. */
+  /** Stepped diorama height: 0 = ground/river, 1 = terrace, 2 = high bluff, 3 = summit tower! */
   elevation: number;
   cover: CoverObject | null;
   /** Collapsible wooden bridge durability (collapses into water/lava at 0 HP!). */
@@ -294,6 +296,8 @@ export type EnemyVisualKind = EnemyBlueprint['archetype'] | 'digger_heavy';
 export interface BattleUnit {
   id: string;
   rosterUid?: string;
+  /** Local Co-Op owner index (0 = P1, 1 = P2, 2 = P3, 3 = P4) when playing 2P–4P Co-Op. */
+  ownerPlayerIdx?: number;
   blueprintId: string;
   team: Team;
   name: string;
@@ -453,6 +457,43 @@ export interface MapTemplate {
   surviveTurns?: number;
   /** Starting tile for the Golden Seed Cart on 'escort' maps. */
   escortStartPos?: GridPos;
+  /** Marked supply crates to destroy on 'smash_crates' (Supply Sabotage) maps. */
+  objectiveCratePositions?: GridPos[];
+}
+
+export interface CoopPlayer {
+  idx: number;
+  name: string;
+  badge: string;
+  color: string;
+}
+
+export type EndlessBonusKind = 'carnival' | 'tinkerer' | 'hotspring';
+
+export interface EndlessFloorOption {
+  id: string;
+  kind: 'battle' | 'boss' | 'bonus';
+  title: string;
+  subtitle: string;
+  icon: string;
+  theme: BoardTheme;
+  bonusKind?: EndlessBonusKind;
+  objective?: ObjectiveType;
+  gridSize?: string;
+  modifierLabel?: string;
+  seed: number;
+}
+
+export interface EndlessState {
+  floor: number;
+  nextOptions: EndlessFloorOption[];
+  activeBonus?: {
+    kind: EndlessBonusKind;
+    title: string;
+    claimed: boolean;
+    wheelResult?: string;
+  } | null;
+  pendingMapTemplate?: MapTemplate | null;
 }
 
 export type BattleStatus = 'ongoing' | 'victory' | 'defeat';
@@ -481,6 +522,11 @@ export interface BattleState {
   parTurns?: number;
   /** Harvest Heat ascension level (0-5) active in this battle. */
   harvestHeat?: number;
+  /** Local Co-Op player roster & active turn handoff state. */
+  coopPlayers?: CoopPlayer[];
+  activeCoopPlayerIdx?: number;
+  coopFreeOrder?: boolean;
+  coopComboCount?: number;
   relicIds: string[];
   items: Record<string, number>;
   gateTiles: GridPos[];
@@ -606,8 +652,14 @@ export interface RunState {
   seed: number;
   /** Harvest Heat Ascension Level (0-5). */
   harvestHeat?: number;
-  /** 'daily' runs share one seed per UTC day and start from the standard loadout. */
-  mode?: 'standard' | 'daily';
+  /** 'standard' campaign board, 'daily' challenge, or 'endless' procedural tower! */
+  mode?: 'standard' | 'daily' | 'endless';
+  /** Local Co-Op setup (1..4 players, hero ownership, and rotating board picker). */
+  coopPlayers?: CoopPlayer[];
+  heroOwnerByUid?: Record<string, number>;
+  activeBoardPickerIdx?: number;
+  /** Endless Harvest procedural run progression state. */
+  endless?: EndlessState;
   /** Seed Shed perks bought before this run started, frozen so buying mid-run changes nothing. */
   perks?: RunPerks;
   /** UTC date (YYYY-MM-DD) of the daily run this is. */
@@ -645,7 +697,18 @@ export interface RunState {
   battlesWon: number;
   enemiesDefeated: number;
   pendingReward: RewardBundle | null;
-  status: 'map' | 'battle' | 'vault' | 'shop' | 'reward' | 'event' | 'shrine' | 'victory' | 'defeat';
+  status:
+    | 'map'
+    | 'battle'
+    | 'vault'
+    | 'shop'
+    | 'reward'
+    | 'event'
+    | 'shrine'
+    | 'endless_hub'
+    | 'bonus_room'
+    | 'victory'
+    | 'defeat';
   /** The "?" event currently open, if any. */
   pendingEvent?: { eventId: string; outcome: string[] | null; choiceIndex: number | null } | null;
   /** Events already met this run, so they don't repeat. */
@@ -658,9 +721,15 @@ export interface MetaProgress {
   heirloomSeeds: number;
   runsPlayed: number;
   runsWon: number;
-  /** Highest Harvest Heat (0-5) unlocked by winning runs (0 = Heat 0..1 unlocked or 0..5). */
+  /** Highest Endless Harvest floor reached across runs. */
+  bestEndlessFloor?: number;
+  /** Highest Harvest Heat (0-5) unlocked by winning runs. */
   maxHeatUnlocked?: number;
   selectedHeat?: number;
+  /** Heroes permanently unlocked in the Greenhouse (starters + Seed Shed / rescue unlocks). */
+  unlockedHeroIds?: string[];
+  /** Toggleable guided onboarding hints & interactive tour popups. */
+  guidedHintsEnabled?: boolean;
   unlocks: {
     extraItemSatchel: boolean; // +1 Fertilizer Bomb & +1 Watering Can at run start
     heirloomSoil: boolean; // All starter heroes begin with +2 Max HP

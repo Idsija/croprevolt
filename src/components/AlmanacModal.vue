@@ -11,6 +11,7 @@ import { ACHIEVEMENTS, loadHistory } from '../engine/history';
 import { getFamilyLabel } from '../engine/hooks';
 import { dailyKeyFor } from '../engine/score';
 import { hasVariantSprite, resolveVariantSpriteKey, type SpriteVariantKind } from '../renderer3d/textures';
+import { gameStore } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
 
 const emit = defineEmits<{
@@ -36,6 +37,7 @@ const shortDate = (iso: string) =>
 const records = [
   { label: 'Runs played', value: fmt(history.stats.runs) },
   { label: 'Runs won', value: fmt(history.stats.wins) },
+  { label: 'Best Endless Floor', value: (gameStore.meta.bestEndlessFloor ?? 0) > 0 ? `Floor ${gameStore.meta.bestEndlessFloor}` : 'None yet' },
   { label: 'Best score', value: fmt(history.stats.bestScore) },
   { label: 'Best daily score', value: fmt(history.stats.bestDailyScore) },
   { label: 'Highest Heat won', value: history.stats.highestHeatWon >= 0 ? `Heat ${history.stats.highestHeatWon}` : 'None yet' },
@@ -286,7 +288,7 @@ const cardTransformStyle = computed(() => ({
               <small>{{ selectedHero.ability.description }}</small>
             </div>
             <div class="info-box tree-box">
-              <strong>🌿 Unique Skill Trees</strong>
+              <strong>🌿 Unique Skill Trees (3 Paths · 9 Perks)</strong>
               <small>
                 <strong>{{ selectedHeroTree.pathA.icon }} {{ selectedHeroTree.pathA.name }}:</strong>
                 {{ selectedHeroTree.pathA.tagline }}
@@ -294,6 +296,10 @@ const cardTransformStyle = computed(() => ({
               <small>
                 <strong>{{ selectedHeroTree.pathB.icon }} {{ selectedHeroTree.pathB.name }}:</strong>
                 {{ selectedHeroTree.pathB.tagline }}
+              </small>
+              <small>
+                <strong>{{ selectedHeroTree.pathC.icon }} {{ selectedHeroTree.pathC.name }}:</strong>
+                {{ selectedHeroTree.pathC.tagline }}
               </small>
             </div>
           </div>

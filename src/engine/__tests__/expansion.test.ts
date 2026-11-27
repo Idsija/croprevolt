@@ -30,17 +30,17 @@ import {
 } from '../../renderer3d/textures';
 
 describe('overnight expansion: battle poses, heroes, enemies, maps, items, relics & cards', () => {
-  it('wires all 19 heroes with unique alt weapons and 6-perk 2-branch skill trees (114 perks)', () => {
+  it('wires all 19 heroes with unique alt weapons and 9-perk 3-branch skill trees (171 perks)', () => {
     const heroes = Object.values(PRODUCE_BLUEPRINTS);
     expect(heroes).toHaveLength(19);
-    expect(ALL_SKILL_PERK_IDS.length).toBe(114);
+    expect(ALL_SKILL_PERK_IDS.length).toBe(171);
 
     for (const h of heroes) {
       expect(ALT_WEAPONS_BY_SPECIES[h.species]).toBeDefined();
       const tree = getHeroSkillTree(h.species);
       expect(tree.species).toBe(h.species);
       const perks = getHeroPerkDefs(h.species);
-      expect(perks).toHaveLength(6);
+      expect(perks).toHaveLength(9);
       const ids = new Set(perks.map((p) => p.id));
       for (const p of perks) {
         if (p.requires) expect(ids.has(p.requires)).toBe(true);
@@ -48,7 +48,7 @@ describe('overnight expansion: battle poses, heroes, enemies, maps, items, relic
     }
   });
 
-  it('wires all 13 non-animal enemies including Wheelbarrow Wally, Leaf-Blower Larry, Trencher Ted, and Shielded Tin-Can Tank', () => {
+  it('wires all 13 non-animal enemies including Chug-Barrow, Gale-O-Matic, Bore-Bot 3000, and Shielded Tin-Can Tank', () => {
     expect(Object.keys(ENEMY_BLUEPRINTS)).toHaveLength(13);
     expect(ENEMY_BLUEPRINTS.hound).toBeUndefined();
     expect(ENEMY_BLUEPRINTS.goose).toBeUndefined();
@@ -66,7 +66,7 @@ describe('overnight expansion: battle poses, heroes, enemies, maps, items, relic
     expect(ted.weapon.arc).toBe('lobbed');
     expect(ted.weapon.appliesStatus?.kind).toBe('rooted');
 
-    // Legacy localStorage save compatibility aliases map cleanly to human farmhands
+    // Legacy localStorage save compatibility aliases map cleanly to contraption enemies
     expect(createBattleUnitFromEnemy('hound', 0, { x: 1, y: 1 }).blueprintId).toBe('barrow');
     expect(createBattleUnitFromEnemy('goose', 0, { x: 1, y: 1 }).blueprintId).toBe('blower');
     expect(createBattleUnitFromEnemy('mole', 0, { x: 1, y: 1 }).blueprintId).toBe('sapper');
@@ -191,7 +191,7 @@ describe('overnight expansion: battle poses, heroes, enemies, maps, items, relic
     // Dewdrop Compass: +1 Move on Turn 1
     expect(getRemainingMove(owl)).toBe(owl.moveRange + 1);
 
-    // Copper Weathervane: +1 Jump Range & +3 High Ground DMG
+    // Copper Weathervane: +1 Jump Range & +1 High Ground DMG
     expect(getEffectiveJumpRange(owl, undefined, battle.relicIds)).toBe(owl.jumpRange + 1);
 
     // Heirloom Pocketwatch: +1 Overwatch shot
@@ -199,7 +199,7 @@ describe('overnight expansion: battle poses, heroes, enemies, maps, items, relic
     expect(executeOverwatch(battle, owl.id)).toBe(true);
     expect(owl.actions.overwatchCharges).toBe(2);
 
-    // High Ground (+3) & Straw Hat Trophy (+2 Assist DMG & Range 2)
+    // Summit High Ground (+3 at elev diff 2) + Copper Weathervane (+1) = +4 & Straw Hat Trophy (+2 Assist DMG & Range 2)
     owl.actions.hasAttacked = false;
     battle.tiles[4][2].elevation = 2;
     battle.tiles[4][5].elevation = 0;
@@ -209,7 +209,7 @@ describe('overnight expansion: battle poses, heroes, enemies, maps, items, relic
     foe.pos = { x: 5, y: 4 };
     pip.pos = { x: 5, y: 6 }; // 2 tiles away from foe -> triggers Straw Hat Trophy Assist!
     const fc = forecastAttack(battle, owl, foe.pos);
-    expect(fc.highGroundBonus).toBe(3);
+    expect(fc.highGroundBonus).toBe(4);
     expect(fc.partnerAssistUnitId).toBe(pip.id);
     expect(fc.partnerAssistDamage).toBeGreaterThanOrEqual(3);
   });

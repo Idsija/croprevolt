@@ -39,6 +39,7 @@ import {
   applyGraftToHero,
   buyMarketOffer,
   claimRecruitReward,
+  createHeroFromBlueprint,
   createNewRun,
   defaultMetaProgress,
   MAX_GRAFTS_PER_HERO,
@@ -46,12 +47,14 @@ import {
 } from '../run';
 
 describe('Crop Revolt! Tactical Engine', () => {
-  it('defines all maps with vertical mobile-first layout and zero spawn/cover overlap', () => {
+  it('defines all maps with varied valid grid layouts and zero spawn/cover overlap', () => {
     for (const map of Object.values(MAP_TEMPLATES)) {
-      expect(map.height).toBeGreaterThan(map.width);
-      const coverKeys = new Set(
-        map.tiles.filter((t) => Boolean(t.cover)).map((t) => posKey({ x: t.x, y: t.y }))
-      );
+      expect(map.width).toBeGreaterThanOrEqual(7);
+      expect(map.height).toBeGreaterThanOrEqual(7);
+      const coverKeys = new Set([
+        ...map.tiles.filter((t) => Boolean(t.cover)).map((t) => posKey({ x: t.x, y: t.y })),
+        ...(map.objectiveCratePositions ?? []).map(posKey),
+      ]);
       for (const p of map.playerSpawns) {
         expect(p.y).toBeGreaterThanOrEqual(map.height - 2);
         expect(coverKeys.has(posKey(p))).toBe(false);
@@ -127,7 +130,12 @@ describe('Crop Revolt! Tactical Engine', () => {
 
   it('supports flexible 3-action order, Dash mid-move, Team-Jump + Bouncy Mulch, and Undo', () => {
     const run = createNewRun(defaultMetaProgress());
-    const veggieFour = run.roster.filter((h) => ['potato', 'pea', 'lemon', 'chili'].includes(h.blueprintId));
+    const veggieFour = [
+      createHeroFromBlueprint('potato'),
+      createHeroFromBlueprint('pea'),
+      createHeroFromBlueprint('lemon'),
+      createHeroFromBlueprint('chili'),
+    ];
     const battle = createBattleFromMap('vegetable_patch', veggieFour, ['bouncy_mulch'], run.items);
 
     const chili = battle.units.find((u) => u.visualKind === 'chili')!;
@@ -247,9 +255,9 @@ describe('Crop Revolt! Tactical Engine', () => {
 
   it('runs Barnyard Animal characters with Co-op Living Wool Cover, Launchpad Jump, and Mud Runner', () => {
     const run = createNewRun(defaultMetaProgress());
-    expect(run.roster.some((h) => h.blueprintId === 'pig')).toBe(true);
+    expect(run.roster.some((h) => h.blueprintId === 'rooster')).toBe(true);
 
-    expect(claimRecruitReward(run, 'rooster')).toBe(true);
+    expect(claimRecruitReward(run, 'pig')).toBe(true);
     expect(claimRecruitReward(run, 'sheep')).toBe(true);
     expect(claimRecruitReward(run, 'goat')).toBe(true);
 
@@ -294,7 +302,7 @@ describe('Crop Revolt! Tactical Engine', () => {
 
   it('computes simultaneous ally weapon ranges, enemy threat zones, and smart auto turn-end readiness', () => {
     const run = createNewRun(defaultMetaProgress());
-    const pair = run.roster.filter((h) => ['potato', 'pea'].includes(h.blueprintId));
+    const pair = [createHeroFromBlueprint('potato'), createHeroFromBlueprint('pea')];
     const battle = createBattleFromMap('vegetable_patch', pair, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
@@ -351,10 +359,7 @@ describe('Crop Revolt! Tactical Engine', () => {
 
   it('supports unit unclick, enemy toggle-off, tab-blur focus clear, and never auto-uses skills', () => {
     const run = createNewRun(defaultMetaProgress());
-    const pair = [
-      run.roster.find((h) => h.blueprintId === 'potato')!,
-      run.roster.find((h) => h.blueprintId === 'pea')!,
-    ];
+    const pair = [createHeroFromBlueprint('potato'), createHeroFromBlueprint('pea')];
     const battle = createBattleFromMap('vegetable_patch', pair, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
@@ -487,7 +492,7 @@ describe('Crop Revolt! Tactical Engine', () => {
     expect(hero.graftIds.length).toBe(MAX_GRAFTS_PER_HERO);
     expect(applyGraftToHero(run, hero.uid, 'pumpkin_rind')).toBe(false);
 
-    const pair = run.roster.filter((h) => ['potato', 'pea'].includes(h.blueprintId));
+    const pair = [createHeroFromBlueprint('potato'), createHeroFromBlueprint('pea')];
     const battle = createBattleFromMap('vegetable_patch', pair, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
@@ -543,7 +548,12 @@ describe('Crop Revolt! Tactical Engine', () => {
 
   it('resolves Knockback slide, +2 BUMP crunch, Beehive chain explosions, Sprinkler jets, and Sunbeam +2 ATK', () => {
     const run = createNewRun(defaultMetaProgress(), 'summer');
-    const quad = run.roster.filter((h) => ['potato', 'pea', 'lemon', 'pig'].includes(h.blueprintId));
+    const quad = [
+      createHeroFromBlueprint('potato'),
+      createHeroFromBlueprint('pea'),
+      createHeroFromBlueprint('lemon'),
+      createHeroFromBlueprint('pig'),
+    ];
     const battle = createBattleFromMap('greenhouse_entry', quad, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
@@ -680,18 +690,20 @@ describe('Crop Revolt! Tactical Engine', () => {
     expect(run.roster[1].harvested).toBe(false);
   });
 
-  it('starts runs with Stitch (cow) and Crisphead (lettuce) in the active starter squad with working traits & skills', () => {
+  it('starts runs with iconic goofy starter squad (Stitch, Snap-Pea, Zestia, Cluck Norris + Carrot bench) and working Crisphead traits', () => {
     const run = createNewRun(defaultMetaProgress());
     const activeIds = run.activeSquadUids.map(
       (uid) => run.roster.find((h) => h.uid === uid)?.blueprintId
     );
-    expect(activeIds[0]).toBe('cow');
-    expect(activeIds[1]).toBe('lettuce');
+    expect(activeIds).toEqual(['cow', 'pea', 'lemon', 'rooster']);
 
-    const activeHeroes = run.activeSquadUids.map(
-      (uid) => run.roster.find((h) => h.uid === uid)!
-    );
-    const battle = createBattleFromMap('vegetable_patch', activeHeroes, [], run.items);
+    const squad = [
+      run.roster.find((h) => h.blueprintId === 'cow')!,
+      createHeroFromBlueprint('lettuce'),
+      run.roster.find((h) => h.blueprintId === 'pea')!,
+      run.roster.find((h) => h.blueprintId === 'lemon')!,
+    ];
+    const battle = createBattleFromMap('vegetable_patch', squad, [], run.items);
     for (let y = 0; y < battle.height; y++) {
       for (let x = 0; x < battle.width; x++) {
         battle.tiles[y][x].cover = null;

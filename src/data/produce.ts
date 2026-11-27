@@ -712,13 +712,18 @@ export const PRODUCE_BLUEPRINTS: Record<string, ProduceBlueprint> = {
   },
 };
 
-export const STARTER_BLUEPRINT_IDS = ['cow', 'lettuce', 'pea', 'lemon', 'strawberry', 'potato', 'pig', 'chili'] as const;
+/** Slimmed iconic starter squad: Stitch (Cow), Snap-Pea, Zestia (Lemon), Sir Clucks (Rooster) active + Cruncher (Carrot) on bench! */
+export const STARTER_BLUEPRINT_IDS = ['cow', 'pea', 'lemon', 'rooster', 'carrot'] as const;
+
 export const RECRUITABLE_BLUEPRINT_IDS = [
+  'lettuce',
+  'potato',
+  'strawberry',
+  'pig',
+  'chili',
   'corn',
-  'rooster',
   'sheep',
   'goat',
-  'carrot',
   'blackberry',
   'mushroom',
   'duck',
@@ -726,3 +731,26 @@ export const RECRUITABLE_BLUEPRINT_IDS = [
   'blueberry',
   'owl',
 ] as const;
+
+export interface HeroUnlockEntry {
+  id: string;
+  cost: number;
+  tagline: string;
+}
+
+export const HERO_UNLOCK_CATALOG: HeroUnlockEntry[] = [
+  { id: 'lettuce', cost: 15, tagline: 'Bouncy leafy skirmisher & dash-flanker' },
+  { id: 'potato', cost: 15, tagline: 'Armored tuber tank with lobbed spud mortar' },
+  { id: 'strawberry', cost: 20, tagline: 'Swift berry swashbuckler with double-dash combos' },
+  { id: 'pig', cost: 20, tagline: 'Mud-charging truffle boar who shoves foes' },
+  { id: 'chili', cost: 25, tagline: 'Fiery pepper pyromancer lighting 3×3 burns' },
+  { id: 'mushroom', cost: 25, tagline: 'Bouncy toadstool trickster & living Team-Jump pad' },
+  { id: 'corn', cost: 25, tagline: 'Explosive popcorn grenadier shattering cover' },
+  { id: 'duck', cost: 30, tagline: 'Aviator barn-duck ignoring mud with hose push' },
+  { id: 'sheep', cost: 30, tagline: 'Fluffy wool guardian shielding nearby teammates' },
+  { id: 'blackberry', cost: 30, tagline: 'Thorny sniper planting prickly bramble walls' },
+  { id: 'goat', cost: 35, tagline: 'Cliff-charging ram knocking foes off ledges' },
+  { id: 'pumpkin', cost: 35, tagline: 'Heirloom gourd knight smashing crates & shielding' },
+  { id: 'blueberry', cost: 40, tagline: 'Nimble berry shinobi chaining double-dashes' },
+  { id: 'owl', cost: 40, tagline: 'Grumpy bespectacled owl archer with 7-tile reach' },
+];

@@ -58,31 +58,49 @@ onMounted(async () => {
         <CraftIcon :name="isVictory ? 'trophy' : 'bag'" :size="18" />
         <span>
           {{
-            isVictory
-              ? run.seasonId === 'autumn'
-                ? 'FULL HARVEST VICTORY!'
-                : run.seasonId === 'summer'
-                  ? 'SUMMER GREENHOUSE VICTORY!'
-                  : 'SPRING REVOLT VICTORY!'
-              : 'SQUAD HARVESTED!'
+            run.mode === 'endless'
+              ? `ENDLESS HARVEST · FLOOR ${run.endless?.floor ?? run.battlesWon}`
+              : isVictory
+                ? run.seasonId === 'autumn'
+                  ? 'FULL HARVEST VICTORY!'
+                  : run.seasonId === 'summer'
+                    ? 'SUMMER GREENHOUSE VICTORY!'
+                    : 'SPRING REVOLT VICTORY!'
+                : 'SQUAD HARVESTED!'
           }}
         </span>
       </div>
 
-      <h1>{{ isVictory ? 'The Garden Stands Free!' : 'Bagged by the Farmers...' }}</h1>
+      <h1>
+        {{
+          run.mode === 'endless'
+            ? `Reached Floor ${run.endless?.floor ?? run.battlesWon}!`
+            : isVictory
+              ? 'The Garden Stands Free!'
+              : 'Bagged by the Farmers...'
+        }}
+      </h1>
       <p class="desc">
         {{
-          isVictory
-            ? run.seasonId === 'autumn'
-              ? 'Lord Bramblecoat fell in a whirl of crimson leaves! Spring, Summer and Autumn: the whole garden is free.'
-              : run.seasonId === 'summer'
-              ? 'Baron Combine ground to a halt in a burst of steam and popcorn! Your heirloom squad rules the Summer Greenhouse.'
-              : 'Captain Scarecrow toppled in a shower of straw! Your heirloom squad rules the Spring Patch.'
-            : 'Every revolt plants stronger seeds. Visit the Seed Shed to unlock permanent perks for your next run!'
+          run.mode === 'endless'
+            ? `Best Endless Record: Floor ${gameStore.meta.bestEndlessFloor ?? 0}. Visit the Greenhouse to unlock even more goofy heroes!`
+            : isVictory
+              ? run.seasonId === 'autumn'
+                ? 'Lord Bramblecoat fell in a whirl of crimson leaves! Spring, Summer and Autumn: the whole garden is free.'
+                : run.seasonId === 'summer'
+                ? 'Baron Combine ground to a halt in a burst of steam and popcorn! Your heirloom squad rules the Summer Greenhouse.'
+                : 'Captain Scarecrow toppled in a shower of straw! Your heirloom squad rules the Spring Patch.'
+              : 'Every revolt plants stronger seeds. Visit the Seed Shed & Greenhouse to unlock goofy heroes and permanent perks!'
         }}
       </p>
 
       <div class="stat-pills">
+        <span v-if="run.mode === 'endless'" class="paper-pill seed-pill">
+          ♾️ Best Endless: Fl.{{ gameStore.meta.bestEndlessFloor ?? 0 }}
+        </span>
+        <span v-if="run.coopPlayers && run.coopPlayers.length > 1" class="paper-pill">
+          🎮 {{ run.coopPlayers.length }}P Local Co-Op
+        </span>
         <span class="paper-pill">
           <CraftIcon name="trophy" :size="15" /> {{ run.battlesWon }} Battles Won
         </span>

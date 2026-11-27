@@ -45,6 +45,7 @@ import type {
   BattleState,
   BoardTheme,
   BattleUnit,
+  CoopPlayer,
   GridPos,
   MapTemplate,
   RosterHero,
@@ -71,6 +72,10 @@ export interface BattleSetup {
   bossEmpowered?: boolean;
   /** Objective rolled for this stop; replaces "defeat all" on maps that use it. */
   objective?: RolledObjective | null;
+  /** Local Co-Op roster (1–4 couch players) and hero-to-player ownership map. */
+  coopPlayers?: CoopPlayer[];
+  heroOwnerByUid?: Record<string, number>;
+  coopFreeOrder?: boolean;
 }
 
 function mirrorTemplate(map: MapTemplate): MapTemplate {
@@ -85,6 +90,7 @@ function mirrorTemplate(map: MapTemplate): MapTemplate {
     cagePos: map.cagePos ? flip(map.cagePos) : undefined,
     burrowPairs: map.burrowPairs?.map(([a, b]) => [flip(a), flip(b)]),
     escortStartPos: map.escortStartPos ? flip(map.escortStartPos) : undefined,
+    objectiveCratePositions: map.objectiveCratePositions?.map(flip),
   };
 }
 
@@ -120,6 +126,7 @@ function varyEnemySpawns(
     ...map.playerSpawns.map(posKey),
     ...(map.gateTiles ?? []).map(posKey),
     ...(map.escortStartPos ? [posKey(map.escortStartPos)] : []),
+    ...(map.objectiveCratePositions ?? []).map(posKey),
   ]);
   const playerTop = Math.min(...map.playerSpawns.map((p) => p.y));
   const candidates: GridPos[] = [];
@@ -330,6 +337,17 @@ export function createBattleFromMap(
 ): BattleState {
   const template = MAP_TEMPLATES[mapId];
   if (!template) throw new Error(`Unknown map template: ${mapId}`);
+  return createBattleFromTemplate(template, activeHeroes, relicIds, items, captiveInfo, setup);
+}
+
+export function createBattleFromTemplate(
+  template: MapTemplate,
+  activeHeroes: RosterHero[],
+  relicIds: string[],
+  items: Record<string, number>,
+  captiveInfo?: { hero?: RosterHero; blueprintId?: string },
+  setup?: BattleSetup
+): BattleState {
   let map: MapTemplate = template;
   if (setup?.rng) {
     if (setup.rng() < 0.5) map = mirrorTemplate(map);
@@ -373,6 +391,21 @@ export function createBattleFromMap(
     }
   }
 
+  // Spawn glowing Farm Supply Crates for 'smash_crates' (Supply Sabotage) maps!
+  if (map.objectiveCratePositions && map.objectiveCratePositions.length > 0) {
+    for (const pos of map.objectiveCratePositions) {
+      if (pos.y < 0 || pos.y >= map.height || pos.x < 0 || pos.x >= map.width) continue;
+      tiles[pos.y][pos.x].cover = {
+        kind: 'crate',
+        level: 'half',
+        hp: 8,
+        maxHp: 8,
+        destructible: true,
+        isObjectiveCrate: true,
+      };
+    }
+  }
+
   // Initialize Collapsible Wooden Bridges (detect whether bridge spans lava or water)
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
@@ -391,11 +424,23 @@ export function createBattleFromMap(
     }
   }
 
+  const coopPlayers =
+    setup?.coopPlayers && setup.coopPlayers.length > 1
+      ? setup.coopPlayers.map((p) => ({ ...p }))
+      : undefined;
+
   const units: BattleUnit[] = [];
   activeHeroes.slice(0, map.playerSpawns.length).forEach((hero, i) => {
     const spawnPos = map.playerSpawns[i];
     const unit = createBattleUnitFromHero(hero, spawnPos);
     unit.facing = spawnPos.x >= map.width / 2 ? 'left' : 'right';
+    if (coopPlayers) {
+      const assignedOwner = setup?.heroOwnerByUid?.[hero.uid];
+      unit.ownerPlayerIdx =
+        typeof assignedOwner === 'number' && assignedOwner >= 0 && assignedOwner < coopPlayers.length
+          ? assignedOwner
+          : i % coopPlayers.length;
+    }
     // Apply battle-start relics & grafts
     if (hasRelic(relicIds, 'rich_loam')) {
       unit.hp = Math.min(unit.maxHp, unit.hp + 2);
@@ -448,6 +493,9 @@ export function createBattleFromMap(
   }
 
   const prepPhase = Boolean(setup?.enablePrepPhase);
+  const firstCoopOwner = coopPlayers
+    ? units.find((u) => u.team === 'player' && u.alive && !u.isEscortCart)?.ownerPlayerIdx ?? 0
+    : undefined;
 
   const state: BattleState = {
     mapId: map.id,
@@ -466,6 +514,10 @@ export function createBattleFromMap(
     playerSpawnPositions: map.playerSpawns.map((p) => ({ ...p })),
     surviveTurns: map.surviveTurns ?? (map.objective === 'survive' ? 4 : undefined),
     harvestHeat,
+    coopPlayers,
+    activeCoopPlayerIdx: firstCoopOwner,
+    coopFreeOrder: coopPlayers ? Boolean(setup?.coopFreeOrder) : undefined,
+    coopComboCount: 0,
     relicIds: [...relicIds],
     items: { ...items },
     gateTiles: map.gateTiles ? map.gateTiles.map((g) => ({ ...g })) : [],
@@ -599,6 +651,7 @@ export function swapPrepHeroWithBench(
   const oldUnit = state.units[idx];
   const newUnit = createBattleUnitFromHero(benchHero, oldUnit.pos);
   newUnit.facing = oldUnit.facing;
+  newUnit.ownerPlayerIdx = oldUnit.ownerPlayerIdx;
   if (hasRelic(state.relicIds, 'rich_loam')) {
     newUnit.hp = Math.min(newUnit.maxHp, newUnit.hp + 2);
   }
@@ -756,6 +809,26 @@ function checkBattleEnd(state: BattleState): void {
     }
   }
 
+  if (state.objective === 'smash_crates') {
+    const cratesLeft = state.tiles.reduce(
+      (sum, row) => sum + row.filter((t) => t.cover?.isObjectiveCrate).length,
+      0
+    );
+    if (cratesLeft === 0) {
+      state.status = 'victory';
+      state.pendingEvents.push({ type: 'banner', text: 'SUPPLIES SABOTAGED! VICTORY!', tone: 'victory' });
+      pushLog(state, 'All farmer supply crates smashed to splinters!');
+      return;
+    }
+    if (aliveEnemies.length === 0) {
+      state.status = 'victory';
+      state.pendingEvents.push({ type: 'banner', text: 'SUPPLY CAMP CLEARED! VICTORY!', tone: 'victory' });
+      pushLog(state, 'All guards routed — the farmer supplies are ruined!');
+      return;
+    }
+    return;
+  }
+
   if (state.objective === 'barn_rescue') {
     const cageStillStanding = state.tiles.some((row) =>
       row.some((t) => t.cover?.isObjectiveCage)
@@ -780,6 +853,30 @@ function checkBattleEnd(state: BattleState): void {
   }
 
   checkBossPhase2(state);
+}
+
+/** Crisp live objective progress string for Battle HUD & mobile badge. */
+export function getObjectiveProgressText(state: BattleState): string {
+  if (state.objective === 'smash_crates') {
+    const left = state.tiles.reduce(
+      (sum, row) => sum + row.filter((t) => t.cover?.isObjectiveCrate).length,
+      0
+    );
+    return left > 0 ? `Smash ${left} Supply Crate${left === 1 ? '' : 's'} left` : 'Supplies Smashed!';
+  }
+  if (state.objective === 'survive') {
+    const total = state.surviveTurns ?? 4;
+    return `Hold Patch: Turn ${Math.min(state.turn, total)} / ${total}`;
+  }
+  if (state.objective === 'rout') {
+    const bonked = state.units.filter((u) => u.team === 'enemy' && !u.alive).length;
+    return `Rout Farmers: ${bonked} / ${state.routTarget ?? 1}`;
+  }
+  if (state.objective === 'barn_rescue') {
+    const cageUp = state.tiles.some((r) => r.some((t) => t.cover?.isObjectiveCage));
+    return cageUp ? 'Smash the Burlap Cage & clear foes' : 'Ally Freed! Clear remaining foes';
+  }
+  return state.objectiveLabel;
 }
 
 /**
@@ -1672,6 +1769,23 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
     pushLog(state, `SPRINGBOARD BOOST! ${springboardAlly.name} & ${unit.name} fired up (+2 ATK)!`);
   }
 
+  // Local Co-Op Cross-Player Synergy: jumping off another couch player's hero triggers a CO-OP COMBO!
+  if (
+    state.coopPlayers &&
+    state.coopPlayers.length > 1 &&
+    springboardAlly &&
+    unit.ownerPlayerIdx !== undefined &&
+    springboardAlly.ownerPlayerIdx !== undefined &&
+    unit.ownerPlayerIdx !== springboardAlly.ownerPlayerIdx
+  ) {
+    state.coopComboCount = (state.coopComboCount ?? 0) + 1;
+    unit.tempAttackBonus = Math.min(4, unit.tempAttackBonus + 1);
+    const pA = state.coopPlayers[unit.ownerPlayerIdx]?.badge ?? `P${unit.ownerPlayerIdx + 1}`;
+    const pB = state.coopPlayers[springboardAlly.ownerPlayerIdx]?.badge ?? `P${springboardAlly.ownerPlayerIdx + 1}`;
+    coopBoost = `CO-OP COMBO! ${pA}+${pB} +1 ATK!`;
+    pushLog(state, `CO-OP COMBO! ${pA} & ${pB} teamed up for a vault (+1 bonus ATK)!`);
+  }
+
   state.pendingEvents.push({
     type: 'jump',
     unitId: unit.id,
@@ -1891,14 +2005,25 @@ export function executeAttack(
   const defenderWasAlive = defender.alive;
   handleUnitKO(state, defender);
 
-  // Mario + Rabbids Partner Follow-Up Assist (+1/+2 bonus DMG from an ally!)
+  // Mario + Rabbids Partner Follow-Up Assist (+1/+2 bonus DMG from an ally, +1 extra on Cross-Player Co-Op!)
   if (defender.alive && fc.partnerAssistUnitId && fc.partnerAssistDamage) {
     const assistAlly = getUnitById(state, fc.partnerAssistUnitId);
     if (assistAlly && assistAlly.alive && !hasStatus(assistAlly, 'rooted')) {
       if (defender.pos.x !== assistAlly.pos.x) {
         assistAlly.facing = defender.pos.x > assistAlly.pos.x ? 'right' : 'left';
       }
-      defender.hp -= fc.partnerAssistDamage;
+      const isCrossPlayer = Boolean(
+        state.coopPlayers &&
+          state.coopPlayers.length > 1 &&
+          attacker.ownerPlayerIdx !== undefined &&
+          assistAlly.ownerPlayerIdx !== undefined &&
+          attacker.ownerPlayerIdx !== assistAlly.ownerPlayerIdx
+      );
+      const assistDmg = fc.partnerAssistDamage;
+      if (isCrossPlayer) {
+        state.coopComboCount = (state.coopComboCount ?? 0) + 1;
+      }
+      defender.hp -= assistDmg;
       state.pendingEvents.push({
         type: 'partner_assist',
         allyId: assistAlly.id,
@@ -1906,11 +2031,13 @@ export function executeAttack(
         targetId: defender.id,
         from: { ...assistAlly.pos },
         to: { ...defender.pos },
-        damage: fc.partnerAssistDamage,
+        damage: assistDmg,
       });
       pushLog(
         state,
-        `PARTNER ASSIST! ${assistAlly.name} piled on ${defender.name} for +${fc.partnerAssistDamage} DMG!`
+        isCrossPlayer
+          ? `CO-OP ASSIST! ${assistAlly.name} & ${attacker.name} synced up for +${assistDmg} DMG!`
+          : `PARTNER ASSIST! ${assistAlly.name} piled on ${defender.name} for +${assistDmg} DMG!`
       );
       handleUnitKO(state, defender);
     }
@@ -2486,6 +2613,12 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
 
   if (nextPhase === 'player') {
     state.turn += 1;
+    if (state.coopPlayers && state.coopPlayers.length > 1) {
+      const firstCoopUnit = state.units.find(
+        (u) => u.team === 'player' && u.alive && !u.isEscortCart
+      );
+      state.activeCoopPlayerIdx = firstCoopUnit?.ownerPlayerIdx ?? 0;
+    }
     // Check survive victory right when entering turn > surviveTurns!
     if (state.objective === 'survive' && state.turn > (state.surviveTurns ?? 4)) {
       checkBattleEnd(state);

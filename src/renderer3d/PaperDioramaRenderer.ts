@@ -1958,11 +1958,15 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       entry.rig.frontMat.color.set(tintHex);
       entry.rig.backMat.color.set(isDone ? '#b5a892' : '#fffaf0');
 
-      // 9. Pedestal Glowing Ring State
+      // 9. Pedestal Glowing Ring State (including Local Co-Op Player Ownership Rings!)
+      const coopOwner =
+        u.team === 'player' && b.coopPlayers && b.coopPlayers.length > 1 && typeof u.ownerPlayerIdx === 'number'
+          ? b.coopPlayers[u.ownerPlayerIdx]
+          : undefined;
       if (isSelected) {
-        entry.rig.ringMat.color.set('#ffe052');
-        entry.rig.ringMat.opacity = 0.78 + Math.sin(this.elapsedTotal * 6) * 0.16;
-        const rs = 1 + Math.sin(this.elapsedTotal * 5) * 0.05;
+        entry.rig.ringMat.color.set(coopOwner ? coopOwner.color : '#ffe052');
+        entry.rig.ringMat.opacity = 0.82 + Math.sin(this.elapsedTotal * 6) * 0.14;
+        const rs = 1.03 + Math.sin(this.elapsedTotal * 5) * 0.05;
         entry.rig.ringMesh.scale.set(rs, 1, rs);
       } else if (isOverwatching) {
         entry.rig.ringMat.color.set('#ffb824');
@@ -1975,6 +1979,11 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       } else if (isInspected) {
         entry.rig.ringMat.color.set('#ef4437');
         entry.rig.ringMat.opacity = 0.82;
+      } else if (coopOwner) {
+        const isCoopActive = b.activeCoopPlayerIdx === coopOwner.idx;
+        entry.rig.ringMat.color.set(coopOwner.color);
+        entry.rig.ringMat.opacity = isCoopActive ? 0.68 : 0.36;
+        entry.rig.ringMesh.scale.setScalar(isCoopActive ? 1.02 : 0.96);
       } else {
         entry.rig.ringMat.opacity = 0;
       }
@@ -2229,6 +2238,34 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         ctx.fill();
       }
 
+      // Local Co-Op P1-P4 color crest badge beside HP bar!
+      if (
+        u.team === 'player' &&
+        !u.isEscortCart &&
+        b.coopPlayers &&
+        b.coopPlayers.length > 1 &&
+        typeof u.ownerPlayerIdx === 'number'
+      ) {
+        const cp = b.coopPlayers[u.ownerPlayerIdx];
+        if (cp) {
+          const pw = 21;
+          const ph = 14;
+          const px = bx - pw - 6;
+          const py = by + barH / 2 - ph / 2;
+          ctx.fillStyle = cp.color;
+          roundRect(ctx, px, py, pw, ph, 5);
+          ctx.fill();
+          ctx.strokeStyle = '#fff9e6';
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+          ctx.fillStyle = '#fffdf5';
+          ctx.font = '800 9px Fredoka, Nunito, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(cp.badge, px + pw / 2, py + ph / 2 + 0.5);
+        }
+      }
+
       // Boss / Veteran Tag
       if (isBoss || u.isVeteran) {
         ctx.font = '800 10px Fredoka, Nunito, sans-serif';
@@ -2292,31 +2329,38 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       }
     }
 
-    // 2. Objective Cage / Damaged Cover Mini-HP Tags
+    // 2. Objective Cage / Objective Supply Crate / Damaged Cover Mini-HP Tags
     for (const cv of this.world.getAllCoverVisuals()) {
       const tile = tileAt(b, cv.pos);
       if (!tile?.cover) continue;
       const showTag =
         cv.isObjectiveCage ||
+        cv.isObjectiveCrate ||
         (tile.cover.destructible && tile.cover.hp < tile.cover.maxHp);
       if (!showTag) continue;
 
-      const wp = cv.group.position.clone().add(new THREE.Vector3(0, cv.height + 0.25, 0));
+      const wp = cv.group.position.clone().add(new THREE.Vector3(0, cv.height + (cv.isObjectiveCrate ? 0.56 : 0.25), 0));
       const sc = this.projectToScreen(wp);
       if (!sc.visible) continue;
 
       const label = cv.isObjectiveCage
         ? `RESCUE ${tile.cover.hp}/${tile.cover.maxHp}`
-        : `${tile.cover.hp}/${tile.cover.maxHp}`;
+        : cv.isObjectiveCrate
+          ? `SMASH ${tile.cover.hp}/${tile.cover.maxHp}`
+          : `${tile.cover.hp}/${tile.cover.maxHp}`;
       ctx.font = '800 10px Fredoka, Nunito, sans-serif';
       const tw = ctx.measureText(label).width + 12;
-      ctx.fillStyle = cv.isObjectiveCage ? '#ffe985' : 'rgba(251, 243, 223, 0.92)';
+      ctx.fillStyle = cv.isObjectiveCage
+        ? '#ffe985'
+        : cv.isObjectiveCrate
+          ? '#ffd46b'
+          : 'rgba(251, 243, 223, 0.92)';
       roundRect(ctx, sc.x - tw / 2, sc.y - 10, tw, 17, 6);
       ctx.fill();
-      ctx.strokeStyle = '#452a16';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = cv.isObjectiveCrate ? '#9c2c12' : '#452a16';
+      ctx.lineWidth = cv.isObjectiveCrate ? 2 : 1.5;
       ctx.stroke();
-      ctx.fillStyle = cv.isObjectiveCage ? '#7a3500' : '#4a2c17';
+      ctx.fillStyle = cv.isObjectiveCage || cv.isObjectiveCrate ? '#7a2500' : '#4a2c17';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(label, sc.x, sc.y - 1);

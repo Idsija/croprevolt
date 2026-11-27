@@ -40,6 +40,7 @@ import {
   confirmPrepPhase,
   cycleAimTarget,
   deselectAll,
+  dismissCoopHandoff,
   dismissFarmerRecap,
   endPlayerTurn,
   executePreviewOption,
@@ -64,7 +65,9 @@ import {
   toggleAudioMute,
   toggleAutoEndTurn,
   toggleBoardViewMode,
+  toggleCoopFreeOrder,
   toggleEnemySpeed,
+  toggleGuidedHints,
   toggleInspectEnemy,
   toggleMusicMute,
   toggleRendererKind,
@@ -806,8 +809,16 @@ watch(
 );
 
 const objectiveLine = computed(() => {
+  void gameStore.eventQueueVersion;
   const b = battle.value;
   const foes = aliveEnemiesCount.value;
+  if (b.objective === 'smash_crates') {
+    const left = b.tiles.reduce(
+      (sum, row) => sum + row.filter((t) => t.cover?.isObjectiveCrate).length,
+      0
+    );
+    return `📦 Smash ${left} Supply Crate${left === 1 ? '' : 's'} · ${foes} foes`;
+  }
   if (b.objective === 'survive') {
     const total = b.surviveTurns ?? 4;
     return `🛡️ Hold Turn ${Math.min(b.turn, total)}/${total} · ${foes} foes`;
@@ -818,6 +829,21 @@ const objectiveLine = computed(() => {
   if (b.objective === 'rout') return `🏃 Rout · bonk ${routLeft.value} more · ${foes} foes`;
   return `${b.objectiveLabel} · ${foes} ${foes === 1 ? 'foe' : 'foes'} left`;
 });
+
+const coopPlayers = computed(() =>
+  battle.value.coopPlayers && battle.value.coopPlayers.length > 1 ? battle.value.coopPlayers : null
+);
+
+const activeCoopPlayer = computed(() => {
+  if (!coopPlayers.value) return null;
+  const idx = battle.value.activeCoopPlayerIdx ?? 0;
+  return coopPlayers.value[idx] ?? coopPlayers.value[0];
+});
+
+function unitCoopBadge(u: { ownerPlayerIdx?: number }) {
+  if (!coopPlayers.value || typeof u.ownerPlayerIdx !== 'number') return null;
+  return coopPlayers.value[u.ownerPlayerIdx] ?? null;
+}
 
 /** Squad Bonds for the heroes on the board: live while deploying, fixed once Turn 1 starts. */
 const squadBonds = computed<BondStatus[]>(() => {
@@ -1439,6 +1465,20 @@ onBeforeUnmount(() => {
         <span v-if="(battle.harvestHeat ?? 0) > 0" class="cam-mode-pill heat">
           🔥 H{{ battle.harvestHeat }}
         </span>
+        <span
+          v-if="activeCoopPlayer && battle.phase === 'player' && !battle.prepPhase"
+          class="cam-mode-pill coop-active-pill"
+          :style="{ background: activeCoopPlayer.color }"
+        >
+          🎮 {{ battle.coopFreeOrder ? `${coopPlayers?.length}P Free` : `${activeCoopPlayer.badge} Turn` }}
+        </span>
+        <span
+          v-if="(battle.coopComboCount ?? 0) > 0"
+          class="cam-mode-pill coop-combo-pill desktop-only"
+          title="Cross-Player Co-Op Combos triggered this battle!"
+        >
+          🤝 {{ battle.coopComboCount }} Combo{{ battle.coopComboCount === 1 ? '' : 's' }}
+        </span>
         <span v-if="is3D && cameraMode === 'aim'" class="cam-mode-pill aim desktop-only">AIM CAM</span>
         <span v-else-if="is3D && cameraMode === 'tacticam'" class="cam-mode-pill tacticam desktop-only">TACTICAM</span>
       </div>
@@ -1574,6 +1614,7 @@ onBeforeUnmount(() => {
     <!-- Turn-1 Sticky-Note Coachmarks -->
     <div
       v-if="
+        (gameStore.meta.guidedHintsEnabled ?? true) &&
         !battle.prepPhase &&
         coachStep >= 0 &&
         battle.phase === 'player' &&
@@ -1581,7 +1622,8 @@ onBeforeUnmount(() => {
         gameStore.mode === 'move' &&
         !gameStore.previewTile &&
         !inspectedEnemy &&
-        !gameStore.farmerRecap
+        !gameStore.farmerRecap &&
+        !gameStore.coopHandoffBanner
       "
       class="coach-note paper-card pinned-card"
     >
@@ -1598,6 +1640,49 @@ onBeforeUnmount(() => {
           <CraftIcon name="close" :size="13" />
         </button>
       </div>
+    </div>
+
+    <!-- Local Co-Op Pass-and-Play Turn Handoff Banner -->
+    <div
+      v-if="gameStore.coopHandoffBanner && battle.status === 'ongoing'"
+      class="coop-handoff-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Pass turn to next co-op player"
+      @click.self="dismissCoopHandoff"
+    >
+      <section class="corrugated-slab coop-handoff-card">
+        <div class="washi-tape"></div>
+        <div
+          class="coop-handoff-crest"
+          :style="{ background: gameStore.coopHandoffBanner.color }"
+        >
+          {{ gameStore.coopHandoffBanner.badge }}
+        </div>
+        <span class="coop-handoff-kicker">🎮 LOCAL CO-OP HANDOFF</span>
+        <h2>PASS TO {{ gameStore.coopHandoffBanner.name.toUpperCase() }}!</h2>
+        <p class="coop-handoff-heroes">
+          Commanding:
+          <strong>{{ gameStore.coopHandoffBanner.heroNames.join(' · ') || 'Squad' }}</strong>
+        </p>
+        <p class="coop-handoff-tip">
+          💡 Team-Jump or Partner-Assist a teammate's hero for a <strong>+1 Co-Op Combo</strong>!
+        </p>
+        <div class="coop-handoff-actions">
+          <button class="paper-btn primary coop-handoff-go" @click="dismissCoopHandoff">
+            Ready! Take Turn →
+          </button>
+          <button
+            class="paper-btn coop-handoff-free"
+            @click="
+              toggleCoopFreeOrder();
+              dismissCoopHandoff();
+            "
+          >
+            Switch to Free Order (No Prompts)
+          </button>
+        </div>
+      </section>
     </div>
 
     <!-- What the Farmer Turn just did, in one place. Closes on a tap or when the player starts aiming. -->
@@ -1654,16 +1739,21 @@ onBeforeUnmount(() => {
           <div class="insp-top">
             <strong>
               {{
-                focusedCover.isObjectiveCage
-                  ? 'Burlap Rescue Cage'
-                  : focusedCover.kind === 'pumpkin'
-                    ? 'Rolling Pumpkin'
-                    : focusedCover.kind.toUpperCase()
+                focusedCover.isObjectiveCrate
+                  ? 'Farmer Supply Crate'
+                  : focusedCover.isObjectiveCage
+                    ? 'Burlap Rescue Cage'
+                    : focusedCover.kind === 'pumpkin'
+                      ? 'Rolling Pumpkin'
+                      : focusedCover.kind.toUpperCase()
               }}
             </strong>
             <span class="paper-pill mini-fam">{{ focusedCover.level }}</span>
           </div>
-          <small v-if="focusedCover.isObjectiveCage">
+          <small v-if="focusedCover.isObjectiveCrate">
+            Smash ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) to sabotage farmer supplies!
+          </small>
+          <small v-else-if="focusedCover.isObjectiveCage">
             Smash ({{ focusedCover.hp }}/{{ focusedCover.maxHp }} HP) to free a bagged ally!
           </small>
           <small v-else-if="focusedCover.kind === 'pumpkin'">
@@ -1767,6 +1857,21 @@ onBeforeUnmount(() => {
             "
           >
             <span>📖 Field Almanac</span>
+          </button>
+          <button
+            v-if="coopPlayers"
+            class="paper-btn toggle-wide"
+            :class="{ gold: battle.coopFreeOrder }"
+            @click="toggleCoopFreeOrder"
+          >
+            <span>🎮 Co-Op Free Order: {{ battle.coopFreeOrder ? 'ON (Any Hero)' : 'OFF (Guided Turns)' }}</span>
+          </button>
+          <button
+            class="paper-btn toggle-wide"
+            :class="{ gold: gameStore.meta.guidedHintsEnabled ?? true }"
+            @click="toggleGuidedHints"
+          >
+            <span>💡 Guided Tips: {{ (gameStore.meta.guidedHintsEnabled ?? true) ? 'ON' : 'OFF' }}</span>
           </button>
           <button
             class="paper-btn toggle-wide"
@@ -1901,6 +2006,14 @@ onBeforeUnmount(() => {
             @click="selectSquadCard(u.id)"
           >
             <span class="mr-hotkey desktop-only">{{ idx + 1 }}</span>
+            <span
+              v-if="unitCoopBadge(u)"
+              class="mr-coop-chip"
+              :style="{ background: unitCoopBadge(u)!.color }"
+              :title="unitCoopBadge(u)!.name"
+            >
+              {{ unitCoopBadge(u)!.badge }}
+            </span>
             <div class="mr-portrait-box">
               <img class="mr-portrait-img" :src="unitPortraitSrc(u)" :alt="u.name" />
               <span v-if="u.alive && (u.level ?? 1) > 1" class="mr-lvl-chip">L{{ u.level }}</span>
@@ -3025,7 +3138,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 9px;
   padding: 6px 12px;
-  max-width: min(460px, 60vw);
+  max-width: min(620px, 64vw);
 }
 
 .turn-stamp {
@@ -5226,13 +5339,25 @@ onBeforeUnmount(() => {
     flex-shrink: 0;
   }
 
-  /* Dock Turn-1 coach tips right above bottom HUD on phones so enemies are NEVER covered */
+  /* Dock Turn-1 coach tips cleanly above bottom HUD + Co-Op P1/P2 chips on phones */
   .coach-note {
     top: auto;
-    bottom: calc(174px + var(--safe-bottom, 0px));
+    bottom: calc(188px + var(--safe-bottom, 0px));
     padding: 6px 8px 6px 12px;
     gap: 6px;
     max-width: calc(100vw - 16px);
+  }
+
+  .coop-active-pill {
+    padding: 2px 7px;
+    font-size: 0.68rem;
+  }
+
+  .mobile-objective-inline {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
   .coach-copy strong {
@@ -5330,5 +5455,143 @@ onBeforeUnmount(() => {
   .board-hint {
     bottom: calc(120px + var(--safe-bottom, 0px));
   }
+}
+
+/* Local Co-Op Pills, Handoff Banner & Hero Owner Chips */
+.coop-active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  color: #fffef6;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 0 rgba(62, 46, 28, 0.35);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.coop-active-pill.free-order {
+  border-style: dashed;
+}
+.coop-combo-pill {
+  background: #fff2be;
+  color: #7a3e00;
+  border: 2px solid #b46c14;
+  font-weight: 800;
+  font-size: 0.74rem;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.mr-coop-chip {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  z-index: 4;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1.6px solid var(--ink);
+  color: #fffdf5;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1.15;
+  box-shadow: 0 1.5px 0 rgba(50, 34, 18, 0.35);
+  pointer-events: none;
+}
+.coop-handoff-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(34, 24, 14, 0.56);
+  backdrop-filter: blur(3px);
+}
+.coop-handoff-card {
+  position: relative;
+  width: min(410px, 94vw);
+  padding: 24px 22px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(180deg, #fffdf4 0%, #f5ebd2 100%);
+  animation: coopPopIn 0.24s cubic-bezier(0.22, 1.35, 0.36, 1);
+}
+@keyframes coopPopIn {
+  from {
+    opacity: 0;
+    transform: scale(0.88) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.coop-handoff-crest {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  border: 3px solid var(--ink);
+  color: #fffef8;
+  display: grid;
+  place-items: center;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 1.4rem;
+  font-weight: 800;
+  box-shadow: 0 4px 0 rgba(55, 36, 18, 0.32);
+}
+.coop-handoff-kicker {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #7d5b34;
+}
+.coop-handoff-card h2 {
+  margin: 0;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 1.5rem;
+  color: var(--ink);
+}
+.coop-handoff-heroes {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #543d25;
+}
+.coop-handoff-tip {
+  margin: 0;
+  padding: 7px 12px;
+  border-radius: 12px;
+  background: #fff4cc;
+  border: 1.5px dashed #b98524;
+  font-size: 0.78rem;
+  color: #634106;
+  line-height: 1.35;
+}
+.coop-handoff-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+.coop-handoff-go {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 1rem;
+  justify-content: center;
+}
+.coop-handoff-free {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  justify-content: center;
 }
 </style>
