@@ -340,8 +340,15 @@ export function createNewRun(
   coopCount = 1
 ): RunState {
   const hpBonus = meta.unlocks.heirloomSoil ? 2 : 0;
-  // Starter iconic goofy squad: Stitch (Cow), Snap-Pea, Zestia (Lemon), Sir Clucks (Rooster) active + Cruncher (Carrot) on bench!
-  const roster = STARTER_BLUEPRINT_IDS.map((id) => createHeroFromBlueprint(id, hpBonus));
+  // Starter iconic goofy squad: Stitch (Cow), Snap-Pea, Zestia (Lemon), Sir Clucks (Rooster) active + Cruncher (Carrot) on bench.
+  // Any additional heroes unlocked in the Greenhouse or rescued in prior runs join your starting bench right away!
+  const starterIds: string[] = [...STARTER_BLUEPRINT_IDS];
+  const extraUnlockedIds = (meta.unlockedHeroIds ?? []).filter(
+    (id) => !starterIds.includes(id) && Boolean(PRODUCE_BLUEPRINTS[id])
+  );
+  const roster = [...starterIds, ...extraUnlockedIds].map((id) =>
+    createHeroFromBlueprint(id, hpBonus)
+  );
   if (meta.unlocks.seasonedSeedlings) {
     for (const hero of roster) hero.skillPoints += 1;
   }
@@ -515,6 +522,25 @@ export function migrateSavedRun(run: RunState): RunState {
       }
       if (!hero.equippedWeaponId) hero.equippedWeaponId = hero.weapon.id;
     }
+  }
+  if (!run.mode) {
+    run.mode = 'standard';
+  }
+  if (!Array.isArray(run.activeSquadUids)) {
+    run.activeSquadUids = [];
+  }
+  if (Array.isArray(run.roster) && run.roster.length > 0) {
+    const livingIds = new Set(run.roster.filter((h) => !h.harvested).map((h) => h.uid));
+    run.activeSquadUids = run.activeSquadUids.filter((uid) => livingIds.has(uid)).slice(0, 4);
+    if (run.activeSquadUids.length === 0) {
+      run.activeSquadUids = run.roster
+        .filter((h) => !h.harvested)
+        .slice(0, 4)
+        .map((h) => h.uid);
+    }
+  }
+  if (run.coopPlayers && run.coopPlayers.length > 1) {
+    assignCoopHeroOwners(run);
   }
   return run;
 }

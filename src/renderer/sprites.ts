@@ -234,6 +234,7 @@ export function drawUnitStandee(
     hitFlash?: number;
     jumpHeight?: number;
     squash?: number;
+    coopOwner?: { badge: string; color: string; isActiveTurn?: boolean } | null;
   } = {}
 ): void {
   const s = scale;
@@ -278,7 +279,7 @@ export function drawUnitStandee(
     ctx.fill();
     ctx.restore();
 
-    // Crisp outer paper-cream + inner golden-ink die-cut ring
+    // Crisp outer paper-cream + inner golden/co-op-ink die-cut ring
     ctx.strokeStyle = INK;
     ctx.lineWidth = 5.4 * s;
     ctx.beginPath();
@@ -290,12 +291,24 @@ export function drawUnitStandee(
     ctx.stroke();
 
     ctx.save();
-    ctx.strokeStyle = '#f2b824';
-    ctx.lineWidth = 1.8 * s;
+    ctx.strokeStyle = opts.coopOwner ? opts.coopOwner.color : '#f2b824';
+    ctx.lineWidth = 2.2 * s;
     ctx.setLineDash([5 * s, 4 * s]);
     ctx.lineDashOffset = -time * 18 * s;
     ctx.beginPath();
     ctx.ellipse(0, 2 * s, 31.5 * s, 16 * s, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  } else if (opts.coopOwner && unit.team === 'player') {
+    const pulse = opts.coopOwner.isActiveTurn ? 1 + Math.sin(time * 4.5) * 0.04 : 1;
+    ctx.save();
+    ctx.strokeStyle = PAPER_RIM;
+    ctx.lineWidth = (opts.coopOwner.isActiveTurn ? 4.4 : 3.2) * s;
+    ctx.beginPath();
+    ctx.ellipse(0, 2 * s, 23 * s * pulse, 11.5 * s * pulse, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = opts.coopOwner.color;
+    ctx.lineWidth = (opts.coopOwner.isActiveTurn ? 2.6 : 1.8) * s;
     ctx.stroke();
     ctx.restore();
   } else if (opts.isInspectedEnemy) {
@@ -476,6 +489,30 @@ export function drawUnitStandee(
     ctx.fill();
   }
 
+  // Co-Op player ownership pill (P1..P4) cleanly on the right edge of the HP bar (left side holds status icons like Shield)!
+  if (opts.coopOwner && unit.team === 'player') {
+    const pw = 21 * s;
+    const ph = 13 * s;
+    const px = barW / 2 + 5 * s;
+    const py = barY + barH / 2 - ph / 2;
+    ctx.save();
+    ctx.fillStyle = opts.coopOwner.color;
+    ctx.strokeStyle = PAPER_RIM;
+    ctx.lineWidth = 2.2 * s;
+    roundRect(ctx, px, py, pw, ph, 5 * s);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.1 * s;
+    ctx.stroke();
+    ctx.fillStyle = '#fffdf7';
+    ctx.font = `700 ${Math.max(8, Math.round(9.2 * s))}px "Fredoka", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(opts.coopOwner.badge, px + pw / 2, py + ph / 2 + 0.5 * s);
+    ctx.restore();
+  }
+
   // Veteran pin: small die-cut paper star badge at the right end of the HP bar (shield sits on the left).
   if (unit.isVeteran) {
     const vx = barW / 2 + 8 * s;
@@ -608,12 +645,20 @@ export function drawCoverObject(
   ctx.save();
   ctx.translate(cx, cy);
 
-  if (isTargetable) {
-    ctx.strokeStyle = '#ff6b35';
-    ctx.lineWidth = 2.8 * scale;
+  if (isTargetable || cover.isObjectiveCrate) {
+    const pulse = cover.isObjectiveCrate ? 1 + Math.sin(time * 5.2) * 0.06 : 1;
+    ctx.strokeStyle = cover.isObjectiveCrate ? '#e53e30' : '#ff6b35';
+    ctx.lineWidth = (cover.isObjectiveCrate ? 3.2 : 2.8) * scale;
     ctx.beginPath();
-    ctx.ellipse(0, 2 * scale, tileW * 0.42, tileH * 0.4, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 2 * scale, tileW * 0.44 * pulse, tileH * 0.42 * pulse, 0, 0, Math.PI * 2);
     ctx.stroke();
+    if (cover.isObjectiveCrate) {
+      ctx.strokeStyle = '#ffd652';
+      ctx.lineWidth = 1.6 * scale;
+      ctx.beginPath();
+      ctx.ellipse(0, 2 * scale, tileW * 0.37 * pulse, tileH * 0.35 * pulse, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   drawSoftGroundShadow(
@@ -689,6 +734,21 @@ export function drawCoverObject(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('RESCUE!', 0, 1 * scale);
+    ctx.restore();
+  } else if (cover.isObjectiveCrate) {
+    ctx.save();
+    ctx.translate(0, topY - 12 * scale + Math.sin(time * 4.6) * 2.5 * scale);
+    ctx.fillStyle = '#d9382e';
+    ctx.strokeStyle = '#ffd652';
+    ctx.lineWidth = 2 * scale;
+    roundRect(ctx, -30 * scale, -10 * scale, 60 * scale, 20 * scale, 7 * scale);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff9e6';
+    ctx.font = `700 ${Math.round(10 * scale)}px "Fredoka", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('SMASH!', 0, 1 * scale);
     ctx.restore();
   }
 

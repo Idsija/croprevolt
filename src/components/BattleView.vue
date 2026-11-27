@@ -994,6 +994,14 @@ function handleTriggerOverwatch(): void {
 function onKeyDown(e: KeyboardEvent): void {
   if (gameStore.enemyTurnRunning || battle.value.status !== 'ongoing') return;
 
+  if (gameStore.coopHandoffBanner) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+      e.preventDefault();
+      dismissCoopHandoff();
+    }
+    return;
+  }
+
   if (e.key === 'Escape') {
     showItemsMenu.value = false;
     showUtilityMenu.value = false;

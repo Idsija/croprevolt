@@ -562,7 +562,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <small class="gh-tip">💡 Tip: Rescuing a hero from a Barn Cage or Carnival Barn also unlocks them here for FREE!</small>
+          <small class="gh-tip">💡 Unlocked heroes join your starting bench on every new Campaign &amp; Endless run! Rescuing a hero from a Barn Cage or Carnival Barn also unlocks them here for FREE.</small>
         </div>
 
         <!-- Tab 2: Permanent Farm Upgrades -->
@@ -601,7 +601,7 @@ onBeforeUnmount(() => {
         <div class="modal-head">
           <div>
             <h2>Garden Field Guide</h2>
-            <small>Core tactical rules &amp; produce matchups</small>
+            <small>Core tactical rules, Co-Op, Endless Harvest &amp; produce matchups</small>
           </div>
           <button class="paper-btn icon-only" aria-label="Close" @click="activeModal = 'none'">
             <CraftIcon name="close" :size="17" />
@@ -635,6 +635,34 @@ onBeforeUnmount(() => {
             <div>
               <strong>Tap Again to Deselect</strong>
               <small>Tap an active hero, inspected farmer, or outside the board to clear focus cleanly.</small>
+            </div>
+          </div>
+          <div class="guide-item">
+            <div class="g-badge sky"><CraftIcon name="squad" :size="17" /></div>
+            <div>
+              <strong>1–4P Local Couch Co-Op</strong>
+              <small>Pick 2P–4P on the title screen! Each hero wears a P1–P4 badge, and cross-player Team-Jumps &amp; Assists trigger +1 DMG Co-Op Combos.</small>
+            </div>
+          </div>
+          <div class="guide-item">
+            <div class="g-badge gold"><CraftIcon name="trophy" :size="17" /></div>
+            <div>
+              <strong>Endless Harvest &amp; Bonus Rooms</strong>
+              <small>Climb randomized arenas with Boss Showdowns every 4th floor and Carnival, Kitchen &amp; Tinkerer's Shed bonus stops in-between.</small>
+            </div>
+          </div>
+          <div class="guide-item">
+            <div class="g-badge tan"><CraftIcon name="attack" :size="17" /></div>
+            <div>
+              <strong>3-Story Cliffs &amp; Supply Sabotage</strong>
+              <small>Elevation 0–3 grants +1 DMG &amp; +1 Range per story! On Sabotage maps, smash the glowing red-and-gold Supply Crates.</small>
+            </div>
+          </div>
+          <div class="guide-item">
+            <div class="g-badge green"><CraftIcon name="seed" :size="17" /></div>
+            <div>
+              <strong>3-Branch Trees &amp; Hero Greenhouse</strong>
+              <small>Level heroes to Lv.8 across 3 distinct branches (free Respec anytime) and unlock 14 extra heroes in the Greenhouse.</small>
             </div>
           </div>
         </div>

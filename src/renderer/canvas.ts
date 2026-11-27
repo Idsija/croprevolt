@@ -629,11 +629,11 @@ export class PaperCraftRenderer {
       }
     }
 
-    // Check tall Rescue Cage standee banner too
+    // Check tall Rescue Cage and Supply Crate objective banners too
     for (let y = battle.height - 1; y >= 0; y--) {
       for (let x = battle.width - 1; x >= 0; x--) {
         const cov = battle.tiles[y][x].cover;
-        if (!cov?.isObjectiveCage) continue;
+        if (!cov?.isObjectiveCage && !cov?.isObjectiveCrate) continue;
         const pt = gridToScreen(x, y, m);
         const footY = pt.y + (m.viewMode === 'topdown' ? m.tileH * 0.1 : 0);
         const halfW = m.tileW * 0.44;
@@ -1877,7 +1877,7 @@ export class PaperCraftRenderer {
         const cover = tile.cover;
         const center = gridToScreen(x, y, m);
         const targetable =
-          (mode === 'attack' || Boolean(cover.isObjectiveCage)) &&
+          (mode === 'attack' || Boolean(cover.isObjectiveCage) || Boolean(cover.isObjectiveCrate)) &&
           attackKeySet.has(posKey({ x, y }));
         const sprScale = m.viewMode === 'topdown' ? m.scale * 0.84 : m.scale;
         itemsToDraw.push({
@@ -1935,6 +1935,17 @@ export class PaperCraftRenderer {
       const flash = this.hitFlashes.get(unit.id) ?? 0;
       const squash = this.unitSquashes.get(unit.id) ?? 0;
       const sprScale = m.viewMode === 'topdown' ? m.scale * 0.85 : m.scale;
+      const rawOwner =
+        unit.team === 'player' && battle.coopPlayers && battle.coopPlayers.length > 1 && unit.ownerPlayerIdx !== undefined
+          ? battle.coopPlayers[unit.ownerPlayerIdx] ?? null
+          : null;
+      const coopOwner = rawOwner
+        ? {
+            badge: rawOwner.badge,
+            color: rawOwner.color,
+            isActiveTurn: battle.activeCoopPlayerIdx === rawOwner.idx,
+          }
+        : null;
 
       itemsToDraw.push({
         depth: m.viewMode === 'topdown' ? drawGy + 0.25 : drawGx + drawGy + 0.25,
@@ -1955,6 +1966,7 @@ export class PaperCraftRenderer {
               hitFlash: flash,
               jumpHeight,
               squash,
+              coopOwner,
             }
           );
         },

@@ -92,11 +92,19 @@ function bestAttackFrom(state: BattleState, hero: BattleUnit, pos: GridPos): { t
   for (const enemy of state.units) {
     if (enemy.team === 'enemy' && enemy.alive) consider(enemy.pos, enemy.isBoss ? 6 : 0);
   }
-  if (!best) {
-    // Nothing to shoot: break the rescue cage, or a crate an enemy is hiding behind.
+  if (state.objective === 'smash_crates') {
     for (let y = 0; y < state.height; y++) {
       for (let x = 0; x < state.width; x++) {
-        if (state.tiles[y][x].cover?.isObjectiveCage) consider({ x, y }, 4);
+        if (state.tiles[y][x].cover?.isObjectiveCrate) consider({ x, y }, 22);
+      }
+    }
+  }
+  if (!best) {
+    // Nothing to shoot: break the rescue cage, objective supply crate, or a crate an enemy is hiding behind.
+    for (let y = 0; y < state.height; y++) {
+      for (let x = 0; x < state.width; x++) {
+        const cov = state.tiles[y][x].cover;
+        if (cov?.isObjectiveCage || cov?.isObjectiveCrate) consider({ x, y }, 8);
       }
     }
     for (const enemy of state.units) {
@@ -109,10 +117,19 @@ function bestAttackFrom(state: BattleState, hero: BattleUnit, pos: GridPos): { t
   return best;
 }
 
-/** Where the bot heads when it has nothing to shoot: the gate on gate maps, else the nearest enemy. */
+/** Where the bot heads when it has nothing to shoot: the gate on gate maps, crates on sabotage maps, else the nearest enemy. */
 function goalTiles(state: BattleState): GridPos[] {
   if ((state.objective === 'reach_gate' || state.objective === 'escort') && state.gateTiles.length > 0) {
     return state.gateTiles;
+  }
+  if (state.objective === 'smash_crates') {
+    const crates: GridPos[] = [];
+    for (let y = 0; y < state.height; y++) {
+      for (let x = 0; x < state.width; x++) {
+        if (state.tiles[y][x].cover?.isObjectiveCrate) crates.push({ x, y });
+      }
+    }
+    if (crates.length > 0) return crates;
   }
   return state.units.filter((u) => u.team === 'enemy' && u.alive).map((u) => u.pos);
 }

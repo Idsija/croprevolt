@@ -38,6 +38,7 @@ import {
   defaultMetaProgress,
   finishRewardsAndReturnToMap,
   leaveEndlessBonusRoom,
+  migrateSavedRun,
   openEndlessBonusRoom,
   purchaseHeroUnlock,
   respecHeroPerks,
@@ -80,6 +81,28 @@ describe('Mario + Rabbids Goal Pillars: Co-Op, Endless, 3-Branch Trees, Unlocks,
     expect(unlockHeroPermanently(meta, 'duck')).toBe(false);
     setGuidedHintsEnabled(meta, false);
     expect(meta.guidedHintsEnabled).toBe(false);
+
+    // Greenhouse-purchased & rescued heroes immediately join the starting bench on every new run!
+    const unlockedRun = createNewRun(meta);
+    expect(unlockedRun.roster.map((h) => h.blueprintId)).toEqual([
+      'cow',
+      'pea',
+      'lemon',
+      'rooster',
+      'carrot',
+      'owl',
+      'duck',
+    ]);
+    expect(unlockedRun.activeSquadUids).toHaveLength(4);
+    expect(
+      unlockedRun.activeSquadUids.map((uid) => unlockedRun.roster.find((h) => h.uid === uid)?.blueprintId)
+    ).toEqual(['cow', 'pea', 'lemon', 'rooster']);
+
+    // Legacy saved runs with empty activeSquadUids are repaired cleanly by migrateSavedRun!
+    const legacy = createNewRun(defaultMetaProgress());
+    legacy.activeSquadUids = [];
+    const repaired = migrateSavedRun(legacy);
+    expect(repaired.activeSquadUids).toHaveLength(4);
   });
 
   it('provides 171 bespoke perks (19 heroes × 3 branches × 3 tiers) up to MAX_HERO_LEVEL 8 with full unlock + respec', () => {

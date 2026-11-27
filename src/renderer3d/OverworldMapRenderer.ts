@@ -812,8 +812,8 @@ export class OverworldMapRenderer {
     // 2. Bobbing Origami Paper Sailboat / Pond Toy!
     const boatCoords: Record<BoardTheme, [number, number]> = {
       spring: [5.4, 3.1],
-      greenhouse: [-0.2, 0.15],
-      autumn: [-5.9, -0.5],
+      greenhouse: [0.15, 1.45],
+      autumn: [0.3, 1.15],
     };
     const [bx, bz] = boatCoords[theme] ?? boatCoords.spring;
     const boat = new THREE.Group();
