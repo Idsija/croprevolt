@@ -1001,6 +1001,9 @@ export function applyBattleOutcomeToRun(
   run.items = { ...battle.items };
 
   run.battleTurns = (run.battleTurns ?? 0) + Math.max(1, battle.turn);
+  if ((battle.coopComboCount ?? 0) > 0) {
+    run.totalCoopCombos = (run.totalCoopCombos ?? 0) + (battle.coopComboCount ?? 0);
+  }
 
   // Count defeated enemies
   const defeatedEnemies = battle.units.filter((u) => u.team === 'enemy' && !u.alive).length;
@@ -1032,7 +1035,10 @@ export function applyBattleOutcomeToRun(
     }
   }
   for (const bpId of battle.rescuedNewBlueprintIds) {
-    unlockHeroPermanently(meta, bpId);
+    if (unlockHeroPermanently(meta, bpId)) {
+      if (!Array.isArray(run.newlyUnlockedHeroIds)) run.newlyUnlockedHeroIds = [];
+      if (!run.newlyUnlockedHeroIds.includes(bpId)) run.newlyUnlockedHeroIds.push(bpId);
+    }
     if (!run.roster.some((h) => h.blueprintId === bpId)) {
       const bonusHp = meta.unlocks.heirloomSoil ? 2 : 0;
       const newHero = createHeroFromBlueprint(bpId, bonusHp);
@@ -1106,8 +1112,10 @@ export function applyBattleOutcomeToRun(
     const isBoss = battle.objective === 'boss' || clearedFloor % 4 === 0;
     meta.bestEndlessFloor = Math.max(meta.bestEndlessFloor ?? 0, clearedFloor);
     // Bank bonus Heirloom Seeds on every Endless Boss milestone so Endless fuels the Greenhouse!
+    let heirloomSeedsEarned = 0;
     if (isBoss) {
-      meta.heirloomSeeds += 18 + clearedFloor * 2;
+      heirloomSeedsEarned = 18 + clearedFloor * 2;
+      meta.heirloomSeeds += heirloomSeedsEarned;
     }
     saveMetaProgress(meta);
 
@@ -1128,7 +1136,9 @@ export function applyBattleOutcomeToRun(
     reward.xpEarned = xpEarned;
     reward.levelUps = levelUps;
     reward.battleGrade = battleGrade;
-    reward.seedsEarned += battleGrade.bonusSeeds + clearedFloor * 2;
+    if (heirloomSeedsEarned > 0) reward.heirloomSeedsEarned = heirloomSeedsEarned;
+    const seedBonusFromMod = run.endless.pendingMapTemplate?.id.includes('seed_convoy') ? 10 : 0;
+    reward.seedsEarned += battleGrade.bonusSeeds + clearedFloor * 2 + seedBonusFromMod;
     run.seeds += reward.seedsEarned;
     if (reward.itemGrant) {
       run.items[reward.itemGrant.itemId] =
@@ -1208,6 +1218,7 @@ export function applyBattleOutcomeToRun(
  */
 export function openEndlessBonusRoom(run: RunState, option: EndlessFloorOption): boolean {
   if (!run.endless || option.kind !== 'bonus' || !option.bonusKind) return false;
+  run.endless.bonusRoomsVisited = (run.endless.bonusRoomsVisited ?? 0) + 1;
   run.endless.activeBonus = {
     kind: option.bonusKind,
     title: option.title,
@@ -1230,6 +1241,7 @@ export function resolveEndlessBonusChoice(
   if (bonus.kind === 'carnival') {
     if (choice === 'wheel') {
       const roll = Math.floor(rng() * 4);
+      bonus.wheelPrizeIdx = roll;
       if (roll === 0) {
         run.seeds += 22;
         message = '🎡 JACKPOT! +22 Run Seeds showered from the Carnival Wheel!';
@@ -1268,6 +1280,10 @@ export function resolveEndlessBonusChoice(
       if (pool.length > 0) {
         const picked = pool[Math.floor(rng() * pool.length)];
         const newlyUnlocked = unlockHeroPermanently(meta, picked);
+        if (newlyUnlocked) {
+          if (!Array.isArray(run.newlyUnlockedHeroIds)) run.newlyUnlockedHeroIds = [];
+          if (!run.newlyUnlockedHeroIds.includes(picked)) run.newlyUnlockedHeroIds.push(picked);
+        }
         const hero = createHeroFromBlueprint(picked, meta.unlocks.heirloomSoil ? 2 : 0);
         run.roster.push(hero);
         if (run.activeSquadUids.length < 4) run.activeSquadUids.push(hero.uid);
@@ -1433,7 +1449,10 @@ export function claimRecruitReward(
   }
   assignCoopHeroOwners(run);
   if (meta) {
-    unlockHeroPermanently(meta, blueprintId);
+    if (unlockHeroPermanently(meta, blueprintId)) {
+      if (!Array.isArray(run.newlyUnlockedHeroIds)) run.newlyUnlockedHeroIds = [];
+      if (!run.newlyUnlockedHeroIds.includes(blueprintId)) run.newlyUnlockedHeroIds.push(blueprintId);
+    }
   }
   if (run.pendingReward) {
     run.pendingReward.claimedRecruit = true;

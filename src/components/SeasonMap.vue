@@ -314,11 +314,47 @@ function onMapKeyDown(e: KeyboardEvent): void {
   if (showBuildModal.value || showAlmanac.value || run.value.status === 'shrine' || isTraveling.value) {
     return;
   }
+  if (e.key === 'Escape') {
+    showBellHelp.value = false;
+    showRelicsPopover.value = false;
+    showOwMenu.value = false;
+    return;
+  }
   if (e.key === '1' || e.key === '2' || e.key === '3') {
     const idx = Number(e.key) - 1;
     const card = travelHand.value[idx];
     if (card) selectTravelCard(card.id);
-  } else if (e.key === 'Enter' && isSelectedAvailable.value) {
+    return;
+  }
+  if (e.key === 'Tab' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    if (availableNodes.value.length > 0) {
+      e.preventDefault();
+      const dir = e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey) ? -1 : 1;
+      const curIdx = availableNodes.value.findIndex((n) => n.id === selectedNodeId.value);
+      const nextIdx =
+        curIdx < 0
+          ? 0
+          : (curIdx + dir + availableNodes.value.length) % availableNodes.value.length;
+      const target = availableNodes.value[nextIdx];
+      if (target) selectStop(target.id, false);
+    }
+    return;
+  }
+  const lower = e.key.toLowerCase();
+  if (lower === 's') {
+    openHeroBuilds();
+    return;
+  }
+  if (lower === 'a') {
+    showAlmanac.value = true;
+    return;
+  }
+  if (lower === 'r') {
+    recenterMap();
+    return;
+  }
+  if ((e.key === 'Enter' || e.key === ' ') && isSelectedAvailable.value) {
+    e.preventDefault();
     enterSelectedStop();
   }
 }

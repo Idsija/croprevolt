@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { ENEMY_BLUEPRINTS } from '../data/enemies';
 import { GRAFT_REGISTRY } from '../data/grafts';
-import { PRODUCE_BLUEPRINTS } from '../data/produce';
+import { HERO_UNLOCK_CATALOG, PRODUCE_BLUEPRINTS, STARTER_BLUEPRINT_IDS } from '../data/produce';
 import { RELIC_REGISTRY } from '../data/relics';
 import { getHeroSkillTree } from '../data/skills';
 import { ALT_WEAPONS, getSpeciesWeapons } from '../data/weapons';
@@ -26,6 +26,12 @@ onMounted(() => window.addEventListener('keydown', onAlmanacKeyDown));
 onBeforeUnmount(() => window.removeEventListener('keydown', onAlmanacKeyDown));
 
 type AlmanacTab = 'heroes' | 'enemies' | 'weapons' | 'relics' | 'records';
+type HeroFilter = 'all' | 'starters' | 'barnyard' | 'root' | 'vine' | 'fruit';
+type EnemyFilter = 'all' | 'contraptions' | 'farmhands' | 'bosses';
+
+const CONTRAPTION_IDS = new Set(['barrow', 'blower', 'sapper', 'mower', 'kettlebot', 'tractor', 'harvester']);
+const UNLOCK_COST_MAP = Object.fromEntries(HERO_UNLOCK_CATALOG.map((e) => [e.id, e.cost]));
+const STARTER_SET = new Set<string>(STARTER_BLUEPRINT_IDS);
 
 const history = loadHistory();
 const dailyStreak = loadDailyState().streak;
@@ -47,10 +53,58 @@ const records = [
 ];
 
 const activeTab = ref<AlmanacTab>('heroes');
+const heroFilter = ref<HeroFilter>('all');
+const enemyFilter = ref<EnemyFilter>('all');
 const heroesList = Object.values(PRODUCE_BLUEPRINTS);
 const enemiesList = Object.values(ENEMY_BLUEPRINTS);
 const relicsList = Object.values(RELIC_REGISTRY);
 const graftsList = Object.values(GRAFT_REGISTRY);
+
+const unlockedHeroSet = computed(
+  () => new Set<string>([...STARTER_BLUEPRINT_IDS, ...(gameStore.meta.unlockedHeroIds ?? [])])
+);
+
+const filteredHeroes = computed(() => {
+  switch (heroFilter.value) {
+    case 'starters':
+      return heroesList.filter((h) => STARTER_SET.has(h.id));
+    case 'barnyard':
+      return heroesList.filter((h) => h.isAnimal);
+    case 'root':
+    case 'vine':
+    case 'fruit':
+      return heroesList.filter((h) => h.family === heroFilter.value);
+    default:
+      return heroesList;
+  }
+});
+
+const filteredEnemies = computed(() => {
+  switch (enemyFilter.value) {
+    case 'contraptions':
+      return enemiesList.filter((e) => !e.isBoss && CONTRAPTION_IDS.has(e.id));
+    case 'farmhands':
+      return enemiesList.filter((e) => !e.isBoss && !CONTRAPTION_IDS.has(e.id));
+    case 'bosses':
+      return enemiesList.filter((e) => e.isBoss);
+    default:
+      return enemiesList;
+  }
+});
+
+function setHeroFilter(f: HeroFilter): void {
+  heroFilter.value = f;
+  if (!filteredHeroes.value.some((h) => h.id === selectedHeroId.value) && filteredHeroes.value[0]) {
+    selectHero(filteredHeroes.value[0].id);
+  }
+}
+
+function setEnemyFilter(f: EnemyFilter): void {
+  enemyFilter.value = f;
+  if (!filteredEnemies.value.some((e) => e.id === selectedEnemyId.value) && filteredEnemies.value[0]) {
+    selectEnemy(filteredEnemies.value[0].id);
+  }
+}
 
 const selectedHeroId = ref<string>(heroesList[0]?.id ?? 'potato');
 const selectedEnemyId = ref<string>(enemiesList[0]?.id ?? 'digger');
@@ -184,11 +238,48 @@ const cardTransformStyle = computed(() => ({
       </nav>
 
       <!-- TAB 1 & 2: HEROES / ENEMIES WITH 3D TILTABLE PAPER CARD -->
+      <div v-if="activeTab === 'heroes' || activeTab === 'enemies'" class="almanac-filter-row">
+        <template v-if="activeTab === 'heroes'">
+          <button
+            v-for="f in [
+              { id: 'all', label: `All (${heroesList.length})` },
+              { id: 'starters', label: '★ Starters' },
+              { id: 'barnyard', label: '🐾 Barnyard' },
+              { id: 'root', label: '🥕 Roots' },
+              { id: 'vine', label: '🌿 Vines' },
+              { id: 'fruit', label: '🍋 Fruits' },
+            ] as const"
+            :key="f.id"
+            class="alm-filter-pill"
+            :class="{ active: heroFilter === f.id }"
+            @click="setHeroFilter(f.id)"
+          >
+            {{ f.label }}
+          </button>
+        </template>
+        <template v-else>
+          <button
+            v-for="f in [
+              { id: 'all', label: `All (${enemiesList.length})` },
+              { id: 'contraptions', label: '⚙️ Contraptions' },
+              { id: 'farmhands', label: '🧑‍🌾 Farmhands' },
+              { id: 'bosses', label: '👑 Bosses' },
+            ] as const"
+            :key="f.id"
+            class="alm-filter-pill"
+            :class="{ active: enemyFilter === f.id }"
+            @click="setEnemyFilter(f.id)"
+          >
+            {{ f.label }}
+          </button>
+        </template>
+      </div>
+
       <div v-if="activeTab === 'heroes' || activeTab === 'enemies'" class="almanac-split">
         <aside class="entry-rail scroll-soft">
           <template v-if="activeTab === 'heroes'">
             <button
-              v-for="h in heroesList"
+              v-for="h in filteredHeroes"
               :key="h.id"
               class="entry-btn"
               :class="{ selected: selectedHero.id === h.id }"
@@ -196,14 +287,17 @@ const cardTransformStyle = computed(() => ({
             >
               <img :src="`/sprites/${h.species}.png`" :alt="h.name" />
               <div class="eb-meta">
-                <strong>{{ h.name }}</strong>
+                <strong>
+                  {{ h.name }}
+                  <span v-if="!unlockedHeroSet.has(h.id)" class="eb-lock" title="Unlock in Hero Greenhouse or Barn Rescue">🔒</span>
+                </strong>
                 <small>{{ h.title }}</small>
               </div>
             </button>
           </template>
           <template v-else>
             <button
-              v-for="e in enemiesList"
+              v-for="e in filteredEnemies"
               :key="e.id"
               class="entry-btn"
               :class="{ selected: selectedEnemy.id === e.id, boss: e.isBoss }"
@@ -260,6 +354,17 @@ const cardTransformStyle = computed(() => ({
           </div>
 
           <div v-if="activeTab === 'heroes'" class="detail-info">
+            <div class="alm-unlock-row">
+              <span v-if="STARTER_SET.has(selectedHero.id)" class="paper-pill alm-status starter">
+                ★ Iconic Starter Hero
+              </span>
+              <span v-else-if="unlockedHeroSet.has(selectedHero.id)" class="paper-pill alm-status owned">
+                ✓ Unlocked in Greenhouse (Ready on Turn 1 Bench)
+              </span>
+              <span v-else class="paper-pill alm-status locked">
+                🔒 Unlock in Greenhouse ({{ UNLOCK_COST_MAP[selectedHero.id] ?? 25 }} 🌱) or Barn Rescue
+              </span>
+            </div>
             <p class="blurb">{{ selectedHero.blurb }}</p>
             <div class="stat-pills">
               <span class="paper-pill">❤️ {{ selectedHero.maxHp }} HP</span>
@@ -868,5 +973,62 @@ const cardTransformStyle = computed(() => ({
 
 .run-row small {
   color: var(--ink-soft);
+}
+.almanac-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 4px;
+}
+.alm-filter-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1.5px solid #9d794c;
+  background: #fbf3df;
+  color: #523519;
+  font-size: 0.74rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.12s ease;
+}
+.alm-filter-pill:hover {
+  transform: translateY(-1px);
+  background: #fff8e8;
+}
+.alm-filter-pill.active {
+  background: linear-gradient(180deg, #ffe791, #f0b635);
+  border-color: #7d4706;
+  color: #3e2000;
+  box-shadow: 0 2px 0 #7d4706;
+}
+.eb-lock {
+  font-size: 0.72rem;
+  margin-left: 3px;
+  opacity: 0.8;
+}
+.alm-unlock-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.alm-status {
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+.alm-status.starter {
+  background: #fff2be;
+  border-color: #b57d14;
+  color: #5b3800;
+}
+.alm-status.owned {
+  background: #dff6d4;
+  border-color: #3f842c;
+  color: #1f4f15;
+}
+.alm-status.locked {
+  background: #f5e6cf;
+  border-color: #9e7346;
+  color: #5f3a18;
 }
 </style>

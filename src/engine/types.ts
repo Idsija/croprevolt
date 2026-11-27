@@ -470,6 +470,14 @@ export interface CoopPlayer {
 
 export type EndlessBonusKind = 'carnival' | 'tinkerer' | 'hotspring';
 
+export type EndlessArenaModifier =
+  | 'sunbeam_surge'
+  | 'bouncy_meadow'
+  | 'rolling_patch'
+  | 'buzzing_yard'
+  | 'seed_convoy'
+  | 'standard';
+
 export interface EndlessFloorOption {
   id: string;
   kind: 'battle' | 'boss' | 'bonus';
@@ -481,17 +489,23 @@ export interface EndlessFloorOption {
   objective?: ObjectiveType;
   gridSize?: string;
   modifierLabel?: string;
+  arenaModifier?: EndlessArenaModifier;
+  arenaModifierLabel?: string;
+  seedBounty?: number;
+  enemyPreviewKinds?: string[];
   seed: number;
 }
 
 export interface EndlessState {
   floor: number;
   nextOptions: EndlessFloorOption[];
+  bonusRoomsVisited?: number;
   activeBonus?: {
     kind: EndlessBonusKind;
     title: string;
     claimed: boolean;
     wheelResult?: string;
+    wheelPrizeIdx?: number;
   } | null;
   pendingMapTemplate?: MapTemplate | null;
 }
@@ -618,6 +632,7 @@ export interface HeroLevelUpSummary {
 
 export interface RewardBundle {
   seedsEarned: number;
+  heirloomSeedsEarned?: number;
   xpEarned?: number;
   levelUps?: HeroLevelUpSummary[];
   graftChoices: string[];
@@ -658,6 +673,10 @@ export interface RunState {
   coopPlayers?: CoopPlayer[];
   heroOwnerByUid?: Record<string, number>;
   activeBoardPickerIdx?: number;
+  /** Total cross-player Co-Op Team-Jump & Partner Assist Combos triggered this run. */
+  totalCoopCombos?: number;
+  /** Blueprint IDs permanently unlocked in the Greenhouse during this run! */
+  newlyUnlockedHeroIds?: string[];
   /** Endless Harvest procedural run progression state. */
   endless?: EndlessState;
   /** Seed Shed perks bought before this run started, frozen so buying mid-run changes nothing. */

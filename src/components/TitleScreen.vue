@@ -139,6 +139,13 @@ function onTitleKeyDown(e: KeyboardEvent): void {
 
 onMounted(() => {
   window.addEventListener('keydown', onTitleKeyDown);
+  if (gameStore.pendingTitleModal) {
+    activeModal.value = gameStore.pendingTitleModal;
+    if (gameStore.pendingTitleModal === 'shed') {
+      shedTab.value = 'greenhouse';
+    }
+    gameStore.pendingTitleModal = null;
+  }
   // Send any scores that could not be uploaded when their run ended.
   if (online) void flushQueuedScores(online);
   if (!backdropCanvasRef.value) return;

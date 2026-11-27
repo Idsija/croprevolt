@@ -167,7 +167,42 @@ export function rollEndlessFloorOptions(
           ? 'Lord Bramblecoat'
           : 'Captain Scarecrow';
 
+const ARENA_MODIFIER_META: Record<
+  Exclude<import('./types').EndlessArenaModifier, 'standard'>,
+  { label: string; short: string }
+> = {
+  sunbeam_surge: { label: '☀️ Sunbeam Surge (+2 Sunbeams)', short: '☀️ Sunbeam Surge' },
+  bouncy_meadow: { label: '🍄 Bouncy Meadow (+2 Bounce Pads)', short: '🍄 Bouncy Meadow' },
+  rolling_patch: { label: '🎃 Rolling Patch (+2 Pumpkins)', short: '🎃 Rolling Patch' },
+  buzzing_yard: { label: '🐝 Buzzing Yard (+2 Beehives)', short: '🐝 Buzzing Yard' },
+  seed_convoy: { label: '🌱 Seed Convoy (+10 Bonus Seeds)', short: '🌱 +10 Seed Convoy' },
+};
+
+const ARENA_MODIFIER_KEYS = Object.keys(ARENA_MODIFIER_META) as Array<
+  Exclude<import('./types').EndlessArenaModifier, 'standard'>
+>;
+
+const PREVIEW_CONTRAPTIONS = ['barrow', 'blower', 'sapper', 'mower', 'kettlebot', 'digger', 'trimmer', 'sprayer'] as const;
+
     const maxElev = archetype === 'terrace_climb' || archetype === 'central_keep' ? 3 : 2;
+    const modKey =
+      !forceBoss || spicy
+        ? ARENA_MODIFIER_KEYS[(floor + slot + Math.floor(optRng() * ARENA_MODIFIER_KEYS.length)) % ARENA_MODIFIER_KEYS.length]
+        : 'standard';
+    const modMeta = modKey !== 'standard' ? ARENA_MODIFIER_META[modKey] : null;
+    const seedBounty =
+      (forceBoss ? 22 + floor * 3 : 10 + floor * 2) + (modKey === 'seed_convoy' ? 10 : 0);
+    const previewSet = new Set<string>();
+    if (forceBoss) {
+      previewSet.add(bossId);
+      if (floor >= 8) {
+        previewSet.add(BOSS_ROTATION[Math.floor(floor / 4) % BOSS_ROTATION.length]);
+      }
+    }
+    while (previewSet.size < 3) {
+      previewSet.add(pick(optRng, PREVIEW_CONTRAPTIONS));
+    }
+
     return {
       id: `endless_f${floor}_${slot}_${optSeed.toString(36).slice(0, 4)}`,
       kind: forceBoss ? 'boss' : 'battle',
@@ -190,6 +225,10 @@ export function rollEndlessFloorOptions(
           ? 'Double Seeds + Relic'
           : 'Boss Bounty + Relic'
         : `${objInfo.name} · Elev ${maxElev}`,
+      arenaModifier: modKey,
+      arenaModifierLabel: modMeta?.short,
+      seedBounty,
+      enemyPreviewKinds: Array.from(previewSet),
       seed: optSeed,
     };
   };
@@ -581,6 +620,39 @@ export function generateEndlessFloorMap(
     placedCover += 1;
   }
 
+  // 5B. Apply Endless Arena Modifier spice!
+  const mod = option.arenaModifier ?? 'standard';
+  if (mod === 'sunbeam_surge' || mod === 'bouncy_meadow') {
+    const bonusTerrain: TerrainType = mod === 'sunbeam_surge' ? 'sunbeam' : 'bounce_pad';
+    let placed = 0;
+    for (let tries = 0; tries < 50 && placed < 2; tries++) {
+      const mx = 1 + Math.floor(rng() * Math.max(1, width - 2));
+      const my = 1 + Math.floor(rng() * Math.max(1, height - 3));
+      if (!isFree(mx, my)) continue;
+      if (grid[my][mx].terrain === 'ramp' || grid[my][mx].terrain === 'bridge' || grid[my][mx].terrain === 'burrow') continue;
+      setTile(mx, my, { terrain: bonusTerrain });
+      placed += 1;
+    }
+  } else if (mod === 'rolling_patch' || mod === 'buzzing_yard') {
+    const bonusCover: Exclude<CoverKind, 'none'> = mod === 'rolling_patch' ? 'pumpkin' : 'beehive';
+    let placed = 0;
+    for (let tries = 0; tries < 50 && placed < 2; tries++) {
+      const mx = 1 + Math.floor(rng() * Math.max(1, width - 2));
+      const my = 1 + Math.floor(rng() * Math.max(1, height - 3));
+      if (!isFree(mx, my)) continue;
+      const adjBridge = [
+        grid[my]?.[mx - 1],
+        grid[my]?.[mx + 1],
+        grid[my - 1]?.[mx],
+        grid[my + 1]?.[mx],
+      ].some((t) => t?.terrain === 'bridge' || t?.terrain === 'ramp');
+      if (adjBridge) continue;
+      setTile(mx, my, { cover: bonusCover });
+      occupied.add(`${mx},${my}`);
+      placed += 1;
+    }
+  }
+
   // Flatten non-default tiles into MapTemplate['tiles']
   const tiles: TileSpec[] = [];
   for (let y = 0; y < height; y++) {
@@ -607,7 +679,7 @@ export function generateEndlessFloorMap(
         : objMeta.label;
 
   return {
-    id: `endless_f${floor}_${option.seed.toString(36)}`,
+    id: `endless_f${floor}_${option.seed.toString(36)}${mod !== 'standard' ? `_${mod}` : ''}`,
     name: `Floor ${floor} · ${option.title}`,
     subtitle: option.subtitle,
     theme,

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
+import { HERO_UNLOCK_CATALOG, PRODUCE_BLUEPRINTS, STARTER_BLUEPRINT_IDS } from '../data/produce';
 import {
   flushQueuedScores,
   loadPlayerName,
@@ -11,7 +12,7 @@ import {
 import { activeStreak, dailyShareText, isPracticeRun, loadDailyState } from '../engine/daily';
 import { ACHIEVEMENTS } from '../engine/history';
 import { computeRunScore, loadScores, rankOf, scoreEntryForRun } from '../engine/score';
-import { gameStore, playAgain, returnToTitle } from '../stores/gameStore';
+import { gameStore, openTitleGreenhouse, playAgain, returnToTitle } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
 
 const run = computed(() => gameStore.run!);
@@ -21,6 +22,19 @@ const score = computed(() => computeRunScore(run.value));
 /** 1-based place on this device's board (the run was recorded when it ended), 0 if off the board. */
 const rank = computed(() => rankOf(loadScores(), scoreEntryForRun(run.value)));
 const fmt = (n: number) => n.toLocaleString('en-US');
+
+const newlyUnlockedHeroes = computed(() =>
+  (run.value.newlyUnlockedHeroIds ?? [])
+    .map((id) => PRODUCE_BLUEPRINTS[id])
+    .filter((bp): bp is NonNullable<typeof bp> => Boolean(bp))
+);
+
+const canAffordNewGreenhouseHero = computed(() => {
+  const owned = new Set<string>([...STARTER_BLUEPRINT_IDS, ...(gameStore.meta.unlockedHeroIds ?? [])]);
+  return HERO_UNLOCK_CATALOG.some(
+    (entry) => !owned.has(entry.id) && gameStore.meta.heirloomSeeds >= entry.cost
+  );
+});
 
 /** Upload to the shared board when one is configured; unsent scores stay queued for later. */
 const earnedAchievements = computed(() =>
@@ -98,8 +112,14 @@ onMounted(async () => {
         <span v-if="run.mode === 'endless'" class="paper-pill seed-pill">
           ♾️ Best Endless: Fl.{{ gameStore.meta.bestEndlessFloor ?? 0 }}
         </span>
+        <span v-if="(run.endless?.bonusRoomsVisited ?? 0) > 0" class="paper-pill">
+          🎉 {{ run.endless?.bonusRoomsVisited }} Bonus Room{{ run.endless?.bonusRoomsVisited === 1 ? '' : 's' }}
+        </span>
         <span v-if="run.coopPlayers && run.coopPlayers.length > 1" class="paper-pill">
           🎮 {{ run.coopPlayers.length }}P Local Co-Op
+        </span>
+        <span v-if="(run.totalCoopCombos ?? 0) > 0" class="paper-pill seed-pill">
+          🤝 {{ run.totalCoopCombos }} Co-Op Combo{{ run.totalCoopCombos === 1 ? '' : 's' }}
         </span>
         <span class="paper-pill">
           <CraftIcon name="trophy" :size="15" /> {{ run.battlesWon }} Battles Won
@@ -110,6 +130,16 @@ onMounted(async () => {
         <span class="paper-pill seed-pill">
           <CraftIcon name="seed" :size="15" /> {{ gameStore.meta.heirloomSeeds }} Seeds
         </span>
+      </div>
+
+      <div v-if="newlyUnlockedHeroes.length > 0" class="seed-packet unlocked-banner">
+        <strong>🌱 Permanently Unlocked in Hero Greenhouse!</strong>
+        <div class="unlocked-row">
+          <span v-for="bp in newlyUnlockedHeroes" :key="bp.id" class="paper-pill unlocked-chip">
+            <img :src="`/sprites/${bp.species}.png`" :alt="bp.name" />
+            <span>{{ bp.name }}</span>
+          </span>
+        </div>
       </div>
 
       <div class="seed-packet score-card" aria-label="Run score">
@@ -180,8 +210,15 @@ onMounted(async () => {
         <button class="paper-btn primary diecut act-btn" @click="playAgain()">
           <CraftIcon name="play" :size="18" /> {{ isDaily ? 'Practice Daily Again' : 'Play Another Run' }}
         </button>
-        <button class="paper-btn gold diecut act-btn" @click="returnToTitle">
-          <CraftIcon name="shed" :size="18" /> Seed Shed
+        <button
+          v-if="canAffordNewGreenhouseHero"
+          class="paper-btn gold diecut act-btn"
+          @click="openTitleGreenhouse()"
+        >
+          🌱 Unlock New Hero!
+        </button>
+        <button v-else class="paper-btn gold diecut act-btn" @click="returnToTitle">
+          <CraftIcon name="shed" :size="18" /> Greenhouse &amp; Shed
         </button>
       </div>
     </div>
@@ -424,5 +461,35 @@ onMounted(async () => {
   .actions {
     grid-template-columns: 1fr;
   }
+}
+.unlocked-banner {
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #e7f8dc, #cfeec0);
+  border: 2px solid #488c32;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #1f4d14;
+}
+.unlocked-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.unlocked-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 5px;
+  background: #fffdf6;
+}
+.unlocked-chip img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
 }
 </style>

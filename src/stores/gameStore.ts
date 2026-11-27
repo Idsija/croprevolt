@@ -188,7 +188,10 @@ export interface GameStoreState {
     name: string;
     color: string;
     heroNames: string[];
+    heroes: Array<{ name: string; species: string }>;
   } | null;
+  /** Optional modal to open immediately upon returning to the Title Screen (e.g. 'shed'). */
+  pendingTitleModal?: 'shed' | 'guide' | null;
 }
 
 const initialMeta = loadMetaProgress();
@@ -483,17 +486,19 @@ function triggerCoopHandoffBanner(b: BattleState, playerIdx: number): void {
   if (!b.coopPlayers || b.coopPlayers.length <= 1 || b.coopFreeOrder) return;
   const player = b.coopPlayers[playerIdx];
   if (!player) return;
-  const heroNames = b.units
-    .filter((u) => u.team === 'player' && u.alive && !u.isEscortCart && u.ownerPlayerIdx === playerIdx)
-    .map((u) => u.name);
-  if (heroNames.length === 0) return;
+  const ownedUnits = b.units.filter(
+    (u) => u.team === 'player' && u.alive && !u.isEscortCart && u.ownerPlayerIdx === playerIdx
+  );
+  if (ownedUnits.length === 0) return;
   b.activeCoopPlayerIdx = playerIdx;
+  sfx.handoff();
   gameStore.coopHandoffBanner = {
     playerIdx,
     badge: player.badge,
     name: player.name,
     color: player.color,
-    heroNames,
+    heroNames: ownedUnits.map((u) => u.name),
+    heroes: ownedUnits.map((u) => ({ name: u.name, species: u.visualKind })),
   };
 }
 
@@ -663,6 +668,11 @@ export function enterEndlessOption(optionId: string): void {
   setTimeout(() => flushBattleEvents(), 60);
 }
 
+export function openTitleGreenhouse(): void {
+  gameStore.pendingTitleModal = 'shed';
+  returnToTitle();
+}
+
 export function claimEndlessBonus(
   choice: 'wheel' | 'recruit' | 'weapon' | 'sp' | 'satchel' | 'soak' | 'vigor' | 'swift'
 ): string | null {
@@ -670,7 +680,8 @@ export function claimEndlessBonus(
   if (!run) return null;
   const result = resolveEndlessBonusChoice(run, gameStore.meta, choice);
   if (result) {
-    sfx.rescue();
+    if (choice === 'wheel') sfx.jackpot();
+    else sfx.rescue();
     saveRun(run);
     saveMetaProgress(gameStore.meta);
   }
@@ -1251,6 +1262,7 @@ export function executePreviewOption(kind: PreviewActionOption['kind'], explicit
   if (!selected || !selected.alive) return false;
 
   clearAutoEndTimer();
+  const prevCombos = b.coopComboCount ?? 0;
   let ok = false;
 
   if (kind === 'move') {
@@ -1285,6 +1297,14 @@ export function executePreviewOption(kind: PreviewActionOption['kind'], explicit
   }
 
   if (ok) {
+    if ((b.coopComboCount ?? 0) > prevCombos) {
+      sfx.coopCombo();
+      showBoardHint(
+        kind === 'jump'
+          ? '🤝 CO-OP LAUNCH! +1 Bonus Attack DMG on your next shot!'
+          : '🤝 CO-OP ASSIST! Cross-player teamwork dealt +1 Bonus DMG!'
+      );
+    }
     flushBattleEvents();
     autoAdvanceAfterAction(selected.id, pos);
   }

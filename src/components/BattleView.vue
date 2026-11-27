@@ -317,9 +317,11 @@ const moveDestinationSummary = computed(() => {
                   ? '🪵 Bridge Crossing (Collapsible!)'
                   : destTerrain === 'ramp'
                     ? '↗ Ramp (No climb penalty)'
-                    : destElev > 0
-                      ? `▲ High Ground Lv.${destElev} (+2 DMG!)`
-                      : null;
+                    : destElev >= 2
+                      ? `▲ Summit Lv.${destElev} (+3 DMG & Uphill Shield!)`
+                      : destElev > 0
+                        ? `▲ High Ground Lv.${destElev} (+2 DMG!)`
+                        : null;
 
   return {
     isJump,
@@ -840,6 +842,16 @@ const activeCoopPlayer = computed(() => {
   return coopPlayers.value[idx] ?? coopPlayers.value[0];
 });
 
+const battleMaxElevation = computed(() => {
+  let maxE = 0;
+  for (const row of battle.value.tiles) {
+    for (const tile of row) {
+      if ((tile.elevation ?? 0) > maxE) maxE = tile.elevation ?? 0;
+    }
+  }
+  return maxE;
+});
+
 function unitCoopBadge(u: { ownerPlayerIdx?: number }) {
   if (!coopPlayers.value || typeof u.ownerPlayerIdx !== 'number') return null;
   return coopPlayers.value[u.ownerPlayerIdx] ?? null;
@@ -966,12 +978,17 @@ const selectedStanceBadges = computed<Array<{ id: string; label: string; tone: s
   }
   const t = tileAt(raw, u.pos);
   if (t && (t.elevation ?? 0) > 0) {
-    const hgDmg = 2 + (hasRelic(raw.relicIds, 'copper_weathervane') ? 1 : 0);
+    const elev = t.elevation ?? 1;
+    const baseHg = elev >= 2 ? 3 : 2;
+    const hgDmg = baseHg + (hasRelic(raw.relicIds, 'copper_weathervane') ? 1 : 0);
     badges.push({
       id: 'high_ground',
-      label: `▲ High Ground +${hgDmg}`,
+      label: elev >= 2 ? `▲ Summit Lv.${elev} +${hgDmg}` : `▲ High Ground +${hgDmg}`,
       tone: 'high-ground',
-      desc: `Elevated perch (Height ${t.elevation}): +${hgDmg} Attack damage & ignores enemy Half Cover below you!`,
+      desc:
+        elev >= 2
+          ? `Summit cliff (Height ${elev}): +${hgDmg} DMG downward, ignores enemy Half Cover below, AND foes 2+ stories lower suffer 50% uphill cover!`
+          : `Elevated perch (Height ${elev}): +${hgDmg} Attack damage & ignores enemy Half Cover below you!`,
     });
   }
   if (t?.terrain === 'sunbeam') {
@@ -1669,16 +1686,23 @@ onBeforeUnmount(() => {
         </div>
         <span class="coop-handoff-kicker">🎮 LOCAL CO-OP HANDOFF</span>
         <h2>PASS TO {{ gameStore.coopHandoffBanner.name.toUpperCase() }}!</h2>
-        <p class="coop-handoff-heroes">
-          Commanding:
-          <strong>{{ gameStore.coopHandoffBanner.heroNames.join(' · ') || 'Squad' }}</strong>
-        </p>
+        <div class="coop-handoff-portraits">
+          <span
+            v-for="h in gameStore.coopHandoffBanner.heroes"
+            :key="h.name"
+            class="coop-portrait-chip"
+            :style="{ borderColor: gameStore.coopHandoffBanner.color }"
+          >
+            <img :src="`/sprites/${h.species}.png`" :alt="h.name" />
+            <strong>{{ h.name.split(' ')[0] }}</strong>
+          </span>
+        </div>
         <p class="coop-handoff-tip">
           💡 Team-Jump or Partner-Assist a teammate's hero for a <strong>+1 Co-Op Combo</strong>!
         </p>
         <div class="coop-handoff-actions">
           <button class="paper-btn primary coop-handoff-go" @click="dismissCoopHandoff">
-            Ready! Take Turn →
+            Ready! Take Turn → <kbd class="handoff-kbd">Enter</kbd>
           </button>
           <button
             class="paper-btn coop-handoff-free"
@@ -2107,6 +2131,9 @@ onBeforeUnmount(() => {
             <div class="prep-top-bar">
               <div class="prep-top-left">
                 <strong>⚔️ DEPLOY SQUAD</strong>
+                <span class="prep-arena-pill">
+                  {{ battle.width }}×{{ battle.height }} · Elev 0–{{ battleMaxElevation }}
+                </span>
                 <button
                   v-if="squadBonds.length > 0"
                   class="prep-bonds-toggle"
@@ -5568,10 +5595,54 @@ onBeforeUnmount(() => {
   font-size: 1.5rem;
   color: var(--ink);
 }
-.coop-handoff-heroes {
-  margin: 0;
-  font-size: 0.9rem;
-  color: #543d25;
+.coop-handoff-portraits {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 2px 0 4px;
+}
+.coop-portrait-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 5px;
+  border-radius: 999px;
+  background: #fffdf4;
+  border: 2.5px solid #4e351e;
+  box-shadow: 0 2px 0 rgba(58, 35, 16, 0.16);
+  font-size: 0.84rem;
+  color: #3c2614;
+}
+.coop-portrait-chip img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  border-radius: 50%;
+  background: #f5ebd2;
+}
+.handoff-kbd {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  vertical-align: middle;
+}
+.prep-arena-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f3e4c4;
+  border: 1.5px solid #967247;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #54371c;
+  white-space: nowrap;
 }
 .coop-handoff-tip {
   margin: 0;

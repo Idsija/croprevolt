@@ -169,6 +169,17 @@ const totalUnspentSp = computed(() =>
   run.value.roster.reduce((sum, h) => sum + (h.harvested ? 0 : h.skillPoints), 0)
 );
 
+function jumpToNextSpHero(): void {
+  const withSp = sortedRoster.value.filter((h) => !h.harvested && h.skillPoints > 0);
+  if (withSp.length === 0) return;
+  const curIdx = withSp.findIndex((h) => h.uid === selectedUid.value);
+  const next = withSp[(curIdx + 1) % withSp.length];
+  if (next) {
+    selectedUid.value = next.uid;
+    activeTab.value = 'trees';
+  }
+}
+
 function handleUnlock(perkId: string): void {
   if (!selectedHero.value || selectedHero.value.harvested) return;
   unlockPerk(selectedHero.value.uid, perkId);
@@ -209,9 +220,14 @@ function unlockedCountInPath(path: SkillPathDef): number {
           <h2>Squad, Skill Trees &amp; Armory</h2>
           <small>
             On Field: {{ run.activeSquadUids.length }}/4 ·
-            <strong v-if="totalUnspentSp > 0" class="sp-highlight">
-              ★ {{ totalUnspentSp }} SP ready
-            </strong>
+            <button
+              v-if="totalUnspentSp > 0"
+              class="sp-jump-pill"
+              title="Jump straight to the next hero with unspent Skill Points"
+              @click="jumpToNextSpHero"
+            >
+              ★ {{ totalUnspentSp }} SP ready · Next →
+            </button>
             <span v-else>Free respec anytime</span>
           </small>
         </div>
@@ -274,6 +290,13 @@ function unlockedCountInPath(path: SkillPathDef): number {
           >
             <div class="rb-port">
               <img :src="`/sprites/${hero.species}.png`" :alt="hero.name" />
+              <span
+                v-if="ownerFor(hero.uid)"
+                class="rb-coop"
+                :style="{ background: ownerFor(hero.uid)!.color }"
+              >
+                {{ ownerFor(hero.uid)!.badge }}
+              </span>
               <span class="rb-lvl">L{{ hero.level }}</span>
               <span v-if="!hero.harvested && hero.skillPoints > 0" class="rb-sp">
                 +{{ hero.skillPoints }}
@@ -1790,5 +1813,36 @@ function unlockedCountInPath(path: SkillPathDef): number {
   .isp-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+.sp-jump-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1.5px solid #9d5c00;
+  background: linear-gradient(180deg, #ffe98a, #f2b730);
+  color: #4b2600;
+  font-weight: 800;
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.sp-jump-pill:hover {
+  transform: translateY(-1px);
+}
+.rb-coop {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 0.56rem;
+  font-weight: 900;
+  color: #fffdf7;
+  border: 1.5px solid #fffdf5;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  line-height: 1.3;
 }
 </style>

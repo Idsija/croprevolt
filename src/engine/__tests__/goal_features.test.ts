@@ -269,6 +269,8 @@ describe('Mario + Rabbids Goal Pillars: Co-Op, Endless, 3-Branch Trees, Unlocks,
         expect(opts.some((o) => o.kind === 'boss')).toBe(true);
       }
       const battleOpt = opts.find((o) => o.kind === 'battle' || o.kind === 'boss')!;
+      expect(battleOpt.enemyPreviewKinds?.length).toBeGreaterThanOrEqual(3);
+      expect(battleOpt.seedBounty).toBeGreaterThan(0);
       const tpl = generateEndlessFloorMap(floor, battleOpt);
       sizes.add(`${tpl.width}x${tpl.height}`);
       const battle = createBattleFromTemplate(tpl, run.roster.slice(0, 4), [], run.items);
@@ -301,17 +303,24 @@ describe('Mario + Rabbids Goal Pillars: Co-Op, Endless, 3-Branch Trees, Unlocks,
       expect(run.status).toBe('bonus_room');
       const outcome = resolveEndlessBonusChoice(run, meta, choice);
       expect(outcome).toBeTruthy();
+      if (kind === 'carnival') {
+        expect(run.endless!.activeBonus?.wheelPrizeIdx).toBeGreaterThanOrEqual(0);
+        expect(run.endless!.activeBonus?.wheelPrizeIdx).toBeLessThan(4);
+      }
       leaveEndlessBonusRoom(run);
       expect(run.status).toBe('endless_hub');
     }
+    expect(run.endless!.bonusRoomsVisited).toBe(3);
 
-    // Winning an Endless battle advances floor, updates bestEndlessFloor, and routes back to endless_hub
+    // Winning an Endless battle advances floor, updates bestEndlessFloor, accumulates Co-Op combos, and routes back to endless_hub
     const floorBefore = run.endless!.floor;
     const fOpt = run.endless!.nextOptions.find((o) => o.kind !== 'bonus')!;
     const fTpl = generateEndlessFloorMap(floorBefore, fOpt);
     const battle = createBattleFromTemplate(fTpl, run.roster.slice(0, 4), [], run.items);
+    battle.coopComboCount = 3;
     battle.status = 'victory';
     applyBattleOutcomeToRun(run, battle, meta);
+    expect(run.totalCoopCombos).toBe(3);
     expect(meta.bestEndlessFloor).toBeGreaterThanOrEqual(floorBefore);
     finishRewardsAndReturnToMap(run);
     expect(run.status).toBe('endless_hub');

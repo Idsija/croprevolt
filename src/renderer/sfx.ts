@@ -224,6 +224,36 @@ class CartoonSfx {
     });
     this.haptic([40, 40, 60]);
   }
+
+  public coopCombo(): void {
+    // Bright joyful harmonic duo chime when cross-player Team-Jump or Assist Combo fires!
+    this.tone(587, 880, 0.13, 'triangle', 0.12);
+    this.tone(740, 1108, 0.16, 'sine', 0.11, 0.06);
+    this.tone(880, 1318, 0.18, 'triangle', 0.1, 0.12);
+    this.haptic([16, 14, 22]);
+  }
+
+  public handoff(): void {
+    // Playful wooden board-game knock + warm rising pass-the-controller triad!
+    this.tone(330, 440, 0.09, 'triangle', 0.1);
+    this.tone(440, 587, 0.11, 'triangle', 0.1, 0.08);
+    this.tone(587, 659, 0.15, 'sine', 0.09, 0.16);
+    this.haptic([12, 18, 12]);
+  }
+
+  public wheelTick(pitchStep = 0): void {
+    const base = 520 + (pitchStep % 5) * 48;
+    this.tone(base, base * 0.72, 0.04, 'triangle', 0.08);
+    this.haptic(6);
+  }
+
+  public jackpot(): void {
+    const notes = [523, 659, 784, 987, 1046];
+    notes.forEach((n, i) => {
+      this.tone(n, n * 1.03, 0.15, 'triangle', 0.11, i * 0.075);
+    });
+    this.haptic([18, 16, 18, 16, 36]);
+  }
 }
 
 export const sfx = new CartoonSfx();

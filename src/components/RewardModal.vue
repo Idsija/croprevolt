@@ -127,6 +127,9 @@ function nextTierLabel(graftCount: number): string {
             <span class="paper-pill seed-pill">
               <CraftIcon name="seed" :size="14" /> {{ run.seeds }} Run Seeds (+{{ reward.seedsEarned }})
             </span>
+            <span v-if="reward.heirloomSeedsEarned" class="paper-pill heirloom-pill">
+              👑 +{{ reward.heirloomSeedsEarned }} Heirloom Seeds!
+            </span>
             <span
               v-if="reward.battleGrade && reward.battleGrade.grade !== 'cleared'"
               class="paper-pill grade-pill"
@@ -206,7 +209,16 @@ function nextTierLabel(graftCount: number): string {
                     </small>
                   </div>
                 </div>
-                <span v-if="PRODUCE_BLUEPRINTS[bpId].isAnimal" class="paper-pill animal-pill">Barnyard</span>
+                <div class="recruit-badges">
+                  <span
+                    v-if="!(gameStore.meta.unlockedHeroIds ?? []).includes(bpId)"
+                    class="paper-pill new-gh-pill"
+                    title="Recruiting this hero permanently unlocks them in your Hero Greenhouse for future runs!"
+                  >
+                    ✨ NEW · Greenhouse Unlock!
+                  </span>
+                  <span v-if="PRODUCE_BLUEPRINTS[bpId].isAnimal" class="paper-pill animal-pill">Barnyard</span>
+                </div>
               </div>
               <p>{{ PRODUCE_BLUEPRINTS[bpId].blurb }}</p>
               <small v-if="PRODUCE_BLUEPRINTS[bpId].coopPassive" class="coop-note">
@@ -781,5 +793,24 @@ function nextTierLabel(graftCount: number): string {
   display: block;
   min-height: 40px;
   padding-inline: 16px;
+}
+.heirloom-pill {
+  background: linear-gradient(180deg, #ffe680, #f0b429);
+  color: #4d2900;
+  border-color: #9e5d06;
+  font-weight: 900;
+}
+.recruit-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.new-gh-pill {
+  background: linear-gradient(180deg, #d7f6c9, #9be082);
+  color: #1f4f16;
+  border-color: #3d7d2e;
+  font-size: 0.68rem;
+  font-weight: 800;
 }
 </style>

@@ -8,6 +8,7 @@ import {
   returnToTitle,
   toggleGuidedHints,
 } from '../stores/gameStore';
+import { sfx } from '../renderer/sfx';
 import CraftIcon from './CraftIcon.vue';
 import HeroBuildModal from './HeroBuildModal.vue';
 
@@ -20,6 +21,7 @@ const isBossFloor = computed(() => (endless.value?.floor ?? 1) % 4 === 0);
 const buildModalOpen = ref(false);
 const buildModalHeroUid = ref<string | null>(null);
 const wheelSpinning = ref(false);
+const wheelRotation = ref(0);
 
 const activeSquad = computed(() =>
   run.value.activeSquadUids
@@ -52,10 +54,21 @@ function openHeroBuild(uid?: string): void {
 function triggerCarnivalSpin(): void {
   if (wheelSpinning.value || activeBonus.value?.claimed) return;
   wheelSpinning.value = true;
+  wheelRotation.value += 1080 + Math.floor(Math.random() * 360);
+  const tickDelays = [70, 150, 240, 350, 480, 630, 810];
+  tickDelays.forEach((ms, idx) => {
+    setTimeout(() => sfx.wheelTick(idx), ms);
+  });
   setTimeout(() => {
     claimEndlessBonus('wheel');
+    const prizeIdx = run.value.endless?.activeBonus?.wheelPrizeIdx;
+    if (typeof prizeIdx === 'number') {
+      // Align landing wedge cleanly under the top pointer
+      const baseSpins = Math.ceil(wheelRotation.value / 360) * 360;
+      wheelRotation.value = baseSpins + (360 - (prizeIdx * 90 + 45));
+    }
     wheelSpinning.value = false;
-  }, 550);
+  }, 940);
 }
 </script>
 
@@ -108,7 +121,7 @@ function triggerCarnivalSpin(): void {
           <strong>Boss Floor {{ endless.floor }}!</strong> Every 4th floor brings a Boss Showdown (and bonus Heirloom Seeds for unlocking new heroes!).
         </template>
         <template v-else>
-          <strong>Pick your next stage door!</strong> Each floor rolls fresh grid dimensions, towering heights (up to 3 stories), objectives &amp; Bonus Rooms in-between.
+          <strong>Pick your next stage door!</strong> Each floor rolls fresh grid dimensions, towering heights (up to 3 stories), Arena Modifiers &amp; Bonus Rooms in-between.
         </template>
       </p>
       <button class="gb-hide" title="Hide Guided Tips" @click="toggleGuidedHints">Hide Tips</button>
@@ -152,7 +165,24 @@ function triggerCarnivalSpin(): void {
             :class="{ spinning: wheelSpinning }"
             @click="triggerCarnivalSpin"
           >
-            <div class="wheel-badge" :class="{ spin: wheelSpinning }">🎡</div>
+            <div class="carnival-spinner-wrap" aria-hidden="true">
+              <span class="wheel-pointer">▼</span>
+              <svg
+                class="prize-wheel-svg"
+                viewBox="0 0 100 100"
+                :style="{ transform: `rotate(${wheelRotation}deg)` }"
+              >
+                <path d="M50,50 L50,4 A46,46 0 0,1 96,50 Z" fill="#f7c948" stroke="#4a2e14" stroke-width="2.5" />
+                <path d="M50,50 L96,50 A46,46 0 0,1 50,96 Z" fill="#82c96e" stroke="#4a2e14" stroke-width="2.5" />
+                <path d="M50,50 L50,96 A46,46 0 0,1 4,50 Z" fill="#6ab5e8" stroke="#4a2e14" stroke-width="2.5" />
+                <path d="M50,50 L4,50 A46,46 0 0,1 50,4 Z" fill="#eb7363" stroke="#4a2e14" stroke-width="2.5" />
+                <text x="69" y="34" font-size="14" text-anchor="middle">🌱</text>
+                <text x="69" y="72" font-size="14" text-anchor="middle">✨</text>
+                <text x="31" y="72" font-size="14" text-anchor="middle">🌳</text>
+                <text x="31" y="34" font-size="14" text-anchor="middle">🍖</text>
+                <circle cx="50" cy="50" r="10" fill="#fff6da" stroke="#4a2e14" stroke-width="2.5" />
+              </svg>
+            </div>
             <strong>Spin the Harvest Prize Wheel!</strong>
             <small>Win +22 Seeds, a Free Relic, +1 SP for ALL Heroes, or a Full Feast &amp; Bombs!</small>
             <span class="card-cta gold">
@@ -260,8 +290,21 @@ function triggerCarnivalSpin(): void {
 
             <div class="door-tags">
               <span v-if="opt.modifierLabel" class="d-tag">{{ opt.modifierLabel }}</span>
+              <span v-if="opt.arenaModifierLabel" class="d-tag mod-tag">{{ opt.arenaModifierLabel }}</span>
+              <span v-if="opt.seedBounty" class="d-tag seed-bounty-tag">🌱 ~{{ opt.seedBounty }} Seeds</span>
               <span v-if="opt.kind === 'boss'" class="d-tag boss-tag">Heirloom Seeds + Relic</span>
               <span v-else-if="opt.kind === 'bonus'" class="d-tag bonus-tag">No Combat · Free Reward</span>
+            </div>
+
+            <div v-if="opt.enemyPreviewKinds && opt.enemyPreviewKinds.length > 0" class="door-foe-preview">
+              <small>Spotted:</small>
+              <img
+                v-for="ek in opt.enemyPreviewKinds"
+                :key="ek"
+                :src="`/sprites/${ek}.png`"
+                :alt="ek"
+                class="foe-mini"
+              />
             </div>
 
             <span class="paper-btn diecut door-go" :class="opt.kind === 'boss' ? 'danger' : opt.kind === 'bonus' ? 'gold' : 'primary'">
@@ -870,5 +913,60 @@ function triggerCarnivalSpin(): void {
     height: 50px;
     font-size: 1.55rem;
   }
+}
+
+.carnival-spinner-wrap {
+  position: relative;
+  width: 82px;
+  height: 82px;
+  display: grid;
+  place-items: center;
+}
+.wheel-pointer {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.9rem;
+  color: #d93829;
+  text-shadow: 0 1px 0 #fff7db;
+  z-index: 2;
+}
+.prize-wheel-svg {
+  width: 78px;
+  height: 78px;
+  transition: transform 0.92s cubic-bezier(0.16, 0.85, 0.25, 1);
+  filter: drop-shadow(0 3px 4px rgba(58, 32, 12, 0.28));
+}
+.d-tag.mod-tag {
+  background: #fff2c2;
+  border-color: #b87e14;
+  color: #5a3700;
+}
+.d-tag.seed-bounty-tag {
+  background: #dff5cf;
+  border-color: #4b8a32;
+  color: #214e13;
+}
+.door-foe-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: rgba(255, 250, 236, 0.82);
+  border: 1.5px dashed #b79568;
+}
+.door-foe-preview small {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #6b4b2a;
+}
+.foe-mini {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 2px rgba(42, 20, 6, 0.22));
 }
 </style>
