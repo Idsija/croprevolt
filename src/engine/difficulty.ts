@@ -147,10 +147,10 @@ export const REGULAR_ENEMY_POOL = [
   'sprayer',
   'mower',
   'beekeeper',
-  'hound',
+  'barrow',
   'pitchfork',
-  'goose',
-  'mole',
+  'blower',
+  'sapper',
   'kettlebot',
 ] as const;
 

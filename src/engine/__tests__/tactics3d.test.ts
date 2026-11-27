@@ -886,15 +886,15 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     expect(duckHero.ignoresMud).toBe(true);
     expect(duckHero.weapon.knockback).toBe(1);
 
-    // New Enemies: Farmer Gus (starts Shielded), Barkley (Move 5 + dashKnockback 1), Beekeeper Bert (lobbed Burn)
+    // New Enemies: Farmer Gus (starts Shielded), Wheelbarrow Wally (Move 5 + dashKnockback 1), Beekeeper Bert (lobbed Burn)
     expect(ENEMY_BLUEPRINTS.beekeeper.weapon.appliesStatus?.kind).toBe('burn');
     expect(ENEMY_BLUEPRINTS.beekeeper.weapon.arc).toBe('lobbed');
     const gus = createBattleUnitFromEnemy('pitchfork', 0, { x: 4, y: 4 });
     expect(gus.hp).toBe(16);
     expect(gus.statuses.some((s) => s.kind === 'shield')).toBe(true);
-    const barkley = createBattleUnitFromEnemy('hound', 1, { x: 2, y: 2 });
-    expect(barkley.moveRange).toBe(5);
-    expect(barkley.dashKnockback).toBe(1);
+    const wally = createBattleUnitFromEnemy('barrow', 1, { x: 2, y: 2 });
+    expect(wally.moveRange).toBe(5);
+    expect(wally.dashKnockback).toBe(1);
 
     // All 3 redesigned seasonal cartoon boards generate 16 pinned spaces with guaranteed facilities and path to Boss
     for (let actIdx = 0; actIdx < 3; actIdx++) {

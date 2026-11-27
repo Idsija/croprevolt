@@ -172,7 +172,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
     ],
     enemySpawns: [
       { blueprintId: 'pitchfork', x: 4, y: 5 },
-      { blueprintId: 'hound', x: 1, y: 2 },
+      { blueprintId: 'barrow', x: 1, y: 2 },
       { blueprintId: 'beekeeper', x: 7, y: 2 },
       { blueprintId: 'digger', x: 2, y: 4 },
     ],
@@ -776,7 +776,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
     ],
     enemySpawns: [
       { blueprintId: 'digger', x: 1, y: 4 },
-      { blueprintId: 'goose', x: 7, y: 4 },
+      { blueprintId: 'blower', x: 7, y: 4 },
       { blueprintId: 'beekeeper', x: 4, y: 4 },
       { blueprintId: 'trimmer', x: 5, y: 3 },
     ],
@@ -998,7 +998,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
     ],
     enemySpawns: [
       { blueprintId: 'pitchfork', x: 3, y: 2 },
-      { blueprintId: 'hound', x: 5, y: 2 },
+      { blueprintId: 'barrow', x: 5, y: 2 },
       { blueprintId: 'beekeeper', x: 4, y: 1 },
     ],
   },
@@ -1064,7 +1064,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
     ],
     enemySpawns: [
       { blueprintId: 'pitchfork', x: 3, y: 5 },
-      { blueprintId: 'hound', x: 6, y: 5 },
+      { blueprintId: 'barrow', x: 6, y: 5 },
       { blueprintId: 'mower', x: 2, y: 2 },
       { blueprintId: 'beekeeper', x: 6, y: 1 },
     ],
@@ -1078,7 +1078,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
   duck_pond_meadow: {
     id: 'duck_pond_meadow',
     name: 'Duck Pond Meadow',
-    subtitle: 'Cross lily-pad footbridges, warp through mole burrows & dunk farmhands into the spring pond!',
+    subtitle: 'Cross lily-pad footbridges, warp through garden burrows & dunk farmhands into the spring pond!',
     theme: 'spring',
     objective: 'defeat_all',
     objectiveLabel: 'Clear the meadow watchcrew',
@@ -1139,8 +1139,8 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
       { x: 6, y: 10 },
     ],
     enemySpawns: [
-      { blueprintId: 'goose', x: 2, y: 2 },
-      { blueprintId: 'mole', x: 6, y: 2 },
+      { blueprintId: 'blower', x: 2, y: 2 },
+      { blueprintId: 'sapper', x: 6, y: 2 },
       { blueprintId: 'digger', x: 0, y: 4 },
       { blueprintId: 'trimmer', x: 8, y: 4 },
     ],
@@ -1201,7 +1201,7 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
     enemySpawns: [
       { blueprintId: 'kettlebot', x: 4, y: 2 },
       { blueprintId: 'beekeeper', x: 2, y: 2 },
-      { blueprintId: 'goose', x: 6, y: 2 },
+      { blueprintId: 'blower', x: 6, y: 2 },
       { blueprintId: 'sprayer', x: 4, y: 0 },
     ],
   },
@@ -1258,9 +1258,9 @@ export const MAP_TEMPLATES: Record<string, MapTemplate> = {
     ],
     enemySpawns: [
       { blueprintId: 'digger', x: 6, y: 1 },
-      { blueprintId: 'mole', x: 2, y: 2 },
+      { blueprintId: 'sapper', x: 2, y: 2 },
       { blueprintId: 'kettlebot', x: 4, y: 4 },
-      { blueprintId: 'goose', x: 7, y: 4 },
+      { blueprintId: 'blower', x: 7, y: 4 },
     ],
   },
 };

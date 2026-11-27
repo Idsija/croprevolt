@@ -1573,6 +1573,37 @@ export function toggleSquadMember(heroUid: string): boolean {
   return ok;
 }
 
+/**
+ * Direct 1-tap swap: replace an active squad hero with a benched hero.
+ * Works both from the Overworld Squad/Skill modal AND live during Pre-Battle Prep!
+ */
+export function swapSquadMembers(activeHeroUid: string, benchHeroUid: string): boolean {
+  const run = gameStore.run;
+  if (!run) return false;
+  const sqIdx = run.activeSquadUids.indexOf(activeHeroUid);
+  if (sqIdx < 0) return false;
+  if (run.activeSquadUids.includes(benchHeroUid)) return false;
+  const benchHero = run.roster.find((h) => h.uid === benchHeroUid && !h.harvested);
+  if (!benchHero) return false;
+
+  const b = gameStore.battle;
+  if (b?.prepPhase) {
+    const activeUnit = b.units.find(
+      (u) => u.team === 'player' && !u.isEscortCart && u.rosterUid === activeHeroUid
+    );
+    if (!activeUnit) return false;
+    const swapped = swapPrepHeroWithBench(b, activeUnit.id, benchHero);
+    if (!swapped) return false;
+    run.activeSquadUids.splice(sqIdx, 1, benchHeroUid);
+    gameStore.selectedUnitId = swapped.id;
+  } else {
+    run.activeSquadUids.splice(sqIdx, 1, benchHeroUid);
+  }
+  sfx.jump();
+  saveRun(run);
+  return true;
+}
+
 function syncPrepBattleUnitFromHero(heroUid: string): void {
   const b = gameStore.battle;
   const run = gameStore.run;

@@ -16,6 +16,7 @@ import {
   equipWeapon,
   gameStore,
   respecPerks,
+  swapSquadMembers,
   toggleSquadMember,
   unlockPerk,
 } from '../stores/gameStore';
@@ -40,6 +41,8 @@ const run = computed(() => gameStore.run!);
 const squadBonds = computed(() =>
   bondStatuses(run.value.roster.filter((h) => !h.harvested && run.value.activeSquadUids.includes(h.uid)))
 );
+const activeBondCount = computed(() => squadBonds.value.filter((b) => b.tier > 0).length);
+const showBondsDrawer = ref(false);
 const openBondId = ref<string | null>(null);
 const openBond = computed(() => squadBonds.value.find((b) => b.def.id === openBondId.value) ?? null);
 
@@ -50,12 +53,40 @@ const selectedUid = ref<string>(
     ''
 );
 
+const swapPickerOpen = ref(false);
+const swapNotice = ref<string | null>(null);
+let swapNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+
 watch(
   () => props.initialHeroUid,
   (uid) => {
     if (uid) selectedUid.value = uid;
   }
 );
+
+watch(selectedUid, () => {
+  swapPickerOpen.value = false;
+});
+
+onBeforeUnmount(() => {
+  if (swapNoticeTimer) clearTimeout(swapNoticeTimer);
+});
+
+const activeSquadHeroes = computed(() =>
+  run.value.activeSquadUids
+    .map((uid) => run.value.roster.find((h) => h.uid === uid && !h.harvested))
+    .filter((h): h is NonNullable<typeof h> => Boolean(h))
+);
+
+const benchHeroes = computed(() =>
+  run.value.roster.filter((h) => !h.harvested && !run.value.activeSquadUids.includes(h.uid))
+);
+
+const sortedRoster = computed(() => [
+  ...activeSquadHeroes.value,
+  ...benchHeroes.value,
+  ...run.value.roster.filter((h) => h.harvested),
+]);
 
 const selectedHero = computed(
   () => run.value.roster.find((h) => h.uid === selectedUid.value) ?? run.value.roster[0] ?? null
@@ -72,6 +103,21 @@ const heroPaths = computed<SkillPathDef[]>(() =>
 const isSelectedActive = computed(() =>
   selectedHero.value ? run.value.activeSquadUids.includes(selectedHero.value.uid) : false
 );
+
+function performDirectSwap(activeUid: string, benchUid: string): void {
+  const outHero = run.value.roster.find((h) => h.uid === activeUid);
+  const inHero = run.value.roster.find((h) => h.uid === benchUid);
+  if (!swapSquadMembers(activeUid, benchUid)) return;
+  swapPickerOpen.value = false;
+  selectedUid.value = benchUid;
+  if (outHero && inHero) {
+    swapNotice.value = `Swapped ${outHero.name.split(' ')[0]} ⇄ ${inHero.name.split(' ')[0]}!`;
+    if (swapNoticeTimer) clearTimeout(swapNoticeTimer);
+    swapNoticeTimer = setTimeout(() => {
+      swapNotice.value = null;
+    }, 2600);
+  }
+}
 
 const selectedHeroArmory = computed(() => {
   const h = selectedHero.value;
@@ -145,23 +191,33 @@ function unlockedCountInPath(path: SkillPathDef): number {
 
       <!-- Header -->
       <header class="build-head">
-        <div>
-          <h2>Unique Character Skill Trees &amp; Armory</h2>
+        <div class="build-head-copy">
+          <h2>Squad, Skill Trees &amp; Armory</h2>
           <small>
-            Active Squad: {{ run.activeSquadUids.length }}/4 ·
+            On Field: {{ run.activeSquadUids.length }}/4 ·
             <strong v-if="totalUnspentSp > 0" class="sp-highlight">
-              ★ {{ totalUnspentSp }} Skill Point{{ totalUnspentSp > 1 ? 's' : '' }} ready to spend!
+              ★ {{ totalUnspentSp }} SP ready
             </strong>
-            <span v-else>Every hero has 2 bespoke build paths — free respec anytime</span>
+            <span v-else>Free respec anytime</span>
           </small>
         </div>
-        <button class="paper-btn icon-only" aria-label="Close" @click="emit('close')">
-          <CraftIcon name="close" :size="17" />
-        </button>
+        <div class="build-head-right">
+          <button
+            class="bond-toggle-pill"
+            :class="{ active: showBondsDrawer }"
+            @click="showBondsDrawer = !showBondsDrawer"
+          >
+            <span>✨ {{ activeBondCount }} Bond{{ activeBondCount === 1 ? '' : 's' }}</span>
+            <span>{{ showBondsDrawer ? '▴' : '▾' }}</span>
+          </button>
+          <button class="paper-btn icon-only" aria-label="Close" @click="emit('close')">
+            <CraftIcon name="close" :size="17" />
+          </button>
+        </div>
       </header>
 
-      <!-- Squad Bonds: what this mix of heroes earns at the start of a battle -->
-      <div class="bond-strip">
+      <!-- Squad Bonds: always shown on desktop, neatly collapsible on phones -->
+      <div class="bond-strip" :class="{ 'mobile-open': showBondsDrawer }">
         <span class="bond-strip-label">Squad Bonds</span>
         <button
           v-for="sb in squadBonds"
@@ -184,11 +240,15 @@ function unlockedCountInPath(path: SkillPathDef): number {
         </p>
       </div>
 
+      <div v-if="swapNotice" class="swap-toast" role="status">
+        ✓ {{ swapNotice }}
+      </div>
+
       <div class="build-body">
-        <!-- Left Roster Strip -->
+        <!-- Roster Strip: On Field heroes first, Bench clearly badged -->
         <aside class="roster-rail scroll-soft">
           <button
-            v-for="hero in run.roster"
+            v-for="hero in sortedRoster"
             :key="hero.uid"
             class="roster-btn"
             :class="{
@@ -206,16 +266,19 @@ function unlockedCountInPath(path: SkillPathDef): number {
               </span>
             </div>
             <div class="rb-copy">
-              <strong>{{ hero.name }}</strong>
-              <small v-if="hero.harvested" class="bag-txt">Bagged in Barn</small>
-              <small v-else>
-                {{ run.activeSquadUids.includes(hero.uid) ? 'Active' : 'Bench' }} · {{ hero.hp }}/{{ hero.maxHp }} HP
+              <strong>{{ hero.name.split(' ')[0] }}</strong>
+              <small v-if="hero.harvested" class="bag-txt">Bagged</small>
+              <small v-else class="rb-role-row">
+                <span class="roster-tag" :class="run.activeSquadUids.includes(hero.uid) ? 'on-field' : 'bench'">
+                  {{ run.activeSquadUids.includes(hero.uid) ? 'FIELD' : 'BENCH' }}
+                </span>
+                <span>{{ hero.hp }}/{{ hero.maxHp }}</span>
               </small>
             </div>
           </button>
         </aside>
 
-        <!-- Right Hero Build Sheet, Armory & Illustrated 2-Path Botanical Skill Tree -->
+        <!-- Right Hero Build Sheet, 1-Tap Swap Picker, Armory & Illustrated 2-Path Skill Tree -->
         <div v-if="selectedHero" class="hero-pane scroll-soft">
           <div class="hero-summary paper-card">
             <div class="hs-left">
@@ -256,20 +319,71 @@ function unlockedCountInPath(path: SkillPathDef): number {
                 title="Refund all spent Skill Points for free"
                 @click="handleRespec"
               >
-                ↺ Reset Perks
+                ↺ Reset
+              </button>
+              <!-- 1-Tap Direct Swap when squad is full OR active hero wants to swap with bench! -->
+              <button
+                v-if="!selectedHero.harvested && !isSelectedActive && run.activeSquadUids.length >= 4"
+                class="paper-btn gold squad-swap-btn"
+                :class="{ active: swapPickerOpen }"
+                @click="swapPickerOpen = !swapPickerOpen"
+              >
+                ⇄ {{ swapPickerOpen ? 'Cancel Swap' : 'Swap Into Squad' }}
               </button>
               <button
-                v-if="!selectedHero.harvested"
-                class="paper-btn squad-swap-btn"
-                :class="{ primary: !isSelectedActive }"
-                :disabled="
-                  (isSelectedActive && run.activeSquadUids.length <= 1) ||
-                  (!isSelectedActive && run.activeSquadUids.length >= 4)
-                "
+                v-else-if="!selectedHero.harvested && !isSelectedActive"
+                class="paper-btn primary squad-swap-btn"
                 @click="toggleSquadMember(selectedHero.uid)"
               >
-                {{ isSelectedActive ? 'Move to Bench' : 'Deploy Active' }}
+                + Deploy to Field
               </button>
+              <button
+                v-else-if="!selectedHero.harvested && isSelectedActive && benchHeroes.length > 0"
+                class="paper-btn gold squad-swap-btn"
+                :class="{ active: swapPickerOpen }"
+                @click="swapPickerOpen = !swapPickerOpen"
+              >
+                ⇄ {{ swapPickerOpen ? 'Cancel Swap' : 'Swap with Bench' }}
+              </button>
+              <button
+                v-else-if="!selectedHero.harvested && isSelectedActive"
+                class="paper-btn squad-swap-btn"
+                :disabled="run.activeSquadUids.length <= 1"
+                @click="toggleSquadMember(selectedHero.uid)"
+              >
+                Move to Bench
+              </button>
+            </div>
+
+            <!-- Inline 1-Tap Swap Target Picker (Zero guesswork, works on 4/4 full squads!) -->
+            <div v-if="swapPickerOpen && !selectedHero.harvested" class="inline-swap-picker">
+              <div class="isp-head">
+                <strong v-if="!isSelectedActive">
+                  ⇄ Replace who on the field with {{ selectedHero.name.split(' ')[0] }}?
+                </strong>
+                <strong v-else>
+                  ⇄ Bring who off the bench for {{ selectedHero.name.split(' ')[0] }}?
+                </strong>
+              </div>
+              <div class="isp-grid">
+                <button
+                  v-for="cand in !isSelectedActive ? activeSquadHeroes : benchHeroes"
+                  :key="cand.uid"
+                  class="isp-card"
+                  @click="
+                    !isSelectedActive
+                      ? performDirectSwap(cand.uid, selectedHero.uid)
+                      : performDirectSwap(selectedHero.uid, cand.uid)
+                  "
+                >
+                  <img :src="`/sprites/${cand.species}.png`" :alt="cand.name" />
+                  <div class="isp-copy">
+                    <strong>{{ cand.name.split(' ')[0] }}</strong>
+                    <small>{{ getFamilyLabel(cand.family) }} · {{ cand.hp }}/{{ cand.maxHp }} HP</small>
+                  </div>
+                  <span class="isp-arrow">⇄</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1092,26 +1206,144 @@ function unlockedCountInPath(path: SkillPathDef): number {
   font-weight: 700;
 }
 
-@media (max-width: 820px) {
-  .build-body {
-    grid-template-columns: 1fr;
-  }
-
-  .roster-rail {
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
-  .roster-btn {
-    flex: 0 0 auto;
-  }
-
-  .armory-bar,
-  .tree-paths-grid {
-    grid-template-columns: 1fr;
-  }
+.build-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
+
+.bond-toggle-pill {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 2px solid var(--ink);
+  background: linear-gradient(180deg, #ffe9a0 0%, #f5cb54 100%);
+  color: #3e2600;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+  min-height: 36px;
+}
+
+.swap-toast {
+  background: linear-gradient(180deg, #dff5d3 0%, #c6eba8 100%);
+  border: 2px solid #2b6e24;
+  color: #1c4d17;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.rb-role-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.roster-tag {
+  font-size: 0.6rem;
+  font-weight: 900;
+  padding: 1px 5px;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+}
+
+.roster-tag.on-field {
+  background: #2f8a3c;
+  color: #fffef4;
+}
+
+.roster-tag.bench {
+  background: #e6d7b8;
+  color: #5c4223;
+  border: 1px solid #a88d65;
+}
+
+.inline-swap-picker {
+  flex-basis: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 2px dashed #9e6b21;
+  background: #fff7dd;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.isp-head strong {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.82rem;
+  color: #5c3605;
+}
+
+.isp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.isp-card {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  min-height: 46px;
+  border-radius: 10px;
+  border: 2px solid var(--ink);
+  background: #fffdf5;
+  box-shadow: 0 2px 0 rgba(74, 44, 23, 0.35);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+
+.isp-card:hover {
+  transform: translateY(-1px);
+  background: #fff0b8;
+}
+
+.isp-card img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.isp-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.isp-copy strong {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.78rem;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.isp-copy small {
+  font-size: 0.66rem;
+  color: var(--ink-soft);
+}
+
+.isp-arrow {
+  font-size: 0.92rem;
+  font-weight: 900;
+  color: #9e6211;
+}
+
 .bond-strip {
   display: flex;
   flex-wrap: wrap;
@@ -1157,5 +1389,81 @@ function unlockedCountInPath(path: SkillPathDef): number {
   font-size: 0.78rem;
   line-height: 1.3;
   color: var(--ink);
+}
+
+@media (max-width: 820px) {
+  .build-sheet {
+    padding: 12px 10px 10px;
+  }
+
+  .build-head h2 {
+    font-size: 1.05rem;
+  }
+
+  .bond-toggle-pill {
+    display: inline-flex;
+  }
+
+  .bond-strip {
+    display: none;
+  }
+
+  .bond-strip.mobile-open {
+    display: flex;
+  }
+
+  .build-body {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .roster-rail {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 4px;
+  }
+
+  .roster-btn {
+    flex: 0 0 auto;
+    padding: 5px 8px;
+  }
+
+  .hero-summary {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .hs-sprite {
+    width: 44px;
+    height: 44px;
+  }
+
+  .hs-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .squad-swap-btn {
+    min-height: 40px;
+  }
+
+  .stat-ribbon {
+    gap: 4px;
+  }
+
+  .stat-chip {
+    font-size: 0.7rem;
+    padding: 2px 7px;
+  }
+
+  .armory-bar,
+  .tree-paths-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .isp-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

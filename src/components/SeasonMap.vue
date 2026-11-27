@@ -34,6 +34,7 @@ const showBuildModal = ref(false);
 const buildModalHeroUid = ref<string | null>(null);
 const showAlmanac = ref(false);
 const showRelicsPopover = ref(false);
+const showOwMenu = ref(false);
 const isTraveling = ref(false);
 
 let mapRenderer: OverworldMapRenderer | null = null;
@@ -445,14 +446,14 @@ onBeforeUnmount(() => {
 
         <button
           v-if="run.relicIds.length > 0"
-          class="paper-pill ow-relic-btn"
+          class="paper-pill ow-relic-btn ow-desktop-only"
           @click="showRelicsPopover = !showRelicsPopover"
         >
           🏅 {{ run.relicIds.length }}
         </button>
 
         <button
-          class="paper-btn icon-tool"
+          class="paper-btn icon-tool ow-desktop-only"
           title="Storybook Field Almanac"
           aria-label="Open Field Almanac"
           @click="showAlmanac = true"
@@ -461,7 +462,7 @@ onBeforeUnmount(() => {
         </button>
 
         <button
-          class="paper-btn icon-tool"
+          class="paper-btn icon-tool ow-desktop-only"
           :title="gameStore.musicMuted ? 'Unmute Soundtrack' : 'Mute Soundtrack'"
           :aria-label="gameStore.musicMuted ? 'Unmute Soundtrack' : 'Mute Soundtrack'"
           @click="toggleMusicMute"
@@ -471,7 +472,7 @@ onBeforeUnmount(() => {
 
         <button
           v-if="!webglFailed"
-          class="paper-btn icon-tool"
+          class="paper-btn icon-tool ow-desktop-only"
           title="Recenter Board"
           aria-label="Recenter board"
           @click="recenterMap"
@@ -479,11 +480,42 @@ onBeforeUnmount(() => {
           <CraftIcon name="center" :size="15" />
         </button>
 
-        <button class="paper-btn icon-tool" title="Save & Return to Title" @click="returnToTitle">
+        <button class="paper-btn icon-tool ow-desktop-only" title="Save & Return to Title" @click="returnToTitle">
           <span>Title</span>
+        </button>
+
+        <!-- Mobile Single Menu Trigger -->
+        <button
+          class="paper-btn icon-tool ow-mobile-only"
+          aria-label="Overworld Menu"
+          title="Almanac, Relics, Audio & Title"
+          @click="showOwMenu = !showOwMenu"
+        >
+          <CraftIcon name="menu" :size="16" />
         </button>
       </div>
     </header>
+
+    <!-- Mobile Compact Overworld Menu Popover -->
+    <div v-if="showOwMenu" class="corrugated-slab ow-menu-pop">
+      <div class="rp-head">
+        <strong>{{ actDef.name }}</strong>
+        <button class="mini-x" @click="showOwMenu = false">✕</button>
+      </div>
+      <div class="ow-menu-grid">
+        <button class="paper-btn" @click="showOwMenu = false; showAlmanac = true">📖 Almanac</button>
+        <button class="paper-btn" @click="toggleMusicMute">
+          {{ gameStore.musicMuted ? '🔇 Music Off' : '🎵 Music On' }}
+        </button>
+        <button v-if="!webglFailed" class="paper-btn" @click="recenterMap(); showOwMenu = false">
+          ⌖ Recenter
+        </button>
+        <button v-if="run.relicIds.length > 0" class="paper-btn gold" @click="showOwMenu = false; showRelicsPopover = true">
+          🏅 Relics ({{ run.relicIds.length }})
+        </button>
+        <button class="paper-btn" @click="returnToTitle">← Title</button>
+      </div>
+    </div>
 
     <!-- Optional Compact Relics Popover -->
     <div v-if="showRelicsPopover && run.relicIds.length > 0" class="corrugated-slab relics-pop">
@@ -505,7 +537,7 @@ onBeforeUnmount(() => {
           v-for="hero in activeHeroes"
           :key="hero.uid"
           class="ow-hero-chip"
-          :title="`${hero.name} (Lv.${hero.level}) — Open Skill Tree & Armory`"
+          :title="`${hero.name} (Lv.${hero.level}) — Open Squad, Swap & Skill Tree`"
           @click="openHeroBuilds(hero.uid)"
         >
           <div class="ow-hero-img-wrap">
@@ -526,7 +558,7 @@ onBeforeUnmount(() => {
           :class="{ gold: totalUnspentSp > 0 }"
           @click="openHeroBuilds()"
         >
-          <span>★ Trees</span>
+          <span>★ Squad</span>
           <span v-if="totalUnspentSp > 0" class="sp-count-pill">{{ totalUnspentSp }}</span>
         </button>
       </div>
@@ -1364,6 +1396,35 @@ onBeforeUnmount(() => {
   font-size: 0.78rem;
 }
 
+.ow-mobile-only {
+  display: none;
+}
+
+.ow-menu-pop {
+  position: fixed;
+  top: calc(56px + var(--safe-top, 0px));
+  right: calc(10px + var(--safe-right, 0px));
+  z-index: 42;
+  width: min(260px, calc(100vw - 20px));
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ow-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ow-menu-grid .paper-btn {
+  padding: 8px 6px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  min-height: 40px;
+}
+
 @media (max-width: 980px) {
   .act-copy small {
     display: none;
@@ -1372,7 +1433,7 @@ onBeforeUnmount(() => {
   .ow-bottom-dock {
     flex-direction: column;
     align-items: stretch;
-    gap: 8px;
+    gap: 6px;
   }
 
   .ow-squad-dock {
@@ -1390,6 +1451,129 @@ onBeforeUnmount(() => {
 
   .shrine-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .ow-desktop-only {
+    display: none !important;
+  }
+
+  .ow-mobile-only {
+    display: inline-flex;
+  }
+
+  .ow-top-bar {
+    flex-wrap: nowrap;
+    align-items: center;
+    padding: calc(6px + var(--safe-top, 0px)) 8px 0;
+    gap: 6px;
+  }
+
+  .ow-left-cluster {
+    flex-wrap: nowrap;
+    gap: 5px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .ow-act-pill {
+    padding: 4px 8px;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .act-copy strong {
+    display: none;
+  }
+
+  .bell-dial {
+    padding: 4px 8px;
+    gap: 4px;
+  }
+
+  .bell-copy strong {
+    font-size: 0.72rem;
+  }
+
+  .bell-copy small {
+    display: none;
+  }
+
+  .ow-top-right {
+    flex-wrap: nowrap;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+
+  .ow-bottom-dock {
+    padding: 0 8px calc(8px + var(--safe-bottom, 0px));
+    gap: 5px;
+  }
+
+  .ow-squad-dock {
+    padding: 4px 6px;
+    gap: 4px;
+  }
+
+  .ow-hero-chip {
+    padding: 2px 3px;
+  }
+
+  .ow-hero-img-wrap {
+    width: 30px;
+    height: 30px;
+  }
+
+  .ow-builds-btn {
+    padding: 5px 10px;
+    font-size: 0.74rem;
+    min-height: 36px;
+  }
+
+  .travel-hand-fan {
+    gap: 6px;
+  }
+
+  .travel-card {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    padding: 5px 6px;
+    gap: 2px;
+    transform: none !important;
+  }
+
+  .tc-icon {
+    font-size: 1.15rem;
+  }
+
+  .tc-name {
+    font-size: 0.7rem;
+  }
+
+  .tc-bonus {
+    font-size: 0.62rem;
+    padding: 2px 4px;
+  }
+
+  .ow-stop-card {
+    padding: 6px 9px;
+    gap: 4px;
+  }
+
+  .stop-copy small {
+    display: none;
+  }
+
+  .stop-title-row strong {
+    font-size: 0.84rem;
+  }
+
+  .stop-go-btn {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    min-height: 38px;
   }
 }
 

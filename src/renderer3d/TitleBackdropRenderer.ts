@@ -468,7 +468,7 @@ export class TitleBackdropRenderer {
       { kind: 'pumpkin', team: 'player', x: -2.4, y: 0, z: 0.85 },
       { kind: 'owl', team: 'player', x: -3.55, y: 0, z: -0.85 },
       { kind: 'blueberry', team: 'player', x: -3.55, y: 0, z: 0.35 },
-      { kind: 'goose', team: 'enemy', x: 3.55, y: 0, z: 1.15 },
+      { kind: 'blower', team: 'enemy', x: 3.55, y: 0, z: 1.15 },
       { kind: 'kettlebot', team: 'enemy', x: 2.45, y: 0.52, z: -0.05 },
       { kind: 'scarecrow', team: 'enemy', x: 3.55, y: 0.52, z: -1.1, boss: true },
     ];

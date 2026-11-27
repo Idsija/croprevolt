@@ -48,16 +48,28 @@ describe('overnight expansion: battle poses, heroes, enemies, maps, items, relic
     }
   });
 
-  it('wires all 13 enemies including Watchgoose, Mole Mechanic, and Shielded Tin-Can Tank', () => {
+  it('wires all 13 non-animal enemies including Wheelbarrow Wally, Leaf-Blower Larry, Trencher Ted, and Shielded Tin-Can Tank', () => {
     expect(Object.keys(ENEMY_BLUEPRINTS)).toHaveLength(13);
+    expect(ENEMY_BLUEPRINTS.hound).toBeUndefined();
+    expect(ENEMY_BLUEPRINTS.goose).toBeUndefined();
+    expect(ENEMY_BLUEPRINTS.mole).toBeUndefined();
 
-    const goose = createBattleUnitFromEnemy('goose', 0, { x: 4, y: 2 });
-    expect(goose.weapon.appliesStatus?.kind).toBe('feared');
-    expect(goose.dashKnockback).toBe(1);
+    const wally = createBattleUnitFromEnemy('barrow', 0, { x: 3, y: 2 });
+    expect(wally.moveRange).toBe(5);
+    expect(wally.dashKnockback).toBe(1);
 
-    const mole = createBattleUnitFromEnemy('mole', 1, { x: 5, y: 2 });
-    expect(mole.weapon.arc).toBe('lobbed');
-    expect(mole.weapon.appliesStatus?.kind).toBe('rooted');
+    const larry = createBattleUnitFromEnemy('blower', 0, { x: 4, y: 2 });
+    expect(larry.weapon.appliesStatus?.kind).toBe('feared');
+    expect(larry.dashKnockback).toBe(1);
+
+    const ted = createBattleUnitFromEnemy('sapper', 1, { x: 5, y: 2 });
+    expect(ted.weapon.arc).toBe('lobbed');
+    expect(ted.weapon.appliesStatus?.kind).toBe('rooted');
+
+    // Legacy localStorage save compatibility aliases map cleanly to human farmhands
+    expect(createBattleUnitFromEnemy('hound', 0, { x: 1, y: 1 }).blueprintId).toBe('barrow');
+    expect(createBattleUnitFromEnemy('goose', 0, { x: 1, y: 1 }).blueprintId).toBe('blower');
+    expect(createBattleUnitFromEnemy('mole', 0, { x: 1, y: 1 }).blueprintId).toBe('sapper');
 
     const tank = createBattleUnitFromEnemy('kettlebot', 2, { x: 6, y: 2 });
     expect(hasStatus(tank, 'shield')).toBe(true);
@@ -84,8 +96,9 @@ describe('overnight expansion: battle poses, heroes, enemies, maps, items, relic
       expect(resolveVariantSpriteKey(kind, 'cover')).toBe(`${kind}_cover`);
       expect(resolveVariantSpriteKey(kind, 'action')).toBe(`${kind}_action`);
     }
-    expect(AVAILABLE_VARIANT_SPRITES.has('goose_hit')).toBe(true);
-    expect(AVAILABLE_VARIANT_SPRITES.has('mole_hit')).toBe(true);
+    expect(AVAILABLE_VARIANT_SPRITES.has('barrow_hit')).toBe(true);
+    expect(AVAILABLE_VARIANT_SPRITES.has('blower_hit')).toBe(true);
+    expect(AVAILABLE_VARIANT_SPRITES.has('sapper_hit')).toBe(true);
     expect(AVAILABLE_VARIANT_SPRITES.has('kettlebot_hit')).toBe(true);
     expect(resolveVariantSpriteKey('potato', 'cover')).toBe('potato');
   });

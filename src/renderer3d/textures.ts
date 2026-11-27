@@ -28,10 +28,10 @@ export const UNIT_WORLD_HEIGHTS: Record<string, number> = {
   sprayer: 1.34,
   mower: 1.08,
   beekeeper: 1.42,
-  hound: 1.02,
+  barrow: 1.38,
   pitchfork: 1.48,
-  goose: 1.18,
-  mole: 1.26,
+  blower: 1.44,
+  sapper: 1.42,
   kettlebot: 1.52,
   scarecrow: 1.78,
   harvester: 1.84,
@@ -65,10 +65,10 @@ export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   sprayer: 'left',
   mower: 'left',
   beekeeper: 'left',
-  hound: 'left',
+  barrow: 'left',
   pitchfork: 'right',
-  goose: 'left',
-  mole: 'left',
+  blower: 'left',
+  sapper: 'left',
   kettlebot: 'left',
   scarecrow: 'left',
   harvester: 'left',
@@ -130,10 +130,10 @@ export const AVAILABLE_VARIANT_SPRITES = new Set<string>([
   'sprayer_hit',
   'mower_hit',
   'beekeeper_hit',
-  'hound_hit',
+  'barrow_hit',
   'pitchfork_hit',
-  'goose_hit',
-  'mole_hit',
+  'blower_hit',
+  'sapper_hit',
   'kettlebot_hit',
   'scarecrow_enraged',
   'tractor_enraged',
@@ -622,26 +622,26 @@ export class CraftTextureLibrary {
 
     const seed =
       theme.charCodeAt(0) * 101 + terrain.charCodeAt(0) * 37 + (checker ? 11 : 23);
-    paintPaperGrain(ctx, s, s, seed, 0.13);
+    paintPaperGrain(ctx, s, s, seed, terrain === 'grass' ? 0.055 : 0.11);
 
     const rng = mulberry(seed + 99);
 
     if (terrain === 'grass') {
-      // Soft wet-on-wet watercolor pigment blooms (sunlit sage & warm shadow washes)
-      for (let i = 0; i < 8; i++) {
-        const px = 22 + rng() * (s - 44);
-        const py = 22 + rng() * (s - 44);
-        const pr = 30 + rng() * 44;
-        const g = ctx.createRadialGradient(px, py, 2, px, py, pr);
+      // Calm, low-contrast watercolor washes so characters and tactical highlights pop effortlessly
+      for (let i = 0; i < 3; i++) {
+        const px = 36 + rng() * (s - 72);
+        const py = 36 + rng() * (s - 72);
+        const pr = 56 + rng() * 54;
+        const g = ctx.createRadialGradient(px, py, 4, px, py, pr);
         g.addColorStop(
           0,
           isAutumn
             ? i % 2 === 0
-              ? 'rgba(248, 228, 162, 0.26)'
-              : 'rgba(166, 102, 42, 0.14)'
+              ? 'rgba(244, 224, 168, 0.11)'
+              : 'rgba(156, 102, 46, 0.06)'
             : i % 2 === 0
-              ? 'rgba(232, 245, 168, 0.26)'
-              : 'rgba(72, 114, 52, 0.14)'
+              ? 'rgba(228, 240, 180, 0.11)'
+              : 'rgba(78, 114, 58, 0.06)'
         );
         g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g;
@@ -650,73 +650,33 @@ export class CraftTextureLibrary {
         ctx.fill();
       }
 
-      // Delicate sepia-moss ink nib grass tufts
+      // Whisper-soft grass wisps (subtle paper craft texture, zero busy clutter)
       ctx.lineCap = 'round';
-      for (let i = 0; i < 7; i++) {
-        const bx = 26 + rng() * (s - 52);
-        const by = 26 + rng() * (s - 52);
-        ctx.strokeStyle = isAutumn ? 'rgba(116, 76, 32, 0.56)' : 'rgba(66, 102, 44, 0.52)';
-        ctx.lineWidth = 2.8;
+      ctx.strokeStyle = isAutumn ? 'rgba(120, 82, 36, 0.2)' : 'rgba(66, 98, 46, 0.19)';
+      ctx.lineWidth = 1.8;
+      for (let i = 0; i < 3; i++) {
+        const bx = 42 + rng() * (s - 84);
+        const by = 42 + rng() * (s - 84);
         ctx.beginPath();
-        ctx.moveTo(bx - 5, by + 6);
-        ctx.quadraticCurveTo(bx - 8, by, bx - 10, by - 7);
-        ctx.moveTo(bx, by + 6);
-        ctx.quadraticCurveTo(bx + 1, by - 2, bx + 2, by - 9);
-        ctx.moveTo(bx + 5, by + 6);
-        ctx.quadraticCurveTo(bx + 8, by + 1, bx + 10, by - 6);
-        ctx.stroke();
-
-        ctx.strokeStyle = isAutumn ? 'rgba(255, 242, 184, 0.42)' : 'rgba(226, 247, 168, 0.42)';
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ctx.moveTo(bx, by + 4);
-        ctx.lineTo(bx + 1.5, by - 8);
+        ctx.moveTo(bx - 4, by + 4);
+        ctx.quadraticCurveTo(bx - 6, by, bx - 7, by - 5);
+        ctx.moveTo(bx + 1, by + 4);
+        ctx.quadraticCurveTo(bx + 2, by - 1, bx + 3, by - 6);
         ctx.stroke();
       }
 
-      // Subtle painted storybook flora accents (soft daisies / dusty blush blooms / russet leaves)
-      if (isAutumn) {
-        for (let i = 0; i < 4; i++) {
-          const lx = 34 + rng() * 188;
-          const ly = 34 + rng() * 188;
-          const ang = rng() * Math.PI * 2;
-          ctx.save();
-          ctx.translate(lx, ly);
-          ctx.rotate(ang);
-          ctx.fillStyle = i % 3 === 0 ? '#c45b38' : i % 3 === 1 ? '#d98e3b' : '#e0b853';
-          ctx.strokeStyle = 'rgba(78, 44, 22, 0.55)';
-          ctx.lineWidth = 1.8;
-          ctx.beginPath();
-          ctx.ellipse(0, 0, 10, 4.8, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          ctx.restore();
-        }
-      } else {
-        const flowerCount = checker ? 2 : 1;
-        for (let i = 0; i < flowerCount; i++) {
-          const fx = 36 + rng() * 184;
-          const fy = 36 + rng() * 184;
-          const petalCol = isGreenhouse
-            ? '#faf0c8'
-            : i % 2 === 0
-              ? '#fcf8eb'
-              : '#f0bcc8';
-          ctx.fillStyle = petalCol;
-          ctx.strokeStyle = 'rgba(92, 62, 38, 0.42)';
-          ctx.lineWidth = 1.4;
-          for (let p = 0; p < 5; p++) {
-            const a = (p / 5) * Math.PI * 2;
-            ctx.beginPath();
-            ctx.arc(fx + Math.cos(a) * 4.8, fy + Math.sin(a) * 4.8, 3.8, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-          }
-          ctx.fillStyle = '#e8be4a';
-          ctx.beginPath();
-          ctx.arc(fx, fy, 3.2, 0, Math.PI * 2);
-          ctx.fill();
-        }
+      // Quiet seasonal hint on alternate tiles only (no dark outlines or busy flower dots)
+      if (isAutumn && checker) {
+        const lx = 64 + rng() * 128;
+        const ly = 64 + rng() * 128;
+        ctx.save();
+        ctx.translate(lx, ly);
+        ctx.rotate(rng() * Math.PI);
+        ctx.fillStyle = 'rgba(196, 102, 54, 0.26)';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 7, 3.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       }
     } else if (terrain === 'soil') {
       // Soft tilled garden furrows with warm watercolor wash & pebbles

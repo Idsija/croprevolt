@@ -269,10 +269,17 @@ export function createEscortSeedCart(pos: GridPos): BattleUnit {
   };
 }
 
+const LEGACY_ENEMY_ALIAS: Record<string, string> = {
+  hound: 'barrow',
+  goose: 'blower',
+  mole: 'sapper',
+};
+
 export function createBattleUnitFromEnemy(blueprintId: string, index: number, pos: GridPos): BattleUnit {
-  const bp = ENEMY_BLUEPRINTS[blueprintId];
+  const resolvedId = LEGACY_ENEMY_ALIAS[blueprintId] ?? blueprintId;
+  const bp = ENEMY_BLUEPRINTS[resolvedId];
   if (!bp) throw new Error(`Unknown enemy blueprint: ${blueprintId}`);
-  const isHeavyDiggerVariant = blueprintId === 'digger' && index % 2 === 1;
+  const isHeavyDiggerVariant = resolvedId === 'digger' && index % 2 === 1;
   const enemyUnit: BattleUnit = {
     id: `enemy_${blueprintId}_${index}`,
     blueprintId: bp.id,

@@ -1212,7 +1212,9 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       duck: 0x3ec6e8,
       sprayer: 0x99cc44,
       beekeeper: 0xf5b324,
-      hound: 0xc97f3b,
+      barrow: 0xc97f3b,
+      blower: 0xc98838,
+      sapper: 0x8f6c47,
       pitchfork: 0xdba93b,
       scarecrow: 0x3a2e28,
     };

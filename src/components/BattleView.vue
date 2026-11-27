@@ -125,6 +125,9 @@ const showItemsMenu = ref(false);
 const showUtilityMenu = ref(false);
 const showAlmanac = ref(false);
 const showPrepArmory = ref(false);
+const showPrepBonds = ref(false);
+const prepSwapNotice = ref<string | null>(null);
+let prepSwapNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 const logExpanded = ref(false);
 const inspectedNote = ref<{ title: string; desc: string } | null>(null);
 const zoomPercent = ref(100);
@@ -135,6 +138,21 @@ const endConfirmPending = ref(false);
 const coachStep = ref<number>(loadCoachStep());
 const webglFallbackNotice = ref(false);
 let endConfirmTimer: ReturnType<typeof setTimeout> | null = null;
+
+function handlePrepBenchSwap(benchHero: { uid: string; name: string }): void {
+  const prevName = selectedUnit.value?.name.split(' ')[0] ?? playerUnits.value[0]?.name.split(' ')[0] ?? 'Hero';
+  if (swapPrepBenchHero(benchHero.uid)) {
+    prepSwapNotice.value = `Swapped ${prevName} ⇄ ${benchHero.name.split(' ')[0]}!`;
+    if (prepSwapNoticeTimer) clearTimeout(prepSwapNoticeTimer);
+    prepSwapNoticeTimer = setTimeout(() => {
+      prepSwapNotice.value = null;
+    }, 2400);
+  }
+}
+
+const hasMobileMenuAlert = computed(
+  () => gameStore.showAllDangerZone || gameStore.enemySpeedFast || cameraMode.value === 'tacticam'
+);
 
 function advanceCoach(): void {
   if (coachStep.value < COACH_TIPS.value.length - 1) {
@@ -1393,24 +1411,25 @@ onBeforeUnmount(() => {
                 ? `TURN ${battle.turn}`
                 : gameStore.enemyTurnProgress
                   ? `FARMER ${gameStore.enemyTurnProgress.index}/${gameStore.enemyTurnProgress.total}`
-                  : 'FARMER TURN'
+                  : 'FARMER'
           }}
         </span>
-        <div class="status-copy">
+        <div class="status-copy desktop-only">
           <strong>{{ battle.mapName }}</strong>
           <small>{{ objectiveLine }}</small>
         </div>
+        <span class="mobile-obj-inline mobile-only">{{ objectiveLine }}</span>
         <span
           v-if="battle.parTurns"
-          class="cam-mode-pill par"
+          class="cam-mode-pill par desktop-only"
           :class="{ over: !battle.prepPhase && battle.turn > battle.parTurns }"
           :title="`Win within ${battle.parTurns} turns for a Great Harvest, with no hero bagged for a Perfect Harvest`"
         >
-          ⏱ <span class="desktop-only">Goal: </span>{{ battle.parTurns }} turns
+          ⏱ Goal: {{ battle.parTurns }} turns
         </span>
         <button
           v-if="!battle.prepPhase && activeSquadBonds.length > 0"
-          class="cam-mode-pill bonds"
+          class="cam-mode-pill bonds desktop-only"
           title="Squad Bonds"
           aria-label="Show Squad Bonds"
           @click="inspectAllBonds"
@@ -1420,8 +1439,8 @@ onBeforeUnmount(() => {
         <span v-if="(battle.harvestHeat ?? 0) > 0" class="cam-mode-pill heat">
           🔥 H{{ battle.harvestHeat }}
         </span>
-        <span v-if="is3D && cameraMode === 'aim'" class="cam-mode-pill aim">AIM CAM</span>
-        <span v-else-if="is3D && cameraMode === 'tacticam'" class="cam-mode-pill tacticam">TACTICAM</span>
+        <span v-if="is3D && cameraMode === 'aim'" class="cam-mode-pill aim desktop-only">AIM CAM</span>
+        <span v-else-if="is3D && cameraMode === 'tacticam'" class="cam-mode-pill tacticam desktop-only">TACTICAM</span>
       </div>
 
       <div class="top-actions">
@@ -1437,8 +1456,8 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <!-- 3D Mario + Rabbids Camera Cluster -->
-        <div v-if="is3D" class="cam-cluster kraft-ribbon">
+        <!-- 3D Mario + Rabbids Camera Cluster (Desktop quick bar; mobile lives in Field Notebook menu) -->
+        <div v-if="is3D" class="cam-cluster kraft-ribbon desktop-only">
           <button
             class="cam-btn"
             :class="{ active: cameraMode === 'tacticam' }"
@@ -1446,10 +1465,10 @@ onBeforeUnmount(() => {
             @click="handleToggleTacticam"
           >
             <CraftIcon :name="cameraMode === 'tacticam' ? 'iso' : 'topdown'" :size="15" />
-            <span class="desktop-only">Tacticam</span>
+            <span>Tacticam</span>
           </button>
           <button
-            class="cam-btn desktop-only"
+            class="cam-btn"
             title="Orbit Left (Q)"
             aria-label="Rotate camera left"
             @click="rotate3DCamera(-1)"
@@ -1457,7 +1476,7 @@ onBeforeUnmount(() => {
             ⟲
           </button>
           <button
-            class="cam-btn desktop-only"
+            class="cam-btn"
             title="Orbit Right (E)"
             aria-label="Rotate camera right"
             @click="rotate3DCamera(1)"
@@ -1465,7 +1484,7 @@ onBeforeUnmount(() => {
             ⟳
           </button>
           <button
-            class="cam-btn desktop-only"
+            class="cam-btn"
             title="Reset Camera (R)"
             aria-label="Reset camera"
             @click="recenterBoard"
@@ -1484,9 +1503,9 @@ onBeforeUnmount(() => {
           <span>{{ gameStore.musicMuted ? '🔇' : '🎵' }}</span>
         </button>
 
-        <!-- 1x / 2x Enemy Phase Speed Toggle -->
+        <!-- 1x / 2x Enemy Phase Speed Toggle (Desktop top bar; Mobile inside Menu) -->
         <button
-          class="paper-btn tool-btn speed-btn"
+          class="paper-btn tool-btn speed-btn desktop-only"
           :class="{ 'speed-fast': gameStore.enemySpeedFast }"
           :aria-label="gameStore.enemySpeedFast ? 'Enemy speed 2x (Fast)' : 'Enemy speed 1x (Normal)'"
           title="Toggle Farmer Phase Speed (1× / 2×)"
@@ -1495,9 +1514,9 @@ onBeforeUnmount(() => {
           <span>{{ gameStore.enemySpeedFast ? '2×' : '1×' }}</span>
         </button>
 
-        <!-- Global Enemy Danger Zone Toggle -->
+        <!-- Global Enemy Danger Zone Toggle (Desktop top bar; Mobile inside Menu) -->
         <button
-          class="paper-btn tool-btn"
+          class="paper-btn tool-btn desktop-only"
           :class="{ 'danger-on': gameStore.showAllDangerZone }"
           aria-label="Toggle all enemy danger zones"
           title="Show/Hide All Enemy Danger Zones"
@@ -1507,9 +1526,10 @@ onBeforeUnmount(() => {
         </button>
 
         <button
+          v-if="!battle.prepPhase"
           class="paper-btn tool-btn"
           :class="{ 'undo-ready': Boolean(battle.undoSnapshot) }"
-          :disabled="battle.prepPhase || !battle.undoSnapshot || battle.phase !== 'player' || gameStore.enemyTurnRunning"
+          :disabled="!battle.undoSnapshot || battle.phase !== 'player' || gameStore.enemyTurnRunning"
           aria-label="Undo last move (Z)"
           title="Undo last move (Z)"
           @click="triggerUndoMove"
@@ -1518,20 +1538,16 @@ onBeforeUnmount(() => {
         </button>
 
         <button
-          class="paper-btn tool-btn"
+          class="paper-btn tool-btn menu-tool-btn"
           aria-label="Field Notebook Menu"
-          title="Field Notebook & Settings"
+          title="Field Notebook, Camera, Bonds & Settings"
           @click="showUtilityMenu = !showUtilityMenu"
         >
           <CraftIcon name="menu" :size="16" />
+          <span v-if="hasMobileMenuAlert" class="menu-active-dot mobile-only" aria-hidden="true"></span>
         </button>
       </div>
     </header>
-
-    <!-- Phones: the objective gets its own full-width line under the top bar -->
-    <div v-if="battle.status === 'ongoing'" class="objective-strip mobile-only" role="status">
-      {{ objectiveLine }}
-    </div>
 
     <!-- Farmer Turn: say that a tap fast-forwards it -->
     <div
@@ -1776,6 +1792,16 @@ onBeforeUnmount(() => {
           </ul>
         </div>
 
+        <div v-if="activeSquadBonds.length > 0" class="menu-section">
+          <h4>Active Squad Bonds</h4>
+          <div class="menu-relics">
+            <div v-for="sb in activeSquadBonds" :key="sb.def.id" class="menu-relic-row">
+              <strong>{{ sb.def.icon }} {{ bondChipLabel(sb) }}</strong>
+              <small>{{ sb.effect }}</small>
+            </div>
+          </div>
+        </div>
+
         <div v-if="battle.relicIds.length > 0" class="menu-section">
           <h4>Active Soil Relics</h4>
           <div class="menu-relics">
@@ -1857,9 +1883,9 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="mr-hud-row">
-        <!-- Bottom-Left Mario + Rabbids Slanted Squad Portrait Cards -->
-        <div class="mr-squad-rail">
+      <div class="mr-hud-row" :class="{ 'is-prep': battle.prepPhase }">
+        <!-- Bottom-Left Squad Portrait Cards (Active Battle only — Prep has its own unified Deploy & Swap Bar) -->
+        <div v-if="!battle.prepPhase" class="mr-squad-rail">
           <button
             v-for="(u, idx) in playerUnits"
             :key="u.id"
@@ -1924,7 +1950,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Bottom-Center Mario + Rabbids Command Deck -->
-        <div class="mr-command-wrap">
+        <div class="mr-command-wrap" :class="{ 'prep-wide': battle.prepPhase }">
           <!-- Garden Satchel Popover -->
           <div
             v-if="showItemsMenu && selectedUnit && !selectedUnit.actions.hasUsedSkill"
@@ -1955,45 +1981,41 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <!-- Mobile 1-line Last-Action Ticker -->
-          <button
-            v-if="latestLogLine && !showItemsMenu && !isCombatPreview && !isMovePreview && !isSkillOrItemMode && !inspectedEnemy"
-            class="mobile-log-ticker mobile-only"
-            @click="showUtilityMenu = true"
-          >
-            {{ latestLogLine }}
-          </button>
-
-          <!-- Pre-Battle Tactical Deployment Prep Deck -->
+          <!-- Pre-Battle Unified Tactical Deployment & Explicit Swap Deck -->
           <div v-if="battle.prepPhase" class="corrugated-slab mr-deck deck-prep">
-            <div class="prep-head">
-              <div class="prep-title-copy">
-                <strong>⚔️ TACTICAL PREP · DEPLOY YOUR SQUAD</strong>
-                <small>
-                  Tap a hero &amp; any glowing green spawn tile to swap positions before Turn 1!
-                </small>
+            <div class="prep-top-bar">
+              <div class="prep-top-left">
+                <strong>⚔️ DEPLOY SQUAD</strong>
+                <button
+                  v-if="squadBonds.length > 0"
+                  class="prep-bonds-toggle"
+                  :class="{ active: showPrepBonds }"
+                  @click="showPrepBonds = !showPrepBonds"
+                >
+                  ✨ {{ activeSquadBonds.length }} Bond{{ activeSquadBonds.length === 1 ? '' : 's' }} {{ showPrepBonds ? '▴' : '▾' }}
+                </button>
               </div>
-              <span v-if="selectedUnit" class="prep-selected-pill">
-                Selected: {{ selectedUnit.name.split(' ')[0] }} ({{ selectedUnit.weapon.name }})
-              </span>
+              <div class="prep-top-actions">
+                <button
+                  v-if="gameStore.run"
+                  class="paper-btn gold prep-armory-btn"
+                  title="Swap Alternate Weapons & spend Skill Points before battle"
+                  @click="showPrepArmory = true"
+                >
+                  <span>⚔️ Armory</span>
+                </button>
+                <button
+                  class="paper-btn primary prep-go-btn"
+                  title="Lock formation and start Turn 1 (Enter)"
+                  @click="confirmPrepPhase"
+                >
+                  <span>Start Battle →</span>
+                </button>
+              </div>
             </div>
 
-            <div v-if="prepBenchHeroes.length > 0" class="prep-bench-row">
-              <span class="prep-bench-label">Bench Swap:</span>
-              <button
-                v-for="bh in prepBenchHeroes"
-                :key="bh.uid"
-                class="prep-bench-chip"
-                :title="`Swap ${selectedUnit?.name ?? 'selected hero'} with ${bh.name} (Lv.${bh.level})`"
-                @click="swapPrepBenchHero(bh.uid)"
-              >
-                <img :src="`/sprites/${bh.species}.png`" :alt="bh.name" />
-                <span>{{ bh.name.split(' ')[0] }} L{{ bh.level }}</span>
-              </button>
-            </div>
-
-            <div v-if="squadBonds.length > 0" class="prep-bench-row prep-bond-row">
-              <span class="prep-bench-label">Squad Bonds:</span>
+            <!-- Collapsible Squad Bonds Drawer inside Prep (keeps default view clean!) -->
+            <div v-if="showPrepBonds && squadBonds.length > 0" class="prep-bench-row prep-bond-row">
               <button
                 v-for="sb in squadBonds"
                 :key="sb.def.id"
@@ -2006,21 +2028,53 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
-            <div class="prep-actions">
+            <!-- Clear Always-Visible Contextual Guidance -->
+            <div class="prep-guide-line" role="status">
+              <span v-if="prepSwapNotice" class="prep-swap-ok">✓ {{ prepSwapNotice }}</span>
+              <span v-else-if="selectedUnit">
+                <strong>{{ selectedUnit.name.split(' ')[0] }}</strong> selected · Tap a glowing green tile to move{{ prepBenchHeroes.length > 0 ? ', or tap Bench below to swap ⇄' : '' }}
+              </span>
+              <span v-else>
+                Tap a hero on the field to reposition or swap with the bench ⇄
+              </span>
+            </div>
+
+            <!-- Explicit 4-Slot On-Field Squad Strip -->
+            <div class="prep-slots-grid" aria-label="Deployed Squad">
               <button
-                v-if="gameStore.run"
-                class="paper-btn gold prep-armory-btn"
-                title="Swap Alternate Weapons & spend Skill Points before battle"
-                @click="showPrepArmory = true"
+                v-for="u in playerUnits"
+                :key="u.id"
+                class="prep-slot-btn"
+                :class="{ selected: u.id === gameStore.selectedUnitId }"
+                @click="selectSquadCard(u.id)"
               >
-                <span>⚔️ Armory &amp; Perks</span>
+                <img :src="unitPortraitSrc(u)" :alt="u.name" />
+                <div class="prep-slot-copy">
+                  <strong>{{ u.name.split(' ')[0] }}</strong>
+                  <small>{{ u.hp }}/{{ u.maxHp }} HP</small>
+                </div>
+                <span v-if="u.id === gameStore.selectedUnitId" class="prep-slot-tag">SWAP</span>
               </button>
+            </div>
+
+            <!-- Explicit Bench Swap Row naming who is being replaced -->
+            <div v-if="prepBenchHeroes.length > 0" class="prep-bench-row">
+              <span class="prep-bench-label">
+                ⇄ Swap {{ selectedUnit ? selectedUnit.name.split(' ')[0] : 'Hero' }}:
+              </span>
               <button
-                class="paper-btn primary prep-go-btn"
-                title="Lock formation and start Turn 1 (Enter)"
-                @click="confirmPrepPhase"
+                v-for="bh in prepBenchHeroes"
+                :key="bh.uid"
+                class="prep-bench-chip"
+                :title="`Replace ${selectedUnit?.name ?? 'selected hero'} with ${bh.name} (Lv.${bh.level})`"
+                @click="handlePrepBenchSwap(bh)"
               >
-                <span>Start Battle! →</span>
+                <span class="bench-swap-glyph" aria-hidden="true">⇄</span>
+                <img :src="`/sprites/${bh.species}.png`" :alt="bh.name" />
+                <div class="bench-chip-copy">
+                  <strong>{{ bh.name.split(' ')[0] }}</strong>
+                  <small>L{{ bh.level }} · {{ bh.hp }}HP</small>
+                </div>
               </button>
             </div>
           </div>
@@ -2323,10 +2377,10 @@ onBeforeUnmount(() => {
             <!-- STATE 5: Mario + Rabbids Hero Command Deck -->
             <template v-else-if="selectedUnit">
               <div class="mr-deck-header">
-                <button class="hero-id-btn" title="Hero details" @click="inspectSelectedHeroSummary">
-                  <strong>{{ selectedUnit.name }}</strong>
-                  <span class="lvl-tag">Lv.{{ selectedUnit.level ?? 1 }}</span>
-                  <span class="family-tag">{{ getFamilyLabel(selectedUnit.family) }}</span>
+                <button class="hero-id-btn" title="Tap for hero stats, traits & weapon details" @click="inspectSelectedHeroSummary">
+                  <strong>{{ selectedUnit.name.split(' ')[0] }}</strong>
+                  <span class="lvl-tag">L{{ selectedUnit.level ?? 1 }}</span>
+                  <span class="family-tag desktop-only">{{ getFamilyLabel(selectedUnit.family) }}</span>
                   <span class="weapon-mini desktop-only">
                     {{ selectedUnit.weapon.name }} · {{ selectedUnit.weapon.damage }} DMG · R{{ selectedUnit.weapon.minRange }}-{{ selectedUnit.weapon.maxRange }}
                   </span>
@@ -2334,10 +2388,10 @@ onBeforeUnmount(() => {
 
                 <div class="slot-pills">
                   <button
-                    v-for="badge in selectedStanceBadges"
+                    v-for="(badge, bIdx) in selectedStanceBadges"
                     :key="badge.id"
                     class="stance-chip"
-                    :class="badge.tone"
+                    :class="[badge.tone, { 'desktop-only': bIdx > 0 }]"
                     :title="badge.desc"
                     @click.stop="inspectedNote = { title: badge.label, desc: badge.desc }"
                   >
@@ -2345,7 +2399,7 @@ onBeforeUnmount(() => {
                   </button>
                   <button
                     v-if="battle.undoSnapshot && battle.phase === 'player' && !gameStore.enemyTurnRunning"
-                    class="undo-thumb-chip"
+                    class="undo-thumb-chip desktop-only"
                     title="Undo Move (Z)"
                     @click="triggerUndoMove"
                   >
@@ -2353,17 +2407,17 @@ onBeforeUnmount(() => {
                     <span>Undo</span>
                   </button>
                   <button
-                    v-for="st in selectedUnit.statuses.slice(0, 2)"
+                    v-for="(st, stIdx) in selectedUnit.statuses.slice(0, 2)"
                     :key="st.kind"
                     class="status-chip"
-                    :class="st.kind"
+                    :class="[st.kind, { 'desktop-only': stIdx > 0 || selectedStanceBadges.length > 0 }]"
                     @click.stop="inspectStatus(st.kind, st.turns)"
                   >
-                    {{ STATUS_META[st.kind]?.short }} {{ st.turns }} {{ st.turns === 1 ? 'turn' : 'turns' }}
+                    {{ STATUS_META[st.kind]?.short }} {{ st.turns }}T
                   </button>
                   <button
                     v-if="selectedUnit.coopPassive"
-                    class="coop-pin"
+                    class="coop-pin desktop-only"
                     title="Barnyard Co-op Trait"
                     @click="inspectCoop(selectedUnit.name, selectedUnit.coopPassive)"
                   >
@@ -2372,16 +2426,37 @@ onBeforeUnmount(() => {
                   <button
                     v-for="gid in selectedUnit.graftIds"
                     :key="gid"
-                    class="graft-pin"
+                    class="graft-pin desktop-only"
                     @click="inspectGraft(gid)"
                   >
                     {{ GRAFT_REGISTRY[gid]?.badgeIcon }}
                   </button>
+                  <button
+                    class="paper-btn deck-end-pill"
+                    :class="{
+                      primary: readyHeroesCount === 0 && !endConfirmPending,
+                      danger: endConfirmPending,
+                    }"
+                    :disabled="battle.phase !== 'player' || gameStore.enemyTurnRunning || battle.status !== 'ongoing'"
+                    title="End Player Turn"
+                    @click="requestEndTurn"
+                  >
+                    <CraftIcon name="end_turn" :size="13" />
+                    <span>
+                      {{
+                        endConfirmPending
+                          ? 'End?'
+                          : readyHeroesCount === 0
+                            ? 'End Turn!'
+                            : `End (${readyHeroesCount})`
+                      }}
+                    </span>
+                  </button>
                 </div>
               </div>
 
-              <!-- 6 Mario + Rabbids Action Buttons: Move / Weapon / Hero Sight Watch / Skill / Bag / End -->
-              <div class="mr-action-bar six-col">
+              <!-- 5 Roomy Hero Action Buttons (≥48px touch targets on mobile): Move / Weapon / Watch / Skill / Bag -->
+              <div class="mr-action-bar">
                 <button
                   class="paper-btn sky mr-act-btn"
                   :class="{ 'is-active': gameStore.mode === 'move' && !selectedUnit.actions.hasMoved }"
@@ -2421,7 +2496,7 @@ onBeforeUnmount(() => {
                   <CraftIcon name="attack" :size="15" />
                   <div class="act-copy">
                     <span class="act-title">{{ gameStore.mode === 'attack' ? 'Aiming' : 'Weapon' }}</span>
-                    <small class="act-sub desktop-only">{{ selectedUnit.weapon.damage }} DMG</small>
+                    <small class="act-sub">{{ selectedUnit.weapon.damage }} DMG</small>
                   </div>
                 </button>
 
@@ -2488,26 +2563,6 @@ onBeforeUnmount(() => {
                   <div class="act-copy">
                     <span class="act-title">Bag</span>
                     <small class="act-sub">×{{ totalItemsLeft }}</small>
-                  </div>
-                </button>
-
-                <button
-                  class="paper-btn mr-act-btn end-btn"
-                  :class="{
-                    primary: readyHeroesCount === 0 && !endConfirmPending,
-                    danger: endConfirmPending,
-                  }"
-                  :disabled="battle.phase !== 'player' || gameStore.enemyTurnRunning || battle.status !== 'ongoing'"
-                  @click="requestEndTurn"
-                >
-                  <CraftIcon name="end_turn" :size="15" />
-                  <div class="act-copy">
-                    <span class="act-title">
-                      {{ endConfirmPending ? 'End?' : readyHeroesCount === 0 ? 'End!' : 'End' }}
-                    </span>
-                    <small v-if="readyHeroesCount > 0 && !endConfirmPending" class="act-sub desktop-only">
-                      {{ readyHeroesCount }} to go
-                    </small>
                   </div>
                 </button>
               </div>
@@ -3463,6 +3518,7 @@ onBeforeUnmount(() => {
 .mr-hero-meta {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 2.5px;
@@ -3480,12 +3536,15 @@ onBeforeUnmount(() => {
   font-size: 0.8rem;
   line-height: 1.1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mr-hp-inline {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .mr-hp-txt {
@@ -3493,11 +3552,12 @@ onBeforeUnmount(() => {
   font-weight: 800;
   color: var(--ink-soft);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .mr-hp-bar {
   flex: 1;
-  min-width: 46px;
+  min-width: 0;
   height: 6px;
   border-radius: 99px;
   background: #cbb692;
@@ -4837,79 +4897,356 @@ onBeforeUnmount(() => {
   transition: transform 0.12s ease;
 }
 
-.prep-bench-chip:hover {
-  transform: translateY(-1px);
-  background: #fff3c4;
+.mobile-obj-inline {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
-.prep-bench-chip img {
-  width: 22px;
-  height: 22px;
-  object-fit: contain;
+.menu-tool-btn {
+  position: relative;
 }
 
-.prep-actions {
+.menu-active-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e6492d;
+  border: 1.5px solid #fffdf5;
+}
+
+.deck-end-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  min-height: 30px;
+  font-size: 0.74rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.mr-hud-row.is-prep {
+  justify-content: center;
+}
+
+.mr-command-wrap.prep-wide {
+  max-width: 680px;
+  align-items: center;
+}
+
+.prep-top-bar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
-.prep-armory-btn {
-  padding: 8px 14px;
-  font-size: 0.82rem;
+.prep-top-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prep-top-left strong {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.88rem;
+  color: #1f542a;
+  letter-spacing: 0.02em;
+}
+
+.prep-bonds-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1.6px solid var(--ink);
+  background: linear-gradient(180deg, #ffe9a0 0%, #f5cb54 100%);
+  color: #3e2600;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.prep-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prep-guide-line {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #3b4f32;
+  background: rgba(255, 250, 234, 0.85);
+  border: 1.4px dashed #7f996d;
+  border-radius: 9px;
+  padding: 4px 9px;
+  line-height: 1.25;
+}
+
+.prep-guide-line strong {
+  color: #1a4d22;
   font-weight: 800;
 }
 
-.prep-go-btn {
-  padding: 8px 20px;
-  font-size: 0.92rem;
-  font-weight: 900;
+.prep-swap-ok {
+  color: #1d6322;
+  font-weight: 800;
 }
 
-/* Phones: keep the deployment deck short so the squad and its spawn tiles stay in view. */
+.prep-slots-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.prep-slot-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  min-height: 46px;
+  border-radius: 11px;
+  border: 2px solid var(--ink);
+  background: #fffdf4;
+  box-shadow: 0 2px 0 rgba(74, 44, 23, 0.32);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+
+.prep-slot-btn.selected {
+  border-color: #c9860d;
+  background: linear-gradient(180deg, #fff5c8 0%, #ffe388 100%);
+  box-shadow: 0 0 0 2px #fff9e6, 0 3px 0 #7a4b00;
+  transform: translateY(-1px);
+}
+
+.prep-slot-btn img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.prep-slot-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.prep-slot-copy strong {
+  font-family: 'Fredoka', sans-serif;
+  font-size: 0.74rem;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prep-slot-copy small {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.prep-slot-tag {
+  position: absolute;
+  top: -7px;
+  right: 5px;
+  background: #c97d0c;
+  color: #fffef4;
+  border: 1.4px solid var(--ink);
+  border-radius: 999px;
+  padding: 0 5px;
+  font-size: 0.54rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.prep-bench-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px 4px 6px;
+  min-height: 40px;
+  border-radius: 11px;
+  border: 2px solid var(--ink);
+  background: #fff8e2;
+  color: var(--ink);
+  font-family: 'Fredoka', sans-serif;
+  cursor: pointer;
+  box-shadow: 0 2px 0 rgba(74, 44, 23, 0.3);
+}
+
+.prep-bench-chip:hover {
+  transform: translateY(-1px);
+  background: #ffeeb3;
+}
+
+.bench-swap-glyph {
+  font-size: 0.8rem;
+  font-weight: 900;
+  color: #9e5f0d;
+}
+
+.prep-bench-chip img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.bench-chip-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.08;
+}
+
+.bench-chip-copy strong {
+  font-size: 0.74rem;
+}
+
+.bench-chip-copy small {
+  font-size: 0.6rem;
+  color: var(--ink-soft);
+}
+
+.prep-armory-btn {
+  padding: 6px 11px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  min-height: 36px;
+}
+
+.prep-go-btn {
+  padding: 6px 14px;
+  font-size: 0.84rem;
+  font-weight: 900;
+  min-height: 36px;
+}
+
+/* Phones: calm single-row top bar, crisp hero cards, roomy 5-col actions & clear prep swap */
 @media (max-width: 767px) {
-  .deck-prep {
+  .mr-top-banner {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 9px;
     gap: 6px;
-    padding: 8px 10px;
   }
-  .prep-title-copy small,
-  .prep-selected-pill {
+
+  .mr-hero-card {
+    padding: 4px 5px;
+    gap: 4px;
+  }
+
+  .mr-hp-bar {
     display: none;
   }
-  .prep-title-copy strong {
-    font-size: 0.8rem;
+
+  .mr-hp-txt {
+    font-size: 0.66rem;
+    font-weight: 900;
+    color: var(--ink);
   }
+
+  .mr-act-btn {
+    min-height: 50px;
+    padding: 5px 2px;
+  }
+
+  .deck-end-pill {
+    padding: 4px 9px;
+    min-height: 32px;
+    font-size: 0.72rem;
+  }
+
+  .deck-prep {
+    gap: 6px;
+    padding: 8px 9px;
+  }
+
+  .prep-top-left strong {
+    font-size: 0.78rem;
+  }
+
+  .prep-slots-grid {
+    gap: 4px;
+  }
+
+  .prep-slot-btn {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 2px;
+    padding: 5px 3px 4px;
+    min-height: 54px;
+    text-align: center;
+  }
+
+  .prep-slot-btn img {
+    width: 24px;
+    height: 24px;
+  }
+
+  .prep-slot-copy strong {
+    font-size: 0.66rem;
+  }
+
+  .prep-slot-copy small {
+    font-size: 0.56rem;
+  }
+
   .prep-bench-row {
     flex-wrap: nowrap;
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
+
   .prep-bench-row::-webkit-scrollbar {
     display: none;
   }
+
   .prep-bench-row > * {
     flex-shrink: 0;
   }
-  .prep-actions > .paper-btn {
-    flex: 1;
-  }
-}
 
-/* Phones: the turn-1 tips are a slim note, not a card over the farmers. */
-@media (max-width: 767px) {
+  /* Dock Turn-1 coach tips right above bottom HUD on phones so enemies are NEVER covered */
   .coach-note {
+    top: auto;
+    bottom: calc(174px + var(--safe-bottom, 0px));
     padding: 6px 8px 6px 12px;
     gap: 6px;
+    max-width: calc(100vw - 16px);
   }
+
   .coach-copy strong {
     font-size: 0.74rem;
   }
+
   .coach-copy small {
     font-size: 0.66rem;
-    line-height: 1.25;
+    line-height: 1.22;
     white-space: normal;
+  }
+
+  .boss-telegraph-strip {
+    top: calc(54px + var(--safe-top));
   }
 }
 
