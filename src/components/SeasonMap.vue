@@ -311,7 +311,13 @@ function recenterMap(): void {
 }
 
 function onMapKeyDown(e: KeyboardEvent): void {
-  if (showBuildModal.value || showAlmanac.value || run.value.status === 'shrine' || isTraveling.value) {
+  if (showBuildModal.value || showAlmanac.value || isTraveling.value) {
+    return;
+  }
+  if (run.value.status === 'shrine') {
+    if (e.key === '1') pickShrineBlessing('heal');
+    else if (e.key === '2') pickShrineBlessing('blessing');
+    else if (e.key === '3') pickShrineBlessing('seeds');
     return;
   }
   if (e.key === 'Escape') {
@@ -710,6 +716,7 @@ onBeforeUnmount(() => {
             v-if="isSelectedAvailable"
             class="paper-btn primary stop-go-btn"
             :disabled="isTraveling"
+            title="March to selected stop (Enter / Space)"
             @click="enterSelectedStop"
           >
             <span>{{ isTraveling ? 'Hopping...' : 'March →' }}</span>
@@ -756,27 +763,27 @@ onBeforeUnmount(() => {
         <div class="shrine-head">
           <span class="shrine-badge">💧 WATERING SHRINE</span>
           <h2>Choose a Spring Blessing</h2>
-          <p>Cool mossy springwater shimmers beside the painted trail. Take one blessing before marching on:</p>
+          <p>Cool mossy springwater shimmers beside the painted trail. Take one blessing before marching on (or press 1–3):</p>
         </div>
 
         <div class="shrine-grid">
           <button class="shrine-opt heal" @click="pickShrineBlessing('heal')">
             <span class="so-icon">💧</span>
-            <strong>Full Squad Heal</strong>
+            <strong>1 · Full Squad Heal</strong>
             <small>Restore every active &amp; benched hero to 100% Max HP.</small>
             <span class="paper-btn primary so-cta">Drink Fresh Water</span>
           </button>
 
           <button class="shrine-opt blessing" @click="pickShrineBlessing('blessing')">
             <span class="so-icon">✨</span>
-            <strong>Sunlit Battle Blessing</strong>
+            <strong>2 · Sunlit Battle Blessing</strong>
             <small>Next battle: all heroes start with +2 ATK, Shield (2t), and +1 Move!</small>
             <span class="paper-btn gold so-cta">Receive Blessing</span>
           </button>
 
           <button class="shrine-opt seeds" @click="pickShrineBlessing('seeds')">
             <span class="so-icon">🌱</span>
-            <strong>Heirloom Seed Offering</strong>
+            <strong>3 · Heirloom Seed Offering</strong>
             <small>Gather +14 Run Seeds from the shrine's wishing trough for Market &amp; Armory stops.</small>
             <span class="paper-btn so-cta">Collect +14 Seeds</span>
           </button>

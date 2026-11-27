@@ -11,7 +11,8 @@ import {
   savePlayerName,
   type OnlineScoreRow,
 } from '../engine/onlineScores';
-import { COOP_PLAYER_PRESETS, META_UNLOCK_COSTS } from '../engine/run';
+import { COOP_PLAYER_PRESETS, loadSavedRun, META_UNLOCK_COSTS } from '../engine/run';
+import { getFamilyLabel } from '../engine/hooks';
 import { activeStreak, loadDailyState } from '../engine/daily';
 import { dailyKeyFor, loadScores, topDailyScores, topStandardScores } from '../engine/score';
 import type { MetaProgress } from '../engine/types';
@@ -41,6 +42,27 @@ const heatDrawerOpen = ref(false);
 const unlockedHeroSet = computed(() => new Set(gameStore.meta.unlockedHeroIds ?? STARTER_BLUEPRINT_IDS));
 const totalHeroesCount = Object.keys(PRODUCE_BLUEPRINTS).length;
 const unlockedHeroesCount = computed(() => unlockedHeroSet.value.size);
+const affordableHeroUnlocks = computed(
+  () =>
+    HERO_UNLOCK_CATALOG.filter(
+      (entry) => !unlockedHeroSet.value.has(entry.id) && gameStore.meta.heirloomSeeds >= entry.cost
+    ).length
+);
+const savedRunPreview = computed(() => {
+  if (!gameStore.savedRunAvailable) return '';
+  const saved = loadSavedRun();
+  if (!saved) return '';
+  const coopTag =
+    saved.coopPlayers && saved.coopPlayers.length > 1 ? ` · ${saved.coopPlayers.length}P Co-Op` : '';
+  if (saved.mode === 'endless' && saved.endless) {
+    return `♾️ Endless Fl.${saved.endless.floor}${coopTag}`;
+  }
+  if (saved.mode === 'daily') {
+    return `📅 Daily Garden`;
+  }
+  const seasonLabel = saved.act === 1 ? 'Summer' : saved.act === 2 ? 'Autumn' : 'Spring';
+  return `🗺️ Act ${(saved.act ?? 0) + 1} ${seasonLabel}${coopTag}`;
+});
 const coopChoices = [1, 2, 3, 4] as const;
 
 const todayKey = dailyKeyFor();
@@ -314,11 +336,12 @@ onBeforeUnmount(() => {
       <div class="cta-stack">
         <button
           v-if="gameStore.savedRunAvailable"
-          class="paper-btn gold diecut cta-main"
+          class="paper-btn gold diecut cta-main continue-btn-rich"
           @click="continueSavedRun"
         >
           <CraftIcon name="play" :size="18" />
           <span>Continue Saved Run</span>
+          <span v-if="savedRunPreview" class="saved-preview-pill">{{ savedRunPreview }}</span>
         </button>
 
         <!-- Illustrated Two-Column Primary Modes: Campaign Board vs Endless Harvest -->
@@ -361,9 +384,16 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="secondary-row three-col">
-          <button class="paper-btn sec-btn" @click="shedTab = 'greenhouse'; activeModal = 'shed'">
+          <button
+            class="paper-btn sec-btn greenhouse-cta"
+            :class="{ 'has-unlocks': affordableHeroUnlocks > 0 }"
+            @click="shedTab = 'greenhouse'; activeModal = 'shed'"
+          >
             <span>🌱 Greenhouse</span>
-            <span class="mini-count">{{ unlockedHeroesCount }}/{{ totalHeroesCount }}</span>
+            <span v-if="affordableHeroUnlocks > 0" class="ready-unlock-pill">
+              ✨ {{ affordableHeroUnlocks }} Ready!
+            </span>
+            <span v-else class="mini-count">{{ unlockedHeroesCount }}/{{ totalHeroesCount }}</span>
           </button>
 
           <button class="paper-btn gold sec-btn" @click="activeModal = 'almanac'">
@@ -542,7 +572,10 @@ onBeforeUnmount(() => {
               v-for="entry in HERO_UNLOCK_CATALOG"
               :key="entry.id"
               class="gh-card"
-              :class="{ unlocked: unlockedHeroSet.has(entry.id) }"
+              :class="{
+                unlocked: unlockedHeroSet.has(entry.id),
+                affordable: !unlockedHeroSet.has(entry.id) && gameStore.meta.heirloomSeeds >= entry.cost,
+              }"
             >
               <div class="gh-port">
                 <img
@@ -554,6 +587,11 @@ onBeforeUnmount(() => {
               <div class="gh-copy">
                 <strong>{{ PRODUCE_BLUEPRINTS[entry.id].name }}</strong>
                 <small>{{ entry.tagline }}</small>
+                <span class="gh-stat-line">
+                  {{ PRODUCE_BLUEPRINTS[entry.id].isAnimal ? '🐾 Barnyard' : getFamilyLabel(PRODUCE_BLUEPRINTS[entry.id].family) }}
+                  · ❤️ {{ PRODUCE_BLUEPRINTS[entry.id].maxHp }}
+                  · 🎯 {{ PRODUCE_BLUEPRINTS[entry.id].weapon.name }}
+                </span>
               </div>
               <span v-if="unlockedHeroSet.has(entry.id)" class="paper-pill owned-pill gh-pill">
                 ✓ Unlocked
@@ -1647,5 +1685,59 @@ onBeforeUnmount(() => {
   .st-5 { height: 58px; margin-right: -12px; }
   .st-trim { height: 62px; margin-right: -10px; }
   .st-6 { height: 74px; }
+}
+
+.continue-btn-rich {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.saved-preview-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(74, 42, 12, 0.14);
+  border: 1.5px solid rgba(74, 42, 12, 0.28);
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #4a2a0c;
+  white-space: nowrap;
+}
+.greenhouse-cta {
+  position: relative;
+}
+.greenhouse-cta.has-unlocks {
+  border-color: #3d8428;
+  background: linear-gradient(180deg, #effce6, #d7f2c4);
+}
+.ready-unlock-pill {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #3d8428;
+  color: #fffdf5;
+  font-size: 0.68rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  .greenhouse-cta .ready-unlock-pill {
+    position: absolute;
+    top: -8px;
+    right: -4px;
+    padding: 1px 6px;
+    font-size: 0.62rem;
+    border: 1.5px solid #fffdf5;
+    box-shadow: 0 2px 3px rgba(32, 68, 18, 0.3);
+  }
+}
+.gh-card.affordable {
+  border-color: #d68d12;
+  background: linear-gradient(180deg, #fffdf4, #fff4d1);
+  box-shadow: 0 3px 0 rgba(168, 104, 12, 0.28);
+}
+.gh-stat-line {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #6b4926;
 }
 </style>

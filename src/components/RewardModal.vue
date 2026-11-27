@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { GRADE_LABELS } from '../engine/par';
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
 import { PRODUCE_BLUEPRINTS } from '../data/produce';
@@ -30,8 +30,13 @@ const confirmSkipUnclaimed = ref(false);
 const showBuildModal = ref(false);
 const buildFocusHeroUid = ref<string | null>(null);
 
+const totalUnspentSp = computed(() =>
+  run.value.roster.reduce((sum, h) => sum + (h.harvested ? 0 : h.skillPoints), 0)
+);
+
 function openLevelUpBuilds(uid?: string): void {
-  buildFocusHeroUid.value = uid ?? reward.value.levelUps?.[0]?.heroUid ?? null;
+  const firstSpHero = run.value.roster.find((h) => !h.harvested && h.skillPoints > 0)?.uid ?? null;
+  buildFocusHeroUid.value = uid ?? reward.value.levelUps?.[0]?.heroUid ?? firstSpHero;
   showBuildModal.value = true;
 }
 
@@ -96,6 +101,17 @@ function handleContinue(): void {
   }
   closeRewardsToMap();
 }
+
+function onRewardKeyDown(e: KeyboardEvent): void {
+  if (showBuildModal.value) return;
+  if (e.key === 'Enter' && unclaimedCount.value === 0) {
+    e.preventDefault();
+    closeRewardsToMap();
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onRewardKeyDown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onRewardKeyDown));
 
 function nextTierLabel(graftCount: number): string {
   if (graftCount === 0) return 'Promotes → RIPE (+2 HP, +1 ATK)';
@@ -433,20 +449,31 @@ function nextTierLabel(graftCount: number): string {
 
       <!-- Sticky Thumb-Friendly Footer CTA -->
       <footer class="reward-foot">
-        <button
-          class="paper-btn diecut done-btn"
-          :class="confirmSkipUnclaimed ? 'danger' : unclaimedCount > 0 ? 'gold' : 'primary'"
-          @click="handleContinue"
-        >
-          <CraftIcon name="map" :size="18" />
-          <span v-if="confirmSkipUnclaimed">
-            Leave {{ unclaimedCount }} unclaimed reward{{ unclaimedCount > 1 ? 's' : '' }}? Tap again →
-          </span>
-          <span v-else-if="unclaimedCount > 0">
-            Continue ({{ unclaimedCount }} reward{{ unclaimedCount > 1 ? 's' : '' }} left) →
-          </span>
-          <span v-else>Continue to Garden Trail →</span>
-        </button>
+        <div class="reward-foot-row">
+          <button
+            v-if="totalUnspentSp > 0"
+            class="paper-btn gold diecut foot-sp-btn"
+            @click="openLevelUpBuilds()"
+          >
+            🌳 Spend {{ totalUnspentSp }} SP
+          </button>
+          <button
+            class="paper-btn diecut done-btn"
+            :class="confirmSkipUnclaimed ? 'danger' : unclaimedCount > 0 ? 'gold' : 'primary'"
+            @click="handleContinue"
+          >
+            <CraftIcon name="map" :size="18" />
+            <span v-if="confirmSkipUnclaimed">
+              Leave {{ unclaimedCount }} unclaimed reward{{ unclaimedCount > 1 ? 's' : '' }}? Tap again →
+            </span>
+            <span v-else-if="unclaimedCount > 0">
+              Continue ({{ unclaimedCount }} reward{{ unclaimedCount > 1 ? 's' : '' }} left) →
+            </span>
+            <span v-else>
+              {{ run.mode === 'endless' ? 'Continue to Next Floor →' : 'Continue to Garden Trail →' }}
+            </span>
+          </button>
+        </div>
       </footer>
     </div>
 
@@ -812,5 +839,24 @@ function nextTierLabel(graftCount: number): string {
   border-color: #3d7d2e;
   font-size: 0.68rem;
   font-weight: 800;
+}
+.reward-foot-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+.reward-foot-row .done-btn {
+  flex: 1;
+}
+.foot-sp-btn {
+  white-space: nowrap;
+  padding-inline: 14px;
+  font-weight: 800;
+}
+@media (max-width: 520px) {
+  .reward-foot-row {
+    flex-direction: column;
+  }
 }
 </style>

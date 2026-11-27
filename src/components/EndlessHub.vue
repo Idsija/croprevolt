@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import {
   claimEndlessBonus,
   closeEndlessBonusRoom,
@@ -70,6 +70,44 @@ function triggerCarnivalSpin(): void {
     wheelSpinning.value = false;
   }, 940);
 }
+
+function onEndlessKeyDown(e: KeyboardEvent): void {
+  if (buildModalOpen.value || wheelSpinning.value) return;
+  const lower = e.key.toLowerCase();
+  if (lower === 's') {
+    openHeroBuild();
+    return;
+  }
+  if (isBonusRoom.value && activeBonus.value) {
+    if (activeBonus.value.claimed) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        closeEndlessBonusRoom();
+      }
+      return;
+    }
+    if (activeBonus.value.kind === 'carnival') {
+      if (e.key === '1') triggerCarnivalSpin();
+      else if (e.key === '2') claimEndlessBonus('recruit');
+    } else if (activeBonus.value.kind === 'tinkerer') {
+      if (e.key === '1') claimEndlessBonus('weapon');
+      else if (e.key === '2') claimEndlessBonus('sp');
+      else if (e.key === '3') claimEndlessBonus('satchel');
+    } else {
+      if (e.key === '1') claimEndlessBonus('soak');
+      else if (e.key === '2') claimEndlessBonus('vigor');
+      else if (e.key === '3') claimEndlessBonus('swift');
+    }
+    return;
+  }
+  if (e.key === '1' || e.key === '2') {
+    const opt = endless.value.nextOptions[Number(e.key) - 1];
+    if (opt) enterEndlessOption(opt.id);
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onEndlessKeyDown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onEndlessKeyDown));
 </script>
 
 <template>

@@ -176,6 +176,8 @@ const ARENA_MODIFIER_META: Record<
   rolling_patch: { label: '🎃 Rolling Patch (+2 Pumpkins)', short: '🎃 Rolling Patch' },
   buzzing_yard: { label: '🐝 Buzzing Yard (+2 Beehives)', short: '🐝 Buzzing Yard' },
   seed_convoy: { label: '🌱 Seed Convoy (+10 Bonus Seeds)', short: '🌱 +10 Seed Convoy' },
+  healing_compost: { label: '🌿 Healing Compost (+2 Compost Beds)', short: '🌿 Healing Compost' },
+  burrow_network: { label: '🕳️ Burrow Network (+2 Warp Pipes)', short: '🕳️ Burrow Network' },
 };
 
 const ARENA_MODIFIER_KEYS = Object.keys(ARENA_MODIFIER_META) as Array<
@@ -622,8 +624,9 @@ export function generateEndlessFloorMap(
 
   // 5B. Apply Endless Arena Modifier spice!
   const mod = option.arenaModifier ?? 'standard';
-  if (mod === 'sunbeam_surge' || mod === 'bouncy_meadow') {
-    const bonusTerrain: TerrainType = mod === 'sunbeam_surge' ? 'sunbeam' : 'bounce_pad';
+  if (mod === 'sunbeam_surge' || mod === 'bouncy_meadow' || mod === 'healing_compost') {
+    const bonusTerrain: TerrainType =
+      mod === 'sunbeam_surge' ? 'sunbeam' : mod === 'bouncy_meadow' ? 'bounce_pad' : 'compost';
     let placed = 0;
     for (let tries = 0; tries < 50 && placed < 2; tries++) {
       const mx = 1 + Math.floor(rng() * Math.max(1, width - 2));
@@ -632,6 +635,25 @@ export function generateEndlessFloorMap(
       if (grid[my][mx].terrain === 'ramp' || grid[my][mx].terrain === 'bridge' || grid[my][mx].terrain === 'burrow') continue;
       setTile(mx, my, { terrain: bonusTerrain });
       placed += 1;
+    }
+  } else if (mod === 'burrow_network') {
+    const pickBurrow = (yMin: number, yMax: number): GridPos | null => {
+      for (let tries = 0; tries < 40; tries++) {
+        const bx = Math.floor(rng() * width);
+        const by = yMin + Math.floor(rng() * Math.max(1, yMax - yMin + 1));
+        if (!isFree(bx, by)) continue;
+        const cur = grid[by][bx].terrain;
+        if (cur === 'ramp' || cur === 'bridge' || cur === 'burrow' || cur === 'bounce_pad') continue;
+        return { x: bx, y: by };
+      }
+      return null;
+    };
+    const southPipe = pickBurrow(Math.max(1, height - 3), height - 2);
+    const northPipe = pickBurrow(1, Math.max(2, Math.floor(height * 0.42)));
+    if (southPipe && northPipe && (southPipe.x !== northPipe.x || southPipe.y !== northPipe.y)) {
+      setTile(southPipe.x, southPipe.y, { terrain: 'burrow' });
+      setTile(northPipe.x, northPipe.y, { terrain: 'burrow' });
+      burrowPairs.push([southPipe, northPipe]);
     }
   } else if (mod === 'rolling_patch' || mod === 'buzzing_yard') {
     const bonusCover: Exclude<CoverKind, 'none'> = mod === 'rolling_patch' ? 'pumpkin' : 'beehive';

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { EVENT_REGISTRY } from '../engine/events';
 import { chooseEventOption, closeEventToMap, gameStore } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
@@ -8,6 +8,27 @@ const run = computed(() => gameStore.run!);
 const pending = computed(() => run.value.pendingEvent!);
 const event = computed(() => EVENT_REGISTRY[pending.value.eventId]);
 const resolved = computed(() => pending.value.outcome !== null);
+
+function onEventKeyDown(e: KeyboardEvent): void {
+  if (resolved.value) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+      e.preventDefault();
+      closeEventToMap();
+    }
+    return;
+  }
+  if (e.key >= '1' && e.key <= '3') {
+    const idx = Number(e.key) - 1;
+    const choice = event.value?.choices[idx];
+    if (choice && !choice.blockedReason?.(run.value)) {
+      e.preventDefault();
+      chooseEventOption(idx);
+    }
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onEventKeyDown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onEventKeyDown));
 </script>
 
 <template>
@@ -39,7 +60,10 @@ const resolved = computed(() => pending.value.outcome !== null);
             :disabled="Boolean(choice.blockedReason?.(run))"
             @click="chooseEventOption(i)"
           >
-            <strong>{{ choice.label }}</strong>
+            <div class="choice-title-row">
+              <kbd class="ev-kbd">{{ i + 1 }}</kbd>
+              <strong>{{ choice.label }}</strong>
+            </div>
             <small>{{ choice.blockedReason?.(run) ?? choice.hint }}</small>
           </button>
         </div>
@@ -56,6 +80,7 @@ const resolved = computed(() => pending.value.outcome !== null);
         <button class="paper-btn primary diecut done-btn" @click="closeEventToMap">
           <CraftIcon name="map" :size="18" />
           <span>Continue to Garden Trail →</span>
+          <kbd class="ev-kbd light">Enter</kbd>
         </button>
       </footer>
     </div>
@@ -216,5 +241,32 @@ const resolved = computed(() => pending.value.outcome !== null);
   .event-body { padding: 12px 14px; }
   .event-foot { padding: 10px 14px 12px; }
   .vignette-sprite { width: 56px; height: 56px; }
+  .ev-kbd { display: none; }
+}
+.choice-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ev-kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  font-family: inherit;
+  background: #f0dfbd;
+  border: 1.5px solid #8a6235;
+  color: #4a2d12;
+  flex-shrink: 0;
+}
+.ev-kbd.light {
+  background: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fffdf5;
+  margin-left: 6px;
 }
 </style>

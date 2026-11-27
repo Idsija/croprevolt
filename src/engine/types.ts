@@ -476,6 +476,8 @@ export type EndlessArenaModifier =
   | 'rolling_patch'
   | 'buzzing_yard'
   | 'seed_convoy'
+  | 'healing_compost'
+  | 'burrow_network'
   | 'standard';
 
 export interface EndlessFloorOption {

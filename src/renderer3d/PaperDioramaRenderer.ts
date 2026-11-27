@@ -722,8 +722,13 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           this.spawnBurst(pAlly.clone().add(new THREE.Vector3(0, 0.5, 0)), ['#f6d55c', '#fff4b8', '#fbf3df'], 14, 'confetti');
           this.spawnPopup(pAlly.clone().add(new THREE.Vector3(0, 1.4, 0)), 'TEAM JUMP!', '#6b4700', '#fff4b8', 1.1);
           if (ev.coopBoost) {
-            this.spawnBurst(pTo.clone().add(new THREE.Vector3(0, 0.55, 0)), ['#fce078', '#ff9234', '#fbf3df'], 16, 'confetti');
-            this.spawnPopup(pTo.clone().add(new THREE.Vector3(0, 1.65, 0)), ev.coopBoost, '#8a3c00', '#ffe994', 1.14);
+            this.spawnBurst(
+              pTo.clone().add(new THREE.Vector3(0, 0.58, 0)),
+              ['#d84840', '#2b78d4', '#f6d55c', '#58b947', '#fffdf5'],
+              30,
+              'confetti'
+            );
+            this.spawnPopup(pTo.clone().add(new THREE.Vector3(0, 1.72, 0)), ev.coopBoost, '#8a3c00', '#ffe994', 1.22);
           }
           sfx.jump();
           break;
@@ -859,17 +864,24 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
 
         case 'cover_break': {
           const p = this.worldPointForTile(b, ev.pos, 0.48);
+          const isSabotageCrate = b.objective === 'smash_crates' && ev.kind === 'crate';
           const cols =
             ev.kind === 'haystack'
               ? ['#e7bd4c', '#f5de8a', '#b88625']
-              : ['#c98d4b', '#96612c', '#e6c28b'];
-          this.spawnBurst(p, cols, 22, 'plank');
+              : isSabotageCrate
+                ? ['#ffd652', '#e53e30', '#fff9e6', '#c98d4b']
+                : ['#c98d4b', '#96612c', '#e6c28b'];
+          this.spawnBurst(p, cols, isSabotageCrate ? 28 : 22, isSabotageCrate ? 'confetti' : 'plank');
           this.spawnPopup(
-            p.clone().add(new THREE.Vector3(0, 0.8, 0)),
-            ev.splashDamage ? `SMASH! +${ev.splashDamage} AoE` : 'CRUNCH!',
-            '#6d3b12',
-            '#fde9c9',
-            1.05
+            p.clone().add(new THREE.Vector3(0, 0.85, 0)),
+            ev.splashDamage
+              ? `SMASH! +${ev.splashDamage} AoE`
+              : isSabotageCrate
+                ? 'SUPPLY SMASHED!'
+                : 'CRUNCH!',
+            isSabotageCrate ? '#a61c14' : '#6d3b12',
+            isSabotageCrate ? '#fff4b8' : '#fde9c9',
+            isSabotageCrate ? 1.18 : 1.05
           );
           sfx.coverBreak();
           break;

@@ -2147,10 +2147,10 @@ onBeforeUnmount(() => {
                 <button
                   v-if="gameStore.run"
                   class="paper-btn gold prep-armory-btn"
-                  title="Swap Alternate Weapons & spend Skill Points before battle"
+                  title="Swap Alternate Weapons, Bench Heroes & spend Skill Points before battle"
                   @click="showPrepArmory = true"
                 >
-                  <span>⚔️ Armory</span>
+                  <span>⚔️ Armory{{ prepBenchHeroes.length > 0 ? ` · ${prepBenchHeroes.length} Bench` : '' }}</span>
                 </button>
                 <button
                   class="paper-btn primary prep-go-btn"
@@ -5672,5 +5672,17 @@ onBeforeUnmount(() => {
   padding: 8px 12px;
   font-size: 0.78rem;
   justify-content: center;
+}
+.mr-hero-card.low-hp:not(.ko) {
+  border-color: #d93829 !important;
+  animation: lowHpPulse 1.5s ease-in-out infinite;
+}
+@keyframes lowHpPulse {
+  0%, 100% {
+    box-shadow: 0 3px 0 #7a1c14, 0 0 0 0 rgba(217, 56, 41, 0.35);
+  }
+  50% {
+    box-shadow: 0 3px 0 #7a1c14, 0 0 0 5px rgba(217, 56, 41, 0.22);
+  }
 }
 </style>
