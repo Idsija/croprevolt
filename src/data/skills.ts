@@ -50,13 +50,19 @@ export interface PerkEffects {
   acidExplosionOnKill?: boolean;
   killRefreshesDash?: boolean;
   killRefundsCd?: boolean;
+  /** Dual-Weapon & Mario+Rabbids Capstone effects! */
+  gimmickBonusDmg?: number;
+  gimmickExtraPullPush?: number;
+  dualSwapBoost?: boolean;
+  dualTapSecondShot?: boolean;
+  dashChainsJump?: boolean;
 }
 
 export interface SkillPerkDef {
   id: string;
   species: HeroSpecies;
   path: SkillPathKey;
-  tier: 1 | 2 | 3;
+  tier: 1 | 2 | 3 | 4;
   cost: number;
   requires?: string;
   name: string;
@@ -73,7 +79,7 @@ export interface SkillPathDef {
   color: string;
   accent: string;
   tagline: string;
-  perks: [SkillPerkDef, SkillPerkDef, SkillPerkDef];
+  perks: SkillPerkDef[];
 }
 
 export interface HeroSkillTreeDef {
@@ -83,7 +89,7 @@ export interface HeroSkillTreeDef {
   pathC: SkillPathDef;
 }
 
-export const MAX_HERO_LEVEL = 8;
+export const MAX_HERO_LEVEL = 10;
 
 /** XP thresholds required to advance from level N -> N+1. */
 export const XP_TO_NEXT_LEVEL: Record<number, number> = {
@@ -94,6 +100,8 @@ export const XP_TO_NEXT_LEVEL: Record<number, number> = {
   5: 195,
   6: 245,
   7: 300,
+  8: 360,
+  9: 430,
 };
 
 export function getXpToNextLevel(level: number): number {
@@ -103,7 +111,7 @@ export function getXpToNextLevel(level: number): number {
 function makePerk(
   species: HeroSpecies,
   path: SkillPathKey,
-  tier: 1 | 2 | 3,
+  tier: 1 | 2 | 3 | 4,
   id: string,
   name: string,
   icon: string,
@@ -117,7 +125,7 @@ function makePerk(
     species,
     path,
     tier,
-    cost: tier === 3 ? 2 : 1,
+    cost: tier >= 3 ? 2 : 1,
     requires,
     name,
     icon,
@@ -1468,20 +1476,78 @@ const PATH_C_BY_SPECIES: Record<HeroSpecies, SkillPathDef> = {
   ),
 };
 
+function buildTier4Capstone(species: HeroSpecies, pathKey: SkillPathKey, tier3Id: string): SkillPerkDef {
+  const capByPath: Record<
+    SkillPathKey,
+    { suffix: string; name: string; icon: string; shortDesc: string; description: string; effects: PerkEffects }
+  > = {
+    pathA: {
+      suffix: 't4a',
+      name: 'Dual-Draw Mastery',
+      icon: '⚡',
+      shortDesc: 'Swap Weapon = +2 ATK · +2 Gimmick DMG',
+      description:
+        'Swapping Ranged ⇄ Gimmick before attacking charges your next shot with +2 ATK, plus +2 permanent Secondary Gimmick DMG!',
+      effects: { dualSwapBoost: true, gimmickBonusDmg: 2, bonusHp: 2 },
+    },
+    pathB: {
+      suffix: 't4b',
+      name: 'Dual-Tap Finisher',
+      icon: '🌟',
+      shortDesc: 'KO Grants Free Off-Hand Shot! (1×/Battle)',
+      description:
+        'Mario+Rabbids Finisher! Once per battle, scoring a KO immediately swaps to your OTHER weapon and grants a FREE bonus attack!',
+      effects: { dualTapSecondShot: true, bonusAttack: 1, gimmickExtraPullPush: 1 },
+    },
+    pathC: {
+      suffix: 't4c',
+      name: 'Acrobat Chain-Master',
+      icon: '🏆',
+      shortDesc: 'Dash Chains +1 Move & Jump · +1 Pull/Push',
+      description:
+        'Dashing an enemy grants +1 Move & +1 Team-Jump range that turn, plus +1 Pull/Push on Secondary Gimmicks & +1 Watch Shot!',
+      effects: { dashChainsJump: true, gimmickExtraPullPush: 1, bonusOverwatchShots: 1 },
+    },
+  };
+  const cfg = capByPath[pathKey];
+  return makePerk(
+    species,
+    pathKey,
+    4,
+    `${species}_${cfg.suffix}`,
+    cfg.name,
+    cfg.icon,
+    cfg.shortDesc,
+    cfg.description,
+    cfg.effects,
+    tier3Id
+  );
+}
+
+function withTier4(species: HeroSpecies, path: SkillPathDef): SkillPathDef {
+  const t3 = path.perks[path.perks.length - 1];
+  return {
+    ...path,
+    perks: [...path.perks, buildTier4Capstone(species, path.key, t3.id)],
+  };
+}
+
 export const HERO_SKILL_TREES: Record<HeroSpecies, HeroSkillTreeDef> = (
   Object.keys(BASE_HERO_SKILL_TREES) as HeroSpecies[]
 ).reduce(
   (acc, sp) => {
     acc[sp] = {
-      ...BASE_HERO_SKILL_TREES[sp],
-      pathC: PATH_C_BY_SPECIES[sp],
+      species: sp,
+      pathA: withTier4(sp, BASE_HERO_SKILL_TREES[sp].pathA),
+      pathB: withTier4(sp, BASE_HERO_SKILL_TREES[sp].pathB),
+      pathC: withTier4(sp, PATH_C_BY_SPECIES[sp]),
     };
     return acc;
   },
   {} as Record<HeroSpecies, HeroSkillTreeDef>
 );
 
-/** Flat registry of all 171 bespoke character perks across 19 heroes × 3 branches × 3 tiers. */
+/** Flat registry of all 228 character perks across 19 heroes × 3 branches × 4 tiers. */
 export const SKILL_PERKS: Record<string, SkillPerkDef> = {};
 for (const tree of Object.values(HERO_SKILL_TREES)) {
   for (const perk of [...tree.pathA.perks, ...tree.pathB.perks, ...tree.pathC.perks]) {
@@ -1561,6 +1627,11 @@ export interface AggregatedPerkEffects {
   acidExplosionOnKill: boolean;
   killRefreshesDash: boolean;
   killRefundsCd: boolean;
+  gimmickBonusDmg: number;
+  gimmickExtraPullPush: number;
+  dualSwapBoost: boolean;
+  dualTapSecondShot: boolean;
+  dashChainsJump: boolean;
 }
 
 export function aggregatePerkEffects(perkIds?: readonly string[]): AggregatedPerkEffects {
@@ -1607,6 +1678,11 @@ export function aggregatePerkEffects(perkIds?: readonly string[]): AggregatedPer
     acidExplosionOnKill: false,
     killRefreshesDash: false,
     killRefundsCd: false,
+    gimmickBonusDmg: 0,
+    gimmickExtraPullPush: 0,
+    dualSwapBoost: false,
+    dualTapSecondShot: false,
+    dashChainsJump: false,
   };
 
   if (!perkIds || perkIds.length === 0) return out;
@@ -1658,6 +1734,11 @@ export function aggregatePerkEffects(perkIds?: readonly string[]): AggregatedPer
     if (e.acidExplosionOnKill) out.acidExplosionOnKill = true;
     if (e.killRefreshesDash) out.killRefreshesDash = true;
     if (e.killRefundsCd) out.killRefundsCd = true;
+    if (e.gimmickBonusDmg) out.gimmickBonusDmg += e.gimmickBonusDmg;
+    if (e.gimmickExtraPullPush) out.gimmickExtraPullPush += e.gimmickExtraPullPush;
+    if (e.dualSwapBoost) out.dualSwapBoost = true;
+    if (e.dualTapSecondShot) out.dualTapSecondShot = true;
+    if (e.dashChainsJump) out.dashChainsJump = true;
   }
   return out;
 }

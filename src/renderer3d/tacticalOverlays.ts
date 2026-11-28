@@ -163,7 +163,7 @@ export class TacticalOverlaySystem3D {
       threatSig,
       telSig,
       snap.focusForecast
-        ? `${snap.focusForecast.hitChance}:${snap.focusForecast.coverLevel}:${snap.focusForecast.canAttack ? 1 : 0}:${snap.focusForecast.isPumpkinTarget ? 1 : 0}:${snap.focusForecast.isBridgeTarget ? 1 : 0}`
+        ? `${snap.focusForecast.hitChance}:${snap.focusForecast.coverLevel}:${snap.focusForecast.canAttack ? 1 : 0}:${snap.focusForecast.isPumpkinTarget ? 1 : 0}:${snap.focusForecast.isBridgeTarget ? 1 : 0}:${snap.focusForecast.pullDest ? posKey(snap.focusForecast.pullDest) : '-'}:${(snap.focusForecast.cleaveUnitIds ?? []).join(',')}:${snap.selectedUnit?.weapon.gimmick ?? '-'}`
         : '-',
     ].join('|');
 
@@ -458,6 +458,21 @@ export class TacticalOverlaySystem3D {
       const [x, y] = key.split(',').map(Number);
       this.addTilePlate(b, { x, y }, 0xffa726, 0.38, 0xfff0a6, 0.95, 0.036);
     }
+
+    // 4. Dual-Weapon Gimmick Previews: Cyan Pull Landing Plate & Golden Cleave Target Plates!
+    if (snap.focusForecast?.canAttack && (snap.mode === 'attack' || snap.mode === 'move')) {
+      if (snap.focusForecast.pullDest) {
+        this.addTilePlate(b, snap.focusForecast.pullDest, 0x3ef0ff, 0.42, 0xd4fbff, 0.98, 0.038);
+      }
+      if (snap.focusForecast.cleaveUnitIds && snap.focusForecast.cleaveUnitIds.length > 0) {
+        for (const cid of snap.focusForecast.cleaveUnitIds) {
+          const cu = b.units.find((u) => u.id === cid && u.alive);
+          if (cu) {
+            this.addTilePlate(b, cu.pos, 0xffb830, 0.44, 0xfff3b0, 0.98, 0.038);
+          }
+        }
+      }
+    }
   }
 
   private addTubeArc(
@@ -638,7 +653,7 @@ export class TacticalOverlaySystem3D {
       }
     }
 
-    // Case D: Combat Forecast Sightline / Lobbed Mortar Arc + Knockback / Rolling Pumpkin Arrow!
+    // Case D: Combat Forecast Sightline / Lobbed Mortar Arc + Knockback / Pull / Cleave / Rolling Pumpkin Preview!
     if (snap.focusForecast && (snap.mode === 'attack' || snap.mode === 'move')) {
       const fc = snap.focusForecast;
       const fromPt = this.tilePosY(b, hero.pos, 0.68);
@@ -646,9 +661,29 @@ export class TacticalOverlaySystem3D {
 
       if (hero.weapon.arc === 'lobbed') {
         this.addParabolicArc(fromPt, toPt, 2.05, fc.canAttack ? 0xffe066 : 0xe84133, 0.058, true);
+      } else if (hero.weapon.gimmick === 'boomerang') {
+        // Lateral curving Mario+Rabbids boomerang arc!
+        const dx = toPt.x - fromPt.x;
+        const dz = toPt.z - fromPt.z;
+        const len = Math.hypot(dx, dz) || 1;
+        const mid = new THREE.Vector3().lerpVectors(fromPt, toPt, 0.5);
+        mid.y = Math.max(fromPt.y, toPt.y) + 0.52;
+        mid.x += (-dz / len) * 1.05;
+        mid.z += (dx / len) * 1.05;
+        const curve = new THREE.QuadraticBezierCurve3(fromPt, mid, toPt);
+        const col = fc.canAttack ? 0x57e8a8 : 0xef4437;
+        const geo = new THREE.TubeGeometry(curve, 24, 0.048, 8, false);
+        const mat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.92, depthWrite: false });
+        this.ribbonLayer.add(new THREE.Mesh(geo, mat));
       } else {
         const lineColor =
-          fc.hitChance >= 100 ? 0x57e368 : fc.hitChance > 0 ? 0xf7be38 : 0xef4437;
+          hero.weapon.gimmick === 'vacuum_pull' || hero.weapon.gimmick === 'grapple_yank'
+            ? 0x45e8ff
+            : fc.hitChance >= 100
+              ? 0x57e368
+              : fc.hitChance > 0
+                ? 0xf7be38
+                : 0xef4437;
         this.addParabolicArc(fromPt, toPt, 0.16, lineColor, 0.044, fc.hitChance < 100);
       }
 
@@ -677,6 +712,31 @@ export class TacticalOverlaySystem3D {
                   : 0xffd147;
         const arrow = new THREE.ArrowHelper(dirVec, startKb, arrowLen, arrowCol, 0.34, 0.26);
         this.ribbonLayer.add(arrow);
+      }
+
+      // Vacuum Duster / Grapple Whip Cyan Pull Trajectory Arrow & Landing Ring!
+      if (fc.pullDest && fc.canAttack && !samePos(fc.pullDest, fc.targetPos)) {
+        const startPull = this.tilePosY(b, fc.targetPos, 0.28);
+        const endPull = this.tilePosY(b, fc.pullDest, 0.22);
+        const pullDelta = endPull.clone().sub(startPull);
+        const pullDist = Math.max(0.4, pullDelta.length());
+        const pullDir = pullDelta.clone().normalize();
+        const pullArrow = new THREE.ArrowHelper(pullDir, startPull, pullDist, 0x3ef0ff, 0.38, 0.28);
+        this.ribbonLayer.add(pullArrow);
+        this.addParabolicArc(startPull, endPull, 0.28, 0x7df6ff, 0.042, true);
+        this.addGroundRing(this.tilePosY(b, fc.pullDest, 0.055), 0.34, 0.54, 0x3ef0ff);
+      }
+
+      // Hammer Cleave / Inferno Bellows / Skewer Golden Cleave Sweep Rings!
+      if (fc.cleaveUnitIds && fc.cleaveUnitIds.length > 0 && fc.canAttack) {
+        const cleaveAnchor = this.tilePosY(b, fc.targetPos, 0.42);
+        for (const cid of fc.cleaveUnitIds) {
+          const cu = b.units.find((u) => u.id === cid && u.alive);
+          if (!cu) continue;
+          const cPt = this.tilePosY(b, cu.pos, 0.42);
+          this.addParabolicArc(cleaveAnchor, cPt, 0.26, 0xffb830, 0.042, false);
+          this.addGroundRing(this.tilePosY(b, cu.pos, 0.055), 0.4, 0.58, 0xffc83d);
+        }
       }
 
       this.addGroundRing(

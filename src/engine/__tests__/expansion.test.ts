@@ -30,17 +30,17 @@ import {
 } from '../../renderer3d/textures';
 
 describe('overnight expansion: battle poses, heroes, enemies, maps, items, relics & cards', () => {
-  it('wires all 19 heroes with unique alt weapons and 9-perk 3-branch skill trees (171 perks)', () => {
+  it('wires all 19 heroes with unique alt weapons and 12-perk 3-branch 4-tier skill trees (228 perks)', () => {
     const heroes = Object.values(PRODUCE_BLUEPRINTS);
     expect(heroes).toHaveLength(19);
-    expect(ALL_SKILL_PERK_IDS.length).toBe(171);
+    expect(ALL_SKILL_PERK_IDS.length).toBe(228);
 
     for (const h of heroes) {
       expect(ALT_WEAPONS_BY_SPECIES[h.species]).toBeDefined();
       const tree = getHeroSkillTree(h.species);
       expect(tree.species).toBe(h.species);
       const perks = getHeroPerkDefs(h.species);
-      expect(perks).toHaveLength(9);
+      expect(perks).toHaveLength(12);
       const ids = new Set(perks.map((p) => p.id));
       for (const p of perks) {
         if (p.requires) expect(ids.has(p.requires)).toBe(true);
@@ -48,8 +48,8 @@ describe('overnight expansion: battle poses, heroes, enemies, maps, items, relic
     }
   });
 
-  it('wires all 13 non-animal enemies including Chug-Barrow, Gale-O-Matic, Bore-Bot 3000, and Shielded Tin-Can Tank', () => {
-    expect(Object.keys(ENEMY_BLUEPRINTS)).toHaveLength(13);
+  it('wires all 16 non-animal enemies including Winter contraptions and Grand Marshal Frostplow', () => {
+    expect(Object.keys(ENEMY_BLUEPRINTS)).toHaveLength(16);
     expect(ENEMY_BLUEPRINTS.hound).toBeUndefined();
     expect(ENEMY_BLUEPRINTS.goose).toBeUndefined();
     expect(ENEMY_BLUEPRINTS.mole).toBeUndefined();

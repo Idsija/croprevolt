@@ -58,6 +58,8 @@ const NODE_TYPE_STYLE: Record<
   shop: { hex: 0x3b9645, badge: '#31823b', icon: '🛒', label: 'Market' },
   shrine: { hex: 0x2ba8b8, badge: '#2091a0', icon: '💧', label: 'Shrine' },
   armory: { hex: 0xc97b1e, badge: '#b36814', icon: '⚒', label: 'Armory' },
+  forge: { hex: 0xd46224, badge: '#c45318', icon: '🔥', label: 'Forge' },
+  lore: { hex: 0x6f4ab8, badge: '#5f3ca6', icon: '📜', label: 'Lore' },
   vault: { hex: 0xdba827, badge: '#c49116', icon: '⛺', label: 'Camp' },
   event: { hex: 0x874ab3, badge: '#783ca3', icon: '?', label: 'Clover' },
   boss: { hex: 0x7c1c28, badge: '#7c1c28', icon: '👑', label: 'Boss' },
@@ -370,7 +372,14 @@ export class OverworldMapRenderer {
     this.previewPathSig = '';
 
     // Seasonal tabletop ambiance
-    const bgHex = snap.theme === 'autumn' ? '#4a2b1a' : snap.theme === 'greenhouse' ? '#5e4326' : '#664324';
+    const bgHex =
+      snap.theme === 'winter'
+        ? '#2d4459'
+        : snap.theme === 'autumn'
+          ? '#4a2b1a'
+          : snap.theme === 'greenhouse'
+            ? '#5e4326'
+            : '#664324';
     this.scene.background = new THREE.Color(bgHex);
     this.scene.fog = new THREE.FogExp2(bgHex, 0.011);
 
@@ -649,6 +658,23 @@ export class OverworldMapRenderer {
         drop.position.set(radius * 0.7, 0.24, -radius * 0.55);
         group.add(drop);
         propSpin = drop;
+      } else if (n.type === 'lore') {
+        const scroll = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.06, 0.06, 0.22, 8),
+          new THREE.MeshStandardMaterial({ color: '#fff3c4', emissive: '#8f5fe8', emissiveIntensity: 0.3, roughness: 0.5 })
+        );
+        scroll.rotation.z = 0.45;
+        scroll.position.set(radius * 0.68, 0.25, -radius * 0.52);
+        group.add(scroll);
+        propSpin = scroll;
+      } else if (n.type === 'forge') {
+        const flame = new THREE.Mesh(
+          new THREE.ConeGeometry(0.1, 0.24, 5),
+          new THREE.MeshStandardMaterial({ color: '#ff8a2b', emissive: '#e04210', emissiveIntensity: 0.5, roughness: 0.35 })
+        );
+        flame.position.set(radius * 0.68, 0.26, -radius * 0.52);
+        group.add(flame);
+        propSpin = flame;
       }
 
       // Generous invisible click collider for crisp picking
@@ -724,19 +750,21 @@ export class OverworldMapRenderer {
 
     // 5. Gentle Drifting Seasonal Paper Motes above the watercolor game board!
     const moteColors =
-      snap.theme === 'autumn'
-        ? [0xd94826, 0xf29f24, 0xb82d1f]
-        : snap.theme === 'greenhouse'
-          ? [0xfff2a6, 0xffd75e, 0xd4ff9c]
-          : [0xffb7cf, 0xfff8e2, 0xc7f29b];
+      snap.theme === 'winter'
+        ? [0xffffff, 0xd8f3ff, 0xa8dcf7]
+        : snap.theme === 'autumn'
+          ? [0xd94826, 0xf29f24, 0xb82d1f]
+          : snap.theme === 'greenhouse'
+            ? [0xfff2a6, 0xffd75e, 0xd4ff9c]
+            : [0xffb7cf, 0xfff8e2, 0xc7f29b];
     const moteGeo = new THREE.PlaneGeometry(0.14, 0.14);
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < (snap.theme === 'winter' ? 32 : 24); i++) {
       const m = new THREE.Mesh(
         moteGeo,
         new THREE.MeshBasicMaterial({
           color: moteColors[i % moteColors.length],
           transparent: true,
-          opacity: 0.72,
+          opacity: snap.theme === 'winter' ? 0.85 : 0.72,
           side: THREE.DoubleSide,
           depthWrite: false,
         })
@@ -761,7 +789,14 @@ export class OverworldMapRenderer {
       color: '#fbf0d4',
       roughness: 0.72,
     });
-    const roofColor = theme === 'autumn' ? '#c94c24' : theme === 'greenhouse' ? '#2c8f78' : '#d64538';
+    const roofColor =
+      theme === 'winter'
+        ? '#2e6c99'
+        : theme === 'autumn'
+          ? '#c94c24'
+          : theme === 'greenhouse'
+            ? '#2c8f78'
+            : '#d64538';
     const roofMat = new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.65 });
     const woodMat = new THREE.MeshStandardMaterial({ color: '#7a4924', roughness: 0.85 });
 
@@ -770,6 +805,7 @@ export class OverworldMapRenderer {
       spring: [-6.8, -3.15],
       greenhouse: [6.8, -3.2],
       autumn: [6.75, -3.05],
+      winter: [-6.75, -3.05],
     };
     const [mx, mz] = millCoords[theme] ?? millCoords.spring;
     const windmill = new THREE.Group();
@@ -814,6 +850,7 @@ export class OverworldMapRenderer {
       spring: [5.4, 3.1],
       greenhouse: [0.15, 1.45],
       autumn: [0.3, 1.15],
+      winter: [5.5, 2.95],
     };
     const [bx, bz] = boatCoords[theme] ?? boatCoords.spring;
     const boat = new THREE.Group();
@@ -845,6 +882,7 @@ export class OverworldMapRenderer {
       spring: [-4.7, 3.4],
       greenhouse: [5.2, 3.3],
       autumn: [-3.4, 3.5],
+      winter: [-4.4, 3.35],
     };
     const [fx, fz] = buntingCoords[theme] ?? buntingCoords.spring;
     const bunting = new THREE.Group();

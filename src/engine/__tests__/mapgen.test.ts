@@ -31,7 +31,7 @@ function byId(nodes: SeasonNode[]): Map<string, SeasonNode> {
 describe('seasonal watercolor tabletop boardgame overworld', () => {
   const seeds = Array.from({ length: 120 }, (_, i) => i * 7919 + 1);
 
-  it('is deterministic for a given seed across all 3 seasonal boards', () => {
+  it('is deterministic for a given seed across all 4 seasonal boards', () => {
     const a = generateActNodes(0, actRng(12345, 0));
     const b = generateActNodes(0, actRng(12345, 0));
     expect(a).toEqual(b);
@@ -39,7 +39,8 @@ describe('seasonal watercolor tabletop boardgame overworld', () => {
     expect(c).not.toEqual(a);
   });
 
-  it('produces connected 16-space seasonal boards with valid coordinates, shrines, armories, markets, elites & boss', () => {
+  it('produces connected 22-space seasonal boards with valid coordinates, shrines, armories, markets, lore, forges, elites & boss', () => {
+    expect(ACTS).toHaveLength(4);
     for (const seed of seeds) {
       for (let act = 0; act < ACTS.length; act++) {
         const nodes = generateActNodes(act, actRng(seed, act));
@@ -52,7 +53,7 @@ describe('seasonal watercolor tabletop boardgame overworld', () => {
         expect(boss.type).toBe('boss');
         expect(boss.mapId).toBe(ACTS[act].boss.mapId);
         expect(nodes.filter((n) => n.type === 'boss')).toHaveLength(1);
-        expect(nodes.length).toBe(16);
+        expect(nodes.length).toBe(22);
 
         // Every space has valid normalized watercolor board coordinates (0..1)
         for (const n of nodes) {
@@ -87,6 +88,8 @@ describe('seasonal watercolor tabletop boardgame overworld', () => {
         expect(nodes.some((n) => n.type === 'shop')).toBe(true);
         expect(nodes.some((n) => n.type === 'shrine')).toBe(true);
         expect(nodes.some((n) => n.type === 'armory')).toBe(true);
+        expect(nodes.some((n) => n.type === 'lore')).toBe(true);
+        expect(nodes.some((n) => n.type === 'forge')).toBe(true);
         expect(nodes.some((n) => n.type === 'elite')).toBe(true);
         expect(nodes.some((n) => n.type === 'vault')).toBe(true);
       }
@@ -172,7 +175,7 @@ describe('multi-act boardgame runs', () => {
     expect(starts.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('carries the squad from Spring to Summer to Autumn boards, and ends the run after the Autumn boss', () => {
+  it('carries the squad from Spring to Summer to Autumn to Winter boards, and ends the run after Grand Marshal Frostplow', () => {
     const meta = defaultMetaProgress();
     const run = createNewRun(meta, 'spring', 7);
     const heroes = run.roster.slice(0, 4);
@@ -205,6 +208,18 @@ describe('multi-act boardgame runs', () => {
     expect(autumnBoss.units.find((u) => u.isBoss)?.visualKind).toBe('harvester');
     autumnBoss.status = 'victory';
     applyBattleOutcomeToRun(run, autumnBoss, meta);
+    expect(run.status).toBe('reward');
+    expect(run.act).toBe(3);
+    expect(run.seasonId).toBe('winter');
+    expect(run.nodes.find((n) => n.type === 'boss')!.mapId).toBe('frostplow_citadel');
+    expect(meta.runsWon).toBe(0);
+
+    run.currentNodeId = bossNodeId(3);
+    const winterBoss = createBattleFromMap('frostplow_citadel', heroes, [], run.items);
+    expect(winterBoss.theme).toBe('winter');
+    expect(winterBoss.units.find((u) => u.isBoss)?.visualKind).toBe('frostboss');
+    winterBoss.status = 'victory';
+    applyBattleOutcomeToRun(run, winterBoss, meta);
     expect(run.status).toBe('victory');
     expect(meta.runsWon).toBe(1);
   });

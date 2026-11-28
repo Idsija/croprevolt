@@ -80,6 +80,9 @@ export function getEffectiveMoveRange(unit: BattleUnit): number {
   if (hasStatus(unit, 'feared')) {
     move = Math.max(1, move - 2);
   }
+  if (hasStatus(unit, 'frost')) {
+    move = Math.max(1, move - 2);
+  }
   return move;
 }
 
@@ -123,6 +126,14 @@ export function getEffectiveCoverDamage(unit: BattleUnit): number {
   const fx = getUnitPerkEffects(unit);
   if (fx.oneShotCover) return Math.max(20, unit.weapon.coverDamage + fx.bonusCoverDmg);
   return unit.weapon.coverDamage + fx.bonusCoverDmg;
+}
+
+export function getSeasonFromBattle(state: Pick<BattleState, 'seasonId' | 'theme'>): 'spring' | 'summer' | 'autumn' | 'winter' {
+  if (state.seasonId) return state.seasonId;
+  if (state.theme === 'greenhouse') return 'summer';
+  if (state.theme === 'autumn') return 'autumn';
+  if (state.theme === 'winter') return 'winter';
+  return 'spring';
 }
 
 export function applyStatusToUnit(unit: BattleUnit, kind: StatusKind, turns: number): boolean {

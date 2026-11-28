@@ -105,31 +105,32 @@ describe('Mario + Rabbids Goal Pillars: Co-Op, Endless, 3-Branch Trees, Unlocks,
     expect(repaired.activeSquadUids).toHaveLength(4);
   });
 
-  it('provides 171 bespoke perks (19 heroes × 3 branches × 3 tiers) up to MAX_HERO_LEVEL 8 with full unlock + respec', () => {
-    expect(MAX_HERO_LEVEL).toBe(8);
-    expect(ALL_SKILL_PERK_IDS).toHaveLength(171);
+  it('provides 228 bespoke perks (19 heroes × 3 branches × 4 tiers) up to MAX_HERO_LEVEL 10 with full unlock + respec', () => {
+    expect(MAX_HERO_LEVEL).toBe(10);
+    expect(ALL_SKILL_PERK_IDS).toHaveLength(228);
 
     const meta = defaultMetaProgress();
     const run = createNewRun(meta);
     const pea = run.roster.find((h) => h.blueprintId === 'pea')!;
     const tree = getHeroSkillTree('pea');
-    expect(tree.pathA.perks).toHaveLength(3);
-    expect(tree.pathB.perks).toHaveLength(3);
-    expect(tree.pathC.perks).toHaveLength(3);
-    expect(getHeroPerkDefs('pea')).toHaveLength(9);
+    expect(tree.pathA.perks).toHaveLength(4);
+    expect(tree.pathB.perks).toHaveLength(4);
+    expect(tree.pathC.perks).toHaveLength(4);
+    expect(getHeroPerkDefs('pea')).toHaveLength(12);
 
-    // Unlock all 3 tiers of the brand-new 3rd branch (pathC) and respec cleanly
-    pea.skillPoints = 4;
-    const [t1, t2, t3] = tree.pathC.perks;
+    // Unlock all 4 tiers (including Tier-4 Capstone) of the 3rd branch (pathC) and respec cleanly
+    pea.skillPoints = 6;
+    const [t1, t2, t3, t4] = tree.pathC.perks;
     expect(unlockHeroPerk(run, pea.uid, t2.id)).toBe(false); // Prerequisite enforced
     expect(unlockHeroPerk(run, pea.uid, t1.id)).toBe(true);
     expect(unlockHeroPerk(run, pea.uid, t2.id)).toBe(true);
     expect(unlockHeroPerk(run, pea.uid, t3.id)).toBe(true);
-    expect(pea.perkIds).toEqual([t1.id, t2.id, t3.id]);
+    expect(unlockHeroPerk(run, pea.uid, t4.id)).toBe(true);
+    expect(pea.perkIds).toEqual([t1.id, t2.id, t3.id, t4.id]);
 
     expect(respecHeroPerks(run, pea.uid)).toBe(true);
     expect(pea.perkIds).toEqual([]);
-    expect(pea.skillPoints).toBe(4);
+    expect(pea.skillPoints).toBe(6);
   });
 
   it('supports Local Co-Op (2P–4P) hero ownership, reassignment, and Cross-Player Co-Op Combos on Team-Jump & Assist', () => {

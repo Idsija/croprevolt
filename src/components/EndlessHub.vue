@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { SEASON_WEATHER_INFO } from '../data/lore';
+import type { BoardTheme } from '../engine/types';
 import {
   claimEndlessBonus,
   closeEndlessBonusRoom,
@@ -11,6 +13,11 @@ import {
 import { sfx } from '../renderer/sfx';
 import CraftIcon from './CraftIcon.vue';
 import HeroBuildModal from './HeroBuildModal.vue';
+
+function weatherForTheme(theme: BoardTheme) {
+  const sid = theme === 'greenhouse' ? 'summer' : theme;
+  return SEASON_WEATHER_INFO[sid] ?? SEASON_WEATHER_INFO.spring;
+}
 
 const run = computed(() => gameStore.run!);
 const endless = computed(() => run.value.endless!);
@@ -240,14 +247,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onEndlessKeyDown));
         <div v-else-if="activeBonus.kind === 'tinkerer'" class="bonus-choices three-col">
           <button class="bonus-card" @click="claimEndlessBonus('weapon')">
             <div class="wheel-badge">⚔️</div>
-            <strong>Forge Alt Weapon</strong>
-            <small>Unlock a brand-new Armory weapon for your squad + 8 Run Seeds!</small>
-            <span class="card-cta gold">Forge Weapon</span>
+            <strong>Forge &amp; Alt Weapon</strong>
+            <small>Unlock a brand-new Armory weapon, +1 Free Forge Voucher &amp; +8 Run Seeds!</small>
+            <span class="card-cta gold">Forge + Voucher</span>
           </button>
           <button class="bonus-card" @click="claimEndlessBonus('sp')">
             <div class="wheel-badge">🌳</div>
             <strong>Skill Tree Workshop</strong>
-            <small>Every living hero immediately gains +1 Skill Point to deepen their 3-branch tree!</small>
+            <small>Every living hero immediately gains +1 Skill Point to deepen their 4-tier tree!</small>
             <span class="card-cta primary">+1 SP to All</span>
           </button>
           <button class="bonus-card" @click="claimEndlessBonus('satchel')">
@@ -327,6 +334,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onEndlessKeyDown));
             <p class="door-sub">{{ opt.subtitle }}</p>
 
             <div class="door-tags">
+              <span
+                v-if="opt.kind !== 'bonus'"
+                class="d-tag weather-door-tag"
+                :title="weatherForTheme(opt.theme).detail"
+              >
+                {{ weatherForTheme(opt.theme).icon }} {{ weatherForTheme(opt.theme).name }}
+              </span>
               <span v-if="opt.modifierLabel" class="d-tag">{{ opt.modifierLabel }}</span>
               <span v-if="opt.arenaModifierLabel" class="d-tag mod-tag">{{ opt.arenaModifierLabel }}</span>
               <span v-if="opt.seedBounty" class="d-tag seed-bounty-tag">🌱 ~{{ opt.seedBounty }} Seeds</span>
@@ -689,6 +703,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onEndlessKeyDown));
   background: #e1f7d5;
   border-color: #367d22;
   color: #1f5412;
+}
+
+.d-tag.weather-door-tag {
+  background: #e4f5ff;
+  border-color: #2472a6;
+  color: #0d456b;
 }
 
 .door-go {

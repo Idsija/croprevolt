@@ -19,14 +19,49 @@ export type TerrainType =
   | 'lava'
   | 'ramp'
   | 'burrow'
-  | 'bounce_pad';
+  | 'bounce_pad'
+  | 'ice';
 
 export type CoverKind = 'none' | 'crate' | 'haystack' | 'stone' | 'thorns' | 'cage' | 'beehive' | 'sprinkler' | 'pumpkin';
 export type CoverLevel = 'none' | 'half' | 'full';
 
 export type WeaponArc = 'direct' | 'lobbed' | 'melee' | 'pierce';
 
-export type StatusKind = 'burn' | 'rooted' | 'acid' | 'shield' | 'boosted' | 'feared' | 'overwatch';
+export type WeaponSlot = 'primary' | 'secondary';
+
+export type WeaponGimmickKind =
+  | 'vacuum_pull'
+  | 'hammer_cleave'
+  | 'boomerang'
+  | 'grapple_yank'
+  | 'cone_bellows'
+  | 'sentry_pop'
+  | 'lunge_skewer';
+
+export type WeaponVisualKind =
+  | 'blaster'
+  | 'sniper'
+  | 'mortar'
+  | 'scatter'
+  | 'bow'
+  | 'hose'
+  | 'duster'
+  | 'hammer'
+  | 'boomerang'
+  | 'whip'
+  | 'bellows'
+  | 'lance'
+  | 'drone'
+  | 'slingshot';
+
+export type WeaponForgeBranch = 'tactical' | 'elemental';
+
+export interface WeaponForgeProgress {
+  tier: 1 | 2 | 3;
+  branch?: WeaponForgeBranch;
+}
+
+export type StatusKind = 'burn' | 'rooted' | 'acid' | 'shield' | 'boosted' | 'feared' | 'overwatch' | 'frost';
 
 export type PromotionTier = 'seedling' | 'ripe' | 'heirloom';
 
@@ -74,6 +109,18 @@ export interface WeaponDef {
   id: string;
   name: string;
   arc: WeaponArc;
+  slot?: WeaponSlot;
+  visualKind?: WeaponVisualKind;
+  gimmick?: WeaponGimmickKind;
+  /** Pull enemy toward attacker (e.g. Luigi-style Vacuum Duster or Vine Grapple!). */
+  pull?: number;
+  /** Cleaves adjacent enemies beside the primary target (Melee Hammer / Mallet!). */
+  cleave?: boolean;
+  /** Curving Boomerang weapon ignores Half Cover and curves past barriers! */
+  curvesCover?: boolean;
+  /** Forged weapon upgrade tier (1 = stock, 2 = Mk.II, 3 = Masterwork). */
+  forgeTier?: 1 | 2 | 3;
+  forgeBranch?: WeaponForgeBranch;
   minRange: number;
   maxRange: number;
   damage: number;
@@ -140,6 +187,7 @@ export interface ProduceBlueprint {
   dashKnockback?: number;
   dashStatus?: StatusEffect;
   weapon: WeaponDef;
+  secondaryWeapon?: WeaponDef;
   ability: AbilityDef;
   color: string;
   accentColor: string;
@@ -160,9 +208,12 @@ export interface EnemyBlueprint {
     | 'blower'
     | 'sapper'
     | 'kettlebot'
+    | 'snowplow'
+    | 'frostblower'
     | 'scarecrow'
     | 'tractor'
-    | 'harvester';
+    | 'harvester'
+    | 'frostboss';
   title: string;
   family: ToolFamily;
   isBoss?: boolean;
@@ -263,6 +314,17 @@ export interface RosterHero {
   dashStatus?: StatusEffect;
   weapon: WeaponDef;
   equippedWeaponId?: string;
+  /** Primary Ranged weapon slot (dual-weapon loadout). */
+  primaryWeapon?: WeaponDef;
+  /** Secondary Melee / Mario+Rabbids Gimmick weapon slot (Vacuum Duster, Hammer, Boomerang, Whip, etc.). */
+  secondaryWeapon?: WeaponDef;
+  /** Which weapon slot starts equipped in battle ('primary' | 'secondary'). */
+  activeWeaponSlot?: WeaponSlot;
+  /** Branching Weapon Forge upgrade state per slot. */
+  weaponForge?: {
+    primary?: WeaponForgeProgress;
+    secondary?: WeaponForgeProgress;
+  };
   ability: AbilityDef;
   graftIds: string[];
   level: number;
@@ -289,6 +351,10 @@ export interface UnitActions {
   hasAttacked: boolean;
   hasUsedSkill: boolean;
   overwatchCharges?: number;
+  /** True if hero swapped Primary↔Secondary weapon this turn (triggers Dual-Swap Boost perk!). */
+  swappedWeaponThisTurn?: boolean;
+  /** True once Tier-4 Dual-Tap Capstone bonus shot has fired this battle. */
+  dualTapUsed?: boolean;
 }
 
 export type EnemyVisualKind = EnemyBlueprint['archetype'] | 'digger_heavy';
@@ -318,7 +384,14 @@ export interface BattleUnit {
   dashDamage: number;
   dashKnockback?: number;
   dashStatus?: StatusEffect;
+  /** Currently equipped active weapon (mirrors primaryWeapon or secondaryWeapon). */
   weapon: WeaponDef;
+  /** Slot 1: Signature Ranged Weapon. */
+  primaryWeapon?: WeaponDef;
+  /** Slot 2: Signature Melee or Tactical Gimmick Weapon (Duster, Hammer, Boomerang, Whip, Bellows, Drone). */
+  secondaryWeapon?: WeaponDef;
+  /** Which dual-weapon slot is currently held & visually equipped in 3D/2D! */
+  activeWeaponSlot?: WeaponSlot;
   ability?: AbilityDef;
   abilityCooldown: number;
   graftIds: string[];
@@ -352,7 +425,13 @@ export interface CombatForecast {
   isLethal: boolean;
   knockbackDir?: GridPos;
   knockbackWillBump?: boolean;
-  knockbackHazard?: 'bump' | 'water' | 'lava' | 'drop';
+  knockbackHazard?: 'bump' | 'water' | 'lava' | 'drop' | 'ice';
+  /** Gimmick pull destination (Vacuum Duster / Vine Grapple yank!). */
+  pullDir?: GridPos;
+  pullDest?: GridPos;
+  /** Additional enemies caught in a Melee Hammer Cleave sweep! */
+  cleaveUnitIds?: string[];
+  gimmick?: WeaponGimmickKind;
   elevationDiff?: number;
   highGroundBonus?: number;
   isCriticalFlank?: boolean;
@@ -398,14 +477,17 @@ export type BattleEvent =
   | { type: 'stomp'; unitId: string; pos: GridPos; damage: number; hitIds: string[] }
   | { type: 'overwatch_shot'; attackerId: string; attackerKind: string; targetId: string; from: GridPos; to: GridPos; damage: number }
   | { type: 'partner_assist'; allyId: string; allyKind: string; targetId: string; from: GridPos; to: GridPos; damage: number }
-  | { type: 'knockback'; unitId: string; from: GridPos; to: GridPos; bumped: boolean; bumpDamage?: number; bumpedUnitId?: string }
+  | { type: 'knockback'; unitId: string; from: GridPos; to: GridPos; bumped: boolean; bumpDamage?: number; bumpedUnitId?: string; slidIce?: boolean }
+  | { type: 'pull'; unitId: string; from: GridPos; to: GridPos; slidIce?: boolean; gimmick: WeaponGimmickKind }
+  | { type: 'weapon_swap'; unitId: string; slot: WeaponSlot; weaponName: string; visualKind: WeaponVisualKind }
+  | { type: 'combo_chain'; count: number; label: string; pos: GridPos }
   | { type: 'terrain_hazard'; kind: 'water' | 'lava' | 'drop'; unitId: string; pos: GridPos; damage: number }
   | { type: 'hazard'; kind: 'beehive' | 'sprinkler'; pos: GridPos; damage: number }
   | { type: 'pumpkin_roll'; from: GridPos; to: GridPos; path: GridPos[]; hitIds: string[]; damage: number }
   | { type: 'bridge_collapse'; pos: GridPos; liquid: 'water' | 'lava'; affectedUnitId?: string }
   | { type: 'reinforcement_spawn'; unitId: string; unitName: string; pos: GridPos }
   | { type: 'escort_move'; unitId: string; from: GridPos; to: GridPos }
-  | { type: 'attack'; attackerId: string; attackerKind: string; from: GridPos; to: GridPos; arc: WeaponArc; hit: boolean; damage: number; targetId?: string; matchup: MatchupResult; coverHitPos?: GridPos; coverDestroyed?: boolean; status?: StatusKind }
+  | { type: 'attack'; attackerId: string; attackerKind: string; from: GridPos; to: GridPos; arc: WeaponArc; hit: boolean; damage: number; targetId?: string; matchup: MatchupResult; coverHitPos?: GridPos; coverDestroyed?: boolean; status?: StatusKind; weaponVisual?: WeaponVisualKind; gimmick?: WeaponGimmickKind; forgeTier?: number; forgeBranch?: WeaponForgeBranch }
   | { type: 'ability'; unitId: string; abilityName: string; from: GridPos; to: GridPos; affectedIds: string[]; heal?: number; damage?: number; status?: StatusKind; coverSpawned?: GridPos }
   | { type: 'item'; unitId: string; itemName: string; from: GridPos; to: GridPos; affectedIds: string[]; heal?: number; damage?: number; status?: StatusKind }
   | { type: 'status_tick'; unitId: string; pos: GridPos; status: StatusKind; damage: number }
@@ -426,7 +508,7 @@ export interface BossTelegraph {
   status?: StatusKind;
 }
 
-export type BoardTheme = 'spring' | 'greenhouse' | 'autumn';
+export type BoardTheme = 'spring' | 'greenhouse' | 'autumn' | 'winter';
 
 export interface MapTemplate {
   id: string;
@@ -518,6 +600,10 @@ export interface BattleState {
   mapId: string;
   mapName: string;
   theme?: BoardTheme;
+  /** Seasonal weather passive active during this battle! */
+  seasonId?: SeasonId;
+  /** Live Mario+Rabbids per-turn Combo Chain counter (resets each Player Turn). */
+  comboChain?: number;
   objective: ObjectiveType;
   objectiveLabel: string;
   width: number;
@@ -559,7 +645,7 @@ export interface BattleState {
   undoSnapshot: string | null;
 }
 
-export type SeasonId = 'spring' | 'summer' | 'autumn';
+export type SeasonId = 'spring' | 'summer' | 'autumn' | 'winter';
 
 export type NodeType =
   | 'start'
@@ -572,7 +658,9 @@ export type NodeType =
   | 'boss'
   | 'event'
   | 'shrine'
-  | 'armory';
+  | 'armory'
+  | 'lore'
+  | 'forge';
 
 export interface SeasonNode {
   id: string;
@@ -697,6 +785,14 @@ export interface RunState {
   perfectHarvests?: number;
   /** Unlocked alternate weapon IDs swappable anytime in the Hero Build Armory. */
   unlockedWeaponIds?: string[];
+  /** Free Weapon Forge vouchers earned from Lore Monuments, Forges & Bosses! */
+  forgeVouchers?: number;
+  /** Active Storybook Lore Monument dialog on the overworld. */
+  pendingLore?: { loreId: string; nodeId: string; claimed: boolean } | null;
+  /** Active Tinker Weapon Forge stop on the overworld. */
+  pendingForge?: { nodeId: string; discount: number } | null;
+  /** Seasonal intro postcards already dismissed this run. */
+  seenActIntros?: SeasonId[];
   nodes: SeasonNode[];
   currentNodeId: string | null;
   completedNodeIds: string[];
@@ -726,6 +822,8 @@ export interface RunState {
     | 'reward'
     | 'event'
     | 'shrine'
+    | 'lore'
+    | 'forge'
     | 'endless_hub'
     | 'bonus_room'
     | 'victory'
@@ -749,6 +847,8 @@ export interface MetaProgress {
   selectedHeat?: number;
   /** Heroes permanently unlocked in the Greenhouse (starters + Seed Shed / rescue unlocks). */
   unlockedHeroIds?: string[];
+  /** Field Chronicle Lore pages discovered across runs (Almanac World & Lore tab). */
+  discoveredLoreIds?: string[];
   /** Toggleable guided onboarding hints & interactive tour popups. */
   guidedHintsEnabled?: boolean;
   unlocks: {

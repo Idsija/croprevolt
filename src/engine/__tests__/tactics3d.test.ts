@@ -748,11 +748,11 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
       expect(c!.hp).toBe(c!.maxHp - 2);
     }
 
-    // Winning the final Act 3 Boss at Heat 1 unlocks Harvest Heat 2 in MetaProgress!
+    // Winning the final Act 4 Boss at Heat 1 unlocks Harvest Heat 2 in MetaProgress!
     const winMeta = defaultMetaProgress();
     winMeta.maxHeatUnlocked = 1;
     const winRun = createNewRun(winMeta, 'spring', 999, 1);
-    winRun.act = 2; // Final act
+    winRun.act = 3; // Final act (Winter)
     const bossNode = winRun.nodes.find((n) => n.type === 'boss')!;
     winRun.currentNodeId = bossNode.id;
     const finalBattle = createBattleFromMap(bossNode.mapId!, winRun.roster.slice(0, 4), [], winRun.items, undefined, {
@@ -867,17 +867,17 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     expect(bystander.statuses.some((s) => s.kind === 'acid')).toBe(true);
   });
 
-  it('supports all 19 heroes (171 bespoke perks across 3 branches & 19 Armory weapons), new allies, new enemies, and all 3 watercolor boards', () => {
+  it('supports all 19 heroes (228 bespoke perks across 3 branches × 4 tiers & 19 Armory weapons), new allies, new enemies, and all 4 watercolor boards', () => {
     const allHeroes = Object.values(PRODUCE_BLUEPRINTS);
     expect(allHeroes).toHaveLength(19);
-    expect(ALL_SKILL_PERK_IDS).toHaveLength(171);
+    expect(ALL_SKILL_PERK_IDS).toHaveLength(228);
 
     for (const bp of allHeroes) {
       const tree = HERO_SKILL_TREES[bp.species];
       expect(tree).toBeDefined();
-      expect(tree.pathA.perks).toHaveLength(3);
-      expect(tree.pathB.perks).toHaveLength(3);
-      expect(tree.pathC.perks).toHaveLength(3);
+      expect(tree.pathA.perks).toHaveLength(4);
+      expect(tree.pathB.perks).toHaveLength(4);
+      expect(tree.pathC.perks).toHaveLength(4);
       expect(ALT_WEAPONS_BY_SPECIES[bp.species]).toBeDefined();
     }
 
@@ -906,9 +906,9 @@ describe('3D Multi-Elevation, Mario + Rabbids Combat & Skill Tree Progression', 
     expect(wally.dashKnockback).toBe(1);
 
     // All 3 redesigned seasonal cartoon boards generate 16 pinned spaces with guaranteed facilities and path to Boss
-    for (let actIdx = 0; actIdx < 3; actIdx++) {
+    for (let actIdx = 0; actIdx < 4; actIdx++) {
       const nodes = generateActNodes(actIdx, createRng(777 + actIdx));
-      expect(nodes).toHaveLength(16);
+      expect(nodes).toHaveLength(22);
       expect(nodes.some((n) => n.type === 'start')).toBe(true);
       expect(nodes.some((n) => n.type === 'boss')).toBe(true);
       expect(nodes.some((n) => n.type === 'shop')).toBe(true);

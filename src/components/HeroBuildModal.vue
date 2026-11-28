@@ -2,6 +2,7 @@
 import { bondStatuses } from '../engine/bonds';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { GRAFT_REGISTRY } from '../data/grafts';
+import { HERO_LORE_QUOTES } from '../data/lore';
 import {
   canUnlockPerk,
   getHeroSkillTree,
@@ -10,13 +11,23 @@ import {
   SKILL_PERKS,
   type SkillPathDef,
 } from '../data/skills';
-import { buildScaledWeaponForHero, getSpeciesWeapons } from '../data/weapons';
+import {
+  ALT_WEAPON_REGISTRY,
+  buildScaledWeaponForHero,
+  getDualWeaponKit,
+  getSpeciesWeapons,
+  getWeaponForgeOptions,
+} from '../data/weapons';
 import { getFamilyLabel } from '../engine/hooks';
+import type { WeaponForgeBranch, WeaponSlot } from '../engine/types';
+import { getWeaponCutoutDataUrl } from '../renderer3d/weaponProps';
 import {
   equipWeapon,
+  forgeWeapon,
   gameStore,
   reassignHeroOwner,
   respecPerks,
+  setDefaultWeaponSlot,
   swapSquadMembers,
   toggleSquadMember,
   unlockPerk,
@@ -25,6 +36,8 @@ import CraftIcon from './CraftIcon.vue';
 
 const props = defineProps<{
   initialHeroUid?: string | null;
+  initialTab?: 'trees' | 'armory' | 'squad';
+  isForgeStop?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -42,7 +55,7 @@ const run = computed(() => gameStore.run!);
 const coopPlayers = computed(() =>
   run.value.coopPlayers && run.value.coopPlayers.length > 1 ? run.value.coopPlayers : null
 );
-const activeTab = ref<'trees' | 'armory' | 'squad'>('trees');
+const activeTab = ref<'trees' | 'armory' | 'squad'>(props.initialTab ?? 'trees');
 const mobileBranchIdx = ref<number>(0);
 
 const squadBonds = computed(() =>
@@ -64,10 +77,25 @@ const swapPickerOpen = ref(false);
 const swapNotice = ref<string | null>(null);
 let swapNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 
+function showNotice(msg: string): void {
+  swapNotice.value = msg;
+  if (swapNoticeTimer) clearTimeout(swapNoticeTimer);
+  swapNoticeTimer = setTimeout(() => {
+    swapNotice.value = null;
+  }, 2600);
+}
+
 watch(
   () => props.initialHeroUid,
   (uid) => {
     if (uid) selectedUid.value = uid;
+  }
+);
+
+watch(
+  () => props.initialTab,
+  (tab) => {
+    if (tab) activeTab.value = tab;
   }
 );
 
@@ -100,6 +128,10 @@ const selectedHero = computed(
   () => run.value.roster.find((h) => h.uid === selectedUid.value) ?? run.value.roster[0] ?? null
 );
 
+const selectedHeroLoreQuote = computed(() =>
+  selectedHero.value ? HERO_LORE_QUOTES[selectedHero.value.species] ?? '' : ''
+);
+
 const heroTree = computed(() =>
   selectedHero.value ? getHeroSkillTree(selectedHero.value.species) : null
 );
@@ -125,22 +157,58 @@ function performDirectSwap(activeUid: string, benchUid: string): void {
   swapPickerOpen.value = false;
   selectedUid.value = benchUid;
   if (outHero && inHero) {
-    swapNotice.value = `Swapped ${outHero.name.split(' ')[0]} ⇄ ${inHero.name.split(' ')[0]}!`;
-    if (swapNoticeTimer) clearTimeout(swapNoticeTimer);
-    swapNoticeTimer = setTimeout(() => {
-      swapNotice.value = null;
-    }, 2600);
+    showNotice(`Swapped ${outHero.name.split(' ')[0]} ⇄ ${inHero.name.split(' ')[0]}!`);
   }
 }
+
+const forgeDiscountMult = computed(() => (props.isForgeStop || run.value.status === 'forge' ? 0.7 : 1));
+const forgeVouchers = computed(() => run.value.forgeVouchers ?? 0);
 
 const selectedHeroArmory = computed(() => {
   const h = selectedHero.value;
   if (!h) return null;
   const pair = getSpeciesWeapons(h.species);
+  const kit = getDualWeaponKit(h.species);
   const unlocked = new Set(run.value.unlockedWeaponIds ?? []);
   const altUnlocked = unlocked.has(pair.alt.weapon.id);
-  const equippedId = h.equippedWeaponId ?? h.weapon.id;
+  const equippedId = h.equippedWeaponId ?? pair.base.id;
+  const activeSlot: WeaponSlot = h.activeWeaponSlot ?? kit.defaultSlot ?? 'primary';
+
+  const primaryBase =
+    h.equippedWeaponId && ALT_WEAPON_REGISTRY[h.equippedWeaponId]
+      ? ALT_WEAPON_REGISTRY[h.equippedWeaponId].weapon
+      : kit.primary;
+
+  const primaryWeapon = h.primaryWeapon ?? buildScaledWeaponForHero(h, primaryBase);
+  const secondaryWeapon = h.secondaryWeapon ?? buildScaledWeaponForHero(h, kit.secondary);
+
   return {
+    kit,
+    activeSlot,
+    primaryWeapon,
+    secondaryWeapon,
+    primaryCutout: getWeaponCutoutDataUrl(
+      primaryWeapon.visualKind ?? 'blaster',
+      primaryWeapon.forgeTier ?? 1,
+      primaryWeapon.forgeBranch
+    ),
+    secondaryCutout: getWeaponCutoutDataUrl(
+      secondaryWeapon.visualKind ?? 'hammer',
+      secondaryWeapon.forgeTier ?? 1,
+      secondaryWeapon.forgeBranch
+    ),
+    primaryForgeOpts: getWeaponForgeOptions(
+      primaryBase,
+      h.species,
+      h.weaponForge?.primary,
+      forgeDiscountMult.value
+    ),
+    secondaryForgeOpts: getWeaponForgeOptions(
+      kit.secondary,
+      h.species,
+      h.weaponForge?.secondary,
+      forgeDiscountMult.value
+    ),
     base: buildScaledWeaponForHero(h, pair.base),
     alt: buildScaledWeaponForHero(h, pair.alt.weapon),
     altTagline: pair.alt.tagline,
@@ -151,7 +219,36 @@ const selectedHeroArmory = computed(() => {
 
 function handleEquipWeapon(weaponId: string): void {
   if (!selectedHero.value || selectedHero.value.harvested) return;
-  equipWeapon(selectedHero.value.uid, weaponId);
+  if (equipWeapon(selectedHero.value.uid, weaponId)) {
+    showNotice('Equipped Alternate Primary Weapon!');
+  }
+}
+
+function handleSetDefaultSlot(slot: WeaponSlot): void {
+  if (!selectedHero.value || selectedHero.value.harvested) return;
+  if (setDefaultWeaponSlot(selectedHero.value.uid, slot)) {
+    showNotice(
+      slot === 'secondary'
+        ? `${selectedHero.value.name.split(' ')[0]} will start battles holding their Secondary Gimmick!`
+        : `${selectedHero.value.name.split(' ')[0]} will start battles holding their Ranged Primary!`
+    );
+  }
+}
+
+function handleForge(slot: WeaponSlot, branch: WeaponForgeBranch, cost: number): void {
+  const h = selectedHero.value;
+  if (!h || h.harvested) return;
+  const usingVoucher = forgeVouchers.value > 0;
+  if (!usingVoucher && run.value.seeds < cost) return;
+  if (forgeWeapon(h.uid, slot, branch, usingVoucher)) {
+    const label = branch === 'tactical' ? '⚙️ Tactical Forge' : '🔥 Elemental Forge';
+    showNotice(`${label} complete on ${h.name.split(' ')[0]}'s ${slot === 'secondary' ? 'Secondary' : 'Primary'}!`);
+  }
+}
+
+function tierStars(tier?: number): string {
+  const t = tier ?? 1;
+  return t >= 3 ? '★★★' : t === 2 ? '★★' : '★';
 }
 
 const xpNeeded = computed(() =>
@@ -217,9 +314,14 @@ function unlockedCountInPath(path: SkillPathDef): number {
       <!-- Header -->
       <header class="build-head">
         <div class="build-head-copy">
-          <h2>Squad, Skill Trees &amp; Armory</h2>
+          <h2>
+            {{ isForgeStop ? '🔥 Tinker Weapon Forge & Squad' : 'Squad, 4-Tier Skill Trees & Forge' }}
+          </h2>
           <small>
-            On Field: {{ run.activeSquadUids.length }}/4 ·
+            On Field: {{ run.activeSquadUids.length }}/4 · 🌱 {{ run.seeds }} Seeds
+            <template v-if="forgeVouchers > 0"> · 🎟️ {{ forgeVouchers }} Free Forge{{ forgeVouchers === 1 ? '' : 's' }}</template>
+            <template v-if="forgeDiscountMult < 1"> · <strong class="forge-sale-txt">🔥 30% OFF!</strong></template>
+            ·
             <button
               v-if="totalUnspentSp > 0"
               class="sp-jump-pill"
@@ -240,7 +342,14 @@ function unlockedCountInPath(path: SkillPathDef): number {
             <span>✨ {{ activeBondCount }} Bond{{ activeBondCount === 1 ? '' : 's' }}</span>
             <span>{{ showBondsDrawer ? '▴' : '▾' }}</span>
           </button>
-          <button class="paper-btn icon-only" aria-label="Close" @click="emit('close')">
+          <button
+            v-if="isForgeStop"
+            class="paper-btn primary"
+            @click="emit('close')"
+          >
+            Leave Forge →
+          </button>
+          <button v-else class="paper-btn icon-only" aria-label="Close" @click="emit('close')">
             <CraftIcon name="close" :size="17" />
           </button>
         </div>
@@ -315,7 +424,7 @@ function unlockedCountInPath(path: SkillPathDef): number {
           </button>
         </aside>
 
-        <!-- Right Hero Build Sheet, 1-Tap Swap Picker, Armory & Illustrated 2-Path Skill Tree -->
+        <!-- Right Hero Build Sheet, 1-Tap Swap Picker, Dual-Weapon Forge & 4-Tier Skill Tree -->
         <div v-if="selectedHero" class="hero-pane scroll-soft">
           <div class="hero-summary paper-card">
             <div class="hs-left">
@@ -329,6 +438,7 @@ function unlockedCountInPath(path: SkillPathDef): number {
                 <small class="hs-sub">
                   {{ selectedHero.title }} · {{ getFamilyLabel(selectedHero.family) }}
                 </small>
+                <small v-if="selectedHeroLoreQuote" class="hs-quote">{{ selectedHeroLoreQuote }}</small>
 
                 <!-- XP Bar -->
                 <div class="xp-row">
@@ -450,7 +560,7 @@ function unlockedCountInPath(path: SkillPathDef): number {
               :aria-selected="activeTab === 'trees'"
               @click="activeTab = 'trees'"
             >
-              <span>🌳 Skill Trees (3 Paths)</span>
+              <span>🌳 Skill Trees (4 Tiers)</span>
               <span v-if="selectedHero.skillPoints > 0" class="tab-badge">{{ selectedHero.skillPoints }} SP</span>
             </button>
             <button
@@ -460,7 +570,8 @@ function unlockedCountInPath(path: SkillPathDef): number {
               :aria-selected="activeTab === 'armory'"
               @click="activeTab = 'armory'"
             >
-              <span>⚔️ Armory &amp; Skill</span>
+              <span>⚔️ Dual Weapons &amp; Forge</span>
+              <span v-if="forgeVouchers > 0" class="tab-badge">🎟️{{ forgeVouchers }}</span>
             </button>
             <button
               class="hub-tab"
@@ -473,7 +584,7 @@ function unlockedCountInPath(path: SkillPathDef): number {
             </button>
           </div>
 
-          <!-- TAB 1: Illustrated 3-Branch Botanical Vine Skill Tree (9 Perks per Hero!) -->
+          <!-- TAB 1: Illustrated 3-Branch × 4-Tier Botanical Vine Skill Tree (12 Perks per Hero!) -->
           <template v-if="activeTab === 'trees'">
             <!-- Mobile Branch Pill Selector (crisp 1-branch view on phones, all 3 side-by-side on desktop!) -->
             <div class="mobile-branch-pills">
@@ -493,7 +604,7 @@ function unlockedCountInPath(path: SkillPathDef): number {
                       : path.name.split(' ')[0]
                   }}
                 </span>
-                <small>{{ unlockedCountInPath(path) }}/3</small>
+                <small>{{ unlockedCountInPath(path) }}/{{ path.perks.length }}</small>
               </button>
             </div>
 
@@ -516,7 +627,7 @@ function unlockedCountInPath(path: SkillPathDef): number {
                       <small>{{ path.tagline }}</small>
                     </div>
                   </div>
-                  <span class="pb-prog">{{ unlockedCountInPath(path) }}/3</span>
+                  <span class="pb-prog">{{ unlockedCountInPath(path) }}/{{ path.perks.length }}</span>
                 </div>
 
                 <div class="vine-tree">
@@ -547,7 +658,7 @@ function unlockedCountInPath(path: SkillPathDef): number {
                       class="perk-node"
                       :class="[
                         perkState(perk.id),
-                        { capstone: perk.tier === 3 },
+                        { capstone: perk.tier === 4 },
                       ]"
                       :disabled="perkState(perk.id) !== 'ready'"
                       @click="handleUnlock(perk.id)"
@@ -560,7 +671,7 @@ function unlockedCountInPath(path: SkillPathDef): number {
                         <div class="pn-top">
                           <div class="pn-title-wrap">
                             <strong>{{ perk.name }}</strong>
-                            <span v-if="perk.tier === 3" class="tier-tag cap">★ CAP</span>
+                            <span v-if="perk.tier === 4" class="tier-tag cap">★ CAPSTONE</span>
                             <span v-else class="tier-tag">T{{ perk.tier }}</span>
                           </div>
                           <span v-if="perkState(perk.id) === 'unlocked'" class="wax-seal done" title="Unlocked">
@@ -584,28 +695,220 @@ function unlockedCountInPath(path: SkillPathDef): number {
             </div>
           </template>
 
-          <!-- TAB 2: Armory Weapon Switcher & Signature Skill Card -->
+          <!-- TAB 2: Dual Weapons Loadout & Branching Weapon Forge (T1 -> Tactical II vs Elemental II -> Masterwork III) -->
           <div v-else-if="activeTab === 'armory'" class="armory-tab-wrap">
-            <div v-if="selectedHeroArmory" class="armory-bar">
+            <div v-if="selectedHeroArmory" class="dual-forge-banner">
+              <div class="dfb-copy">
+                <strong>⚒️ Dual-Weapon Kit &amp; Branching Forge</strong>
+                <small>
+                  Swap freely in battle with <kbd>W</kbd> or the Action Dock! Every weapon upgrades into ⚙️ Tactical or 🔥 Elemental Masterworks.
+                </small>
+              </div>
+              <div class="dfb-wallet">
+                <span class="paper-pill">🌱 {{ run.seeds }} Seeds</span>
+                <span v-if="forgeVouchers > 0" class="paper-pill voucher-pill">🎟️ {{ forgeVouchers }} Free Forge</span>
+                <span v-if="forgeDiscountMult < 1" class="paper-pill sale-pill">🔥 30% OFF</span>
+              </div>
+            </div>
+
+            <!-- Dual Equipped Weapon Cutout Cards: Primary Ranged + Secondary Melee/Gimmick -->
+            <div v-if="selectedHeroArmory" class="dual-weapon-grid">
+              <!-- SLOT 1: PRIMARY RANGED -->
+              <div
+                class="dual-slot-card paper-card"
+                :class="{ active: selectedHeroArmory.activeSlot === 'primary' }"
+              >
+                <div class="dsc-top">
+                  <span class="dsc-slot-tag primary">🎯 PRIMARY RANGED</span>
+                  <span class="dsc-tier-stars" :class="selectedHeroArmory.primaryWeapon.forgeBranch ?? 'stock'">
+                    {{ tierStars(selectedHeroArmory.primaryWeapon.forgeTier) }}
+                    <template v-if="selectedHeroArmory.primaryWeapon.forgeBranch">
+                      {{ selectedHeroArmory.primaryWeapon.forgeBranch === 'tactical' ? 'TACTICAL' : 'ELEMENTAL' }}
+                    </template>
+                  </span>
+                </div>
+
+                <div class="dsc-hero-row">
+                  <img
+                    v-if="selectedHeroArmory.primaryCutout"
+                    class="dsc-cutout"
+                    :src="selectedHeroArmory.primaryCutout"
+                    :alt="selectedHeroArmory.primaryWeapon.name"
+                  />
+                  <div class="dsc-info">
+                    <strong>{{ selectedHeroArmory.primaryWeapon.name }}</strong>
+                    <div class="dsc-chips">
+                      <span>💥 {{ selectedHeroArmory.primaryWeapon.damage }} DMG</span>
+                      <span>📏 R{{ selectedHeroArmory.primaryWeapon.minRange }}–{{ selectedHeroArmory.primaryWeapon.maxRange }}</span>
+                      <span>{{ selectedHeroArmory.primaryWeapon.arc.toUpperCase() }}</span>
+                      <span v-if="selectedHeroArmory.primaryWeapon.curvesCover" class="g-tag">↪ CURVES</span>
+                      <span v-if="selectedHeroArmory.primaryWeapon.appliesStatus" class="g-tag elem">
+                        +{{ selectedHeroArmory.primaryWeapon.appliesStatus.kind.toUpperCase() }}
+                      </span>
+                    </div>
+                    <small>{{ selectedHeroArmory.primaryWeapon.description }}</small>
+                  </div>
+                </div>
+
+                <button
+                  class="paper-btn dsc-default-btn"
+                  :class="{ primary: selectedHeroArmory.activeSlot === 'primary' }"
+                  :disabled="selectedHero.harvested || selectedHeroArmory.activeSlot === 'primary'"
+                  @click="handleSetDefaultSlot('primary')"
+                >
+                  {{ selectedHeroArmory.activeSlot === 'primary' ? '✓ Starts Battle Equipped' : 'Start Battle Holding This' }}
+                </button>
+
+                <!-- Branching Forge Upgrades for Primary -->
+                <div v-if="selectedHeroArmory.primaryForgeOpts.length > 0" class="forge-options">
+                  <button
+                    v-for="opt in selectedHeroArmory.primaryForgeOpts"
+                    :key="opt.branch"
+                    class="forge-opt-btn"
+                    :class="opt.branch"
+                    :disabled="selectedHero.harvested || (forgeVouchers <= 0 && run.seeds < opt.cost)"
+                    @click="handleForge('primary', opt.branch, opt.cost)"
+                  >
+                    <div class="fob-head">
+                      <span>{{ opt.badge }} <strong>{{ opt.title }}</strong></span>
+                      <span class="fob-cost" :class="{ free: forgeVouchers > 0 }">
+                        {{ forgeVouchers > 0 ? '🎟️ FREE' : `🌱 ${opt.cost}` }}
+                      </span>
+                    </div>
+                    <div class="fob-preview">
+                      <span v-if="opt.previewWeapon.damage !== selectedHeroArmory.primaryWeapon.damage" class="fp-chip dmg">
+                        💥 {{ selectedHeroArmory.primaryWeapon.damage }}→<strong>{{ opt.previewWeapon.damage }}</strong>
+                      </span>
+                      <span v-if="opt.previewWeapon.maxRange !== selectedHeroArmory.primaryWeapon.maxRange" class="fp-chip rng">
+                        📏 R{{ selectedHeroArmory.primaryWeapon.maxRange }}→<strong>R{{ opt.previewWeapon.maxRange }}</strong>
+                      </span>
+                      <span v-if="opt.previewWeapon.curvesCover && !selectedHeroArmory.primaryWeapon.curvesCover" class="fp-chip">
+                        ↪ CURVES
+                      </span>
+                      <span v-if="opt.previewWeapon.appliesStatus" class="fp-chip elem">
+                        +{{ opt.previewWeapon.appliesStatus.kind.toUpperCase() }}
+                      </span>
+                    </div>
+                    <small>{{ opt.summary }}</small>
+                  </button>
+                </div>
+                <div v-else class="forge-maxed">★ MASTERWORK TIER III FORGED!</div>
+              </div>
+
+              <!-- SLOT 2: SECONDARY MELEE / GIMMICK (Luigi Vacuum Duster, Hammer, Boomerang, Whip, Bellows!) -->
+              <div
+                class="dual-slot-card paper-card secondary-card"
+                :class="{ active: selectedHeroArmory.activeSlot === 'secondary' }"
+              >
+                <div class="dsc-top">
+                  <span class="dsc-slot-tag secondary">🌀 {{ selectedHeroArmory.kit.secondaryRoleTag.toUpperCase() }}</span>
+                  <span class="dsc-tier-stars" :class="selectedHeroArmory.secondaryWeapon.forgeBranch ?? 'stock'">
+                    {{ tierStars(selectedHeroArmory.secondaryWeapon.forgeTier) }}
+                    <template v-if="selectedHeroArmory.secondaryWeapon.forgeBranch">
+                      {{ selectedHeroArmory.secondaryWeapon.forgeBranch === 'tactical' ? 'TACTICAL' : 'ELEMENTAL' }}
+                    </template>
+                  </span>
+                </div>
+
+                <div class="dsc-hero-row">
+                  <img
+                    v-if="selectedHeroArmory.secondaryCutout"
+                    class="dsc-cutout"
+                    :src="selectedHeroArmory.secondaryCutout"
+                    :alt="selectedHeroArmory.secondaryWeapon.name"
+                  />
+                  <div class="dsc-info">
+                    <strong>{{ selectedHeroArmory.secondaryWeapon.name }}</strong>
+                    <div class="dsc-chips">
+                      <span>💥 {{ selectedHeroArmory.secondaryWeapon.damage }} DMG</span>
+                      <span>📏 R{{ selectedHeroArmory.secondaryWeapon.minRange }}–{{ selectedHeroArmory.secondaryWeapon.maxRange }}</span>
+                      <span v-if="selectedHeroArmory.secondaryWeapon.pull" class="g-tag pull">
+                        🌀 PULL {{ selectedHeroArmory.secondaryWeapon.pull }}
+                      </span>
+                      <span v-if="selectedHeroArmory.secondaryWeapon.cleave" class="g-tag cleave">
+                        🔨 CLEAVE
+                      </span>
+                      <span v-if="selectedHeroArmory.secondaryWeapon.curvesCover" class="g-tag">
+                        ↪ CURVES
+                      </span>
+                      <span v-if="selectedHeroArmory.secondaryWeapon.knockback" class="g-tag">
+                        ⇄ PUSH {{ selectedHeroArmory.secondaryWeapon.knockback }}
+                      </span>
+                      <span v-if="selectedHeroArmory.secondaryWeapon.appliesStatus" class="g-tag elem">
+                        +{{ selectedHeroArmory.secondaryWeapon.appliesStatus.kind.toUpperCase() }}
+                      </span>
+                    </div>
+                    <small>{{ selectedHeroArmory.secondaryWeapon.description }}</small>
+                  </div>
+                </div>
+
+                <button
+                  class="paper-btn dsc-default-btn"
+                  :class="{ primary: selectedHeroArmory.activeSlot === 'secondary' }"
+                  :disabled="selectedHero.harvested || selectedHeroArmory.activeSlot === 'secondary'"
+                  @click="handleSetDefaultSlot('secondary')"
+                >
+                  {{ selectedHeroArmory.activeSlot === 'secondary' ? '✓ Starts Battle Equipped' : 'Start Battle Holding This' }}
+                </button>
+
+                <!-- Branching Forge Upgrades for Secondary -->
+                <div v-if="selectedHeroArmory.secondaryForgeOpts.length > 0" class="forge-options">
+                  <button
+                    v-for="opt in selectedHeroArmory.secondaryForgeOpts"
+                    :key="opt.branch"
+                    class="forge-opt-btn"
+                    :class="opt.branch"
+                    :disabled="selectedHero.harvested || (forgeVouchers <= 0 && run.seeds < opt.cost)"
+                    @click="handleForge('secondary', opt.branch, opt.cost)"
+                  >
+                    <div class="fob-head">
+                      <span>{{ opt.badge }} <strong>{{ opt.title }}</strong></span>
+                      <span class="fob-cost" :class="{ free: forgeVouchers > 0 }">
+                        {{ forgeVouchers > 0 ? '🎟️ FREE' : `🌱 ${opt.cost}` }}
+                      </span>
+                    </div>
+                    <div class="fob-preview">
+                      <span v-if="opt.previewWeapon.damage !== selectedHeroArmory.secondaryWeapon.damage" class="fp-chip dmg">
+                        💥 {{ selectedHeroArmory.secondaryWeapon.damage }}→<strong>{{ opt.previewWeapon.damage }}</strong>
+                      </span>
+                      <span v-if="opt.previewWeapon.maxRange !== selectedHeroArmory.secondaryWeapon.maxRange" class="fp-chip rng">
+                        📏 R{{ selectedHeroArmory.secondaryWeapon.maxRange }}→<strong>R{{ opt.previewWeapon.maxRange }}</strong>
+                      </span>
+                      <span v-if="(opt.previewWeapon.pull ?? 0) > (selectedHeroArmory.secondaryWeapon.pull ?? 0)" class="fp-chip">
+                        🌀 PULL {{ opt.previewWeapon.pull }}
+                      </span>
+                      <span v-if="(opt.previewWeapon.knockback ?? 0) > (selectedHeroArmory.secondaryWeapon.knockback ?? 0)" class="fp-chip">
+                        ⇄ PUSH {{ opt.previewWeapon.knockback }}
+                      </span>
+                      <span v-if="opt.previewWeapon.cleave && !selectedHeroArmory.secondaryWeapon.cleave" class="fp-chip">
+                        🔨 CLEAVE
+                      </span>
+                      <span v-if="opt.previewWeapon.appliesStatus" class="fp-chip elem">
+                        +{{ opt.previewWeapon.appliesStatus.kind.toUpperCase() }}
+                      </span>
+                    </div>
+                    <small>{{ opt.summary }}</small>
+                  </button>
+                </div>
+                <div v-else class="forge-maxed">★ MASTERWORK TIER III FORGED!</div>
+              </div>
+            </div>
+
+            <!-- Optional Unlocked Alternate Primary Blueprint Swapper -->
+            <div v-if="selectedHeroArmory" class="alt-armory-strip">
               <button
-                class="weapon-opt"
+                class="weapon-opt compact"
                 :class="{ equipped: selectedHeroArmory.equippedId === selectedHeroArmory.base.id }"
                 :disabled="selectedHero.harvested"
                 @click="handleEquipWeapon(selectedHeroArmory.base.id)"
               >
                 <div class="wo-head">
-                  <strong>🎯 {{ selectedHeroArmory.base.name }}</strong>
-                  <span class="wo-badge">{{ selectedHeroArmory.equippedId === selectedHeroArmory.base.id ? 'EQUIPPED' : 'BASE' }}</span>
+                  <strong>🎯 Stock Primary: {{ selectedHeroArmory.base.name }}</strong>
+                  <span class="wo-badge">{{ selectedHeroArmory.equippedId === selectedHeroArmory.base.id ? 'ACTIVE' : 'SWITCH' }}</span>
                 </div>
-                <small class="wo-stats">
-                  {{ selectedHeroArmory.base.damage }} DMG · R{{ selectedHeroArmory.base.minRange }}-{{ selectedHeroArmory.base.maxRange }} · {{ selectedHeroArmory.base.arc.toUpperCase() }}
-                  <template v-if="selectedHeroArmory.base.knockback"> · ⇄ Push</template>
-                </small>
-                <small class="wo-desc">{{ selectedHeroArmory.base.description }}</small>
               </button>
-
               <button
-                class="weapon-opt alt"
+                class="weapon-opt alt compact"
                 :class="{
                   equipped: selectedHeroArmory.equippedId === selectedHeroArmory.alt.id,
                   locked: !selectedHeroArmory.altUnlocked,
@@ -614,23 +917,17 @@ function unlockedCountInPath(path: SkillPathDef): number {
                 @click="handleEquipWeapon(selectedHeroArmory.alt.id)"
               >
                 <div class="wo-head">
-                  <strong>⚔️ {{ selectedHeroArmory.alt.name }}</strong>
+                  <strong>⚔️ Alt Primary: {{ selectedHeroArmory.alt.name }}</strong>
                   <span class="wo-badge">
                     {{
                       selectedHeroArmory.equippedId === selectedHeroArmory.alt.id
-                        ? 'EQUIPPED'
+                        ? 'ACTIVE'
                         : selectedHeroArmory.altUnlocked
-                          ? 'EQUIP ALT'
-                          : '🔒 ARMORY / SHED'
+                          ? 'SWITCH'
+                          : '🔒 ARMORY'
                     }}
                   </span>
                 </div>
-                <small class="wo-stats">
-                  {{ selectedHeroArmory.alt.damage }} DMG · R{{ selectedHeroArmory.alt.minRange }}-{{ selectedHeroArmory.alt.maxRange }} · {{ selectedHeroArmory.alt.arc.toUpperCase() }}
-                  <template v-if="selectedHeroArmory.alt.knockback"> · ⇄ Push</template>
-                  <template v-if="selectedHeroArmory.alt.appliesStatus"> · +{{ selectedHeroArmory.alt.appliesStatus.kind }}</template>
-                </small>
-                <small class="wo-desc">{{ selectedHeroArmory.alt.description }}</small>
               </button>
             </div>
 
@@ -1844,5 +2141,348 @@ function unlockedCountInPath(path: SkillPathDef): number {
   border: 1.5px solid #fffdf5;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   line-height: 1.3;
+}
+
+.hs-quote {
+  display: block;
+  font-style: italic;
+  color: #7d4e24;
+  font-size: 0.72rem;
+  margin-top: 2px;
+}
+
+.forge-sale-txt {
+  color: #c93818;
+}
+
+.dual-forge-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 2px solid var(--ink);
+  background: linear-gradient(180deg, #fff9e3 0%, #f5dfb0 100%);
+}
+
+.dfb-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dfb-copy strong {
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.dfb-copy small {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.dfb-copy kbd {
+  background: #4a2c17;
+  color: #ffe891;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.dfb-wallet {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.voucher-pill {
+  background: linear-gradient(180deg, #e0f9ff, #9fe8ff);
+  border-color: #166a8a;
+  color: #093b4f;
+}
+
+.sale-pill {
+  background: linear-gradient(180deg, #ffde96, #f59433);
+  border-color: #822b08;
+  color: #4f1400;
+}
+
+.dual-weapon-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dual-slot-card {
+  padding: 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 2.4px solid var(--ink);
+  background: linear-gradient(180deg, #fffdf5 0%, #f7ebd0 100%);
+}
+
+.dual-slot-card.secondary-card {
+  background: linear-gradient(180deg, #f5fcff 0%, #e1f3fa 100%);
+}
+
+.dual-slot-card.active {
+  border-color: #c97f0a;
+  box-shadow: 0 4px 0 #8a5200, 0 0 12px rgba(255, 206, 74, 0.32);
+}
+
+.dsc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.dsc-slot-tag {
+  font-size: 0.67rem;
+  font-weight: 900;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1.6px solid var(--ink);
+  letter-spacing: 0.03em;
+}
+
+.dsc-slot-tag.primary {
+  background: #ffe89e;
+  color: #5c3400;
+}
+
+.dsc-slot-tag.secondary {
+  background: #9ceeff;
+  color: #0b4863;
+}
+
+.dsc-tier-stars {
+  font-size: 0.72rem;
+  font-weight: 900;
+  color: #8f5c10;
+}
+
+.dsc-tier-stars.tactical {
+  color: #1b65a6;
+}
+
+.dsc-tier-stars.elemental {
+  color: #c93d18;
+}
+
+.dsc-hero-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dsc-cutout {
+  width: 68px;
+  height: 68px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 3px 4px rgba(45, 24, 8, 0.28));
+}
+
+.dsc-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dsc-info strong {
+  font-size: 0.94rem;
+  color: var(--ink);
+}
+
+.dsc-info small {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  line-height: 1.25;
+}
+
+.dsc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.dsc-chips span {
+  background: rgba(255, 252, 240, 0.9);
+  border: 1.4px solid rgba(74, 44, 23, 0.4);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+
+.dsc-chips .g-tag {
+  background: #eef8ff;
+  border-color: #2c7aa8;
+  color: #10496b;
+}
+
+.dsc-chips .g-tag.cleave {
+  background: #fff1cc;
+  border-color: #b8700b;
+  color: #6b3800;
+}
+
+.dsc-chips .g-tag.elem {
+  background: #ffe3d4;
+  border-color: #c43f1c;
+  color: #7d1b06;
+}
+
+.dsc-default-btn {
+  padding: 6px 10px;
+  font-size: 0.76rem;
+  min-height: 36px;
+}
+
+.forge-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1.5px dashed rgba(74, 44, 23, 0.25);
+}
+
+.forge-opt-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 2px solid var(--ink);
+  background: #fffdf5;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.forge-opt-btn.tactical {
+  background: linear-gradient(180deg, #f2faff 0%, #d8efff 100%);
+  border-color: #1e6296;
+}
+
+.forge-opt-btn.elemental {
+  background: linear-gradient(180deg, #fff5eb 0%, #ffe0c4 100%);
+  border-color: #b83d18;
+}
+
+.forge-opt-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 3px 0 rgba(59, 33, 16, 0.4);
+}
+
+.forge-opt-btn:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.fob-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+
+.fob-cost {
+  background: #4a2c17;
+  color: #ffe891;
+  font-size: 0.7rem;
+  font-weight: 900;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.fob-cost.free {
+  background: #1780a6;
+  color: #fffdf5;
+}
+
+.fob-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0;
+}
+
+.fp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255, 253, 245, 0.92);
+  border: 1.4px solid rgba(74, 44, 23, 0.4);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.fp-chip.dmg {
+  background: #fff2cc;
+  border-color: #b8700b;
+  color: #5c3100;
+}
+
+.fp-chip.rng {
+  background: #e6f6ff;
+  border-color: #2472a6;
+  color: #0e466b;
+}
+
+.fp-chip.elem {
+  background: #ffe0d1;
+  border-color: #bd3b1a;
+  color: #781906;
+}
+
+.forge-opt-btn small {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+}
+
+.forge-maxed {
+  text-align: center;
+  font-size: 0.76rem;
+  font-weight: 900;
+  color: #8f5600;
+  background: linear-gradient(180deg, #fff4bd, #f2c852);
+  border: 1.8px solid #8f5600;
+  border-radius: 8px;
+  padding: 5px;
+}
+
+.alt-armory-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.weapon-opt.compact {
+  padding: 7px 10px;
+}
+
+@media (max-width: 820px) {
+  .dual-weapon-grid,
+  .alt-armory-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .dsc-cutout {
+    width: 56px;
+    height: 56px;
+  }
 }
 </style>

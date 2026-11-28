@@ -60,9 +60,11 @@ const savedRunPreview = computed(() => {
   if (saved.mode === 'daily') {
     return `📅 Daily Garden`;
   }
-  const seasonLabel = saved.act === 1 ? 'Summer' : saved.act === 2 ? 'Autumn' : 'Spring';
+  const seasonLabel =
+    saved.act === 3 ? 'Winter' : saved.act === 2 ? 'Autumn' : saved.act === 1 ? 'Summer' : 'Spring';
   return `🗺️ Act ${(saved.act ?? 0) + 1} ${seasonLabel}${coopTag}`;
 });
+const discoveredLoreCount = computed(() => (gameStore.meta.discoveredLoreIds ?? []).length);
 const coopChoices = [1, 2, 3, 4] as const;
 
 const todayKey = dailyKeyFor();
@@ -349,10 +351,10 @@ onBeforeUnmount(() => {
           <button class="mode-card campaign-card" @click="startNewSeasonRun()">
             <div class="mc-top">
               <span class="mc-ico">🗺️</span>
-              <span class="mc-pill">3 Seasons</span>
+              <span class="mc-pill">4 Seasons · 22 Stops</span>
             </div>
             <strong>Campaign Board</strong>
-            <small>Storybook maps, travel cards &amp; Act Bosses</small>
+            <small>Spring to Winter boards, Dual Weapons, Forges &amp; Lore!</small>
           </button>
 
           <button class="mode-card endless-card" @click="startEndlessRun()">
@@ -398,6 +400,7 @@ onBeforeUnmount(() => {
 
           <button class="paper-btn gold sec-btn" @click="activeModal = 'almanac'">
             <span>📖 Almanac</span>
+            <span v-if="discoveredLoreCount > 0" class="mini-count lore-count-pill">📜{{ discoveredLoreCount }}</span>
           </button>
 
           <button class="paper-btn sec-btn" @click="activeModal = 'guide'">
@@ -1666,13 +1669,33 @@ onBeforeUnmount(() => {
   }
 }
 
+.lore-count-pill {
+  background: #4e321a;
+  color: #ffe891;
+  border-color: #2f1a0a;
+}
+
 @media (max-width: 480px) {
   .cover-card {
-    padding: 15px 12px 13px;
-    gap: 9px;
+    padding: 14px 10px 12px;
+    gap: 8px;
   }
   .setup-lbl {
     display: none;
+  }
+  .secondary-row.three-col {
+    grid-template-columns: 1.32fr 0.96fr 0.72fr;
+    gap: 4px;
+  }
+  .sec-btn {
+    font-size: 0.72rem;
+    padding-inline: 5px;
+    gap: 3px;
+    min-width: 0;
+  }
+  .mini-count {
+    padding: 0 4px;
+    font-size: 0.66rem;
   }
   .greenhouse-grid {
     grid-template-columns: 1fr;

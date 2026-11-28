@@ -4,6 +4,7 @@ import { getAbilityTargetTiles } from '../engine/battle';
 import { bondStatuses, type BondStatus } from '../engine/bonds';
 import { GRAFT_REGISTRY } from '../data/grafts';
 import { ITEM_REGISTRY } from '../data/items';
+import { SEASON_ACT_INTROS, SEASON_WEATHER_INFO } from '../data/lore';
 import { RELIC_REGISTRY } from '../data/relics';
 import {
   forecastAttack,
@@ -22,10 +23,11 @@ import {
 } from '../engine/hooks';
 import { computeDashOptions, computeTeamJumpOptions } from '../engine/pathfinding';
 import { GRADE_LABELS, gradeBattle } from '../engine/par';
-import type { StatusKind } from '../engine/types';
+import type { StatusKind, WeaponDef, WeaponGimmickKind, WeaponSlot } from '../engine/types';
 import { type InteractionMode, PaperCraftRenderer } from '../renderer/canvas';
 import { PaperDioramaRenderer } from '../renderer3d/PaperDioramaRenderer';
 import { resolveVariantSpriteKey } from '../renderer3d/textures';
+import { getWeaponCutoutDataUrl } from '../renderer3d/weaponProps';
 import type {
   BattleRendererHandle,
   CameraMode3D,
@@ -61,6 +63,7 @@ import {
   subscribeCameraFocus,
   subscribeUndoReset,
   swapPrepBenchHero,
+  toggleActiveWeapon,
   toggleAllDangerZone,
   toggleAudioMute,
   toggleAutoEndTurn,
@@ -81,12 +84,12 @@ import HeroBuildModal from './HeroBuildModal.vue';
 const COACH_STORAGE_KEY = 'crop_revolt_coach_3d_v2';
 const COACH_TIPS_DESKTOP = [
   {
-    title: '1/3 · Move, then shoot',
-    body: 'Click a hero, click a blue tile to move, then press Weapon and click a farmer. Every hero can do both each turn.',
+    title: '1/3 · Dual Weapons & Move',
+    body: 'Click a blue tile to move, press [W] anytime to flip between Ranged & Melee/Gimmick weapons (Vacuum Pull, Hammer Cleave, Boomerang!), then fire with [F].',
   },
   {
-    title: '2/3 · Dash and Team-Jump',
-    body: 'While moving, run through an orange farmer to Dash it for free damage. Gold tiles bounce you off a friend for extra distance.',
+    title: '2/3 · Dash, Team-Jump & Combos',
+    body: 'Run through orange farmers to Dash them and bounce off gold allies to Team-Jump — chaining moves builds your Mario+Rabbids Combo bonus!',
   },
   {
     title: '3/3 · End the turn',
@@ -95,12 +98,12 @@ const COACH_TIPS_DESKTOP = [
 ] as const;
 const COACH_TIPS_TOUCH = [
   {
-    title: '1/3 · Move, then shoot',
-    body: 'Tap a hero, tap a blue tile twice to move, then tap Weapon and a farmer. Every hero can do both each turn.',
+    title: '1/3 · Dual Weapons & Move',
+    body: 'Tap a blue tile twice to move, tap either Dual-Weapon card to flip Ranged ⇄ Gimmick (Vacuum Pull / Cleave!), then tap Weapon & a farmer.',
   },
   {
-    title: '2/3 · Dash and Team-Jump',
-    body: 'Run through an orange farmer to Dash it for free damage. Gold tiles bounce you off a friend for extra distance.',
+    title: '2/3 · Dash, Team-Jump & Combos',
+    body: 'Run through orange farmers to Dash and bounce off gold allies to Team-Jump — chaining hits builds your Combo bonus!',
   },
   {
     title: '3/3 · End the turn',
@@ -305,23 +308,29 @@ const moveDestinationSummary = computed(() => {
       ? '🍄 Bouncy Mushroom (Launch 3 tiles / +2 height!)'
       : destTerrain === 'burrow'
         ? '🕳️ Gopher Burrow (1-Move Warp Pipe!)'
-        : destTerrain === 'sunbeam'
-          ? '☀ Sunbeam (+2 ATK)'
-          : destTerrain === 'compost'
-            ? '🌿 Compost (+2 HP/turn)'
-            : destTerrain === 'mud'
-              ? '💧 Mud (2 Move cost)'
-              : destTerrain === 'gate'
-                ? '▲ Exit Gate (Win!)'
-                : destTerrain === 'bridge'
-                  ? '🪵 Bridge Crossing (Collapsible!)'
-                  : destTerrain === 'ramp'
-                    ? '↗ Ramp (No climb penalty)'
-                    : destElev >= 2
-                      ? `▲ Summit Lv.${destElev} (+3 DMG & Uphill Shield!)`
-                      : destElev > 0
-                        ? `▲ High Ground Lv.${destElev} (+2 DMG!)`
-                        : null;
+        : destTerrain === 'ice'
+          ? '❄️ Glaze Ice (Pushes & Pulls slide +1 extra tile!)'
+          : destTerrain === 'sunbeam'
+            ? battle.value.seasonId === 'summer'
+              ? '☀ Summer Sunbeam (+3 ATK!)'
+              : '☀ Sunbeam (+2 ATK)'
+            : destTerrain === 'compost'
+              ? battle.value.seasonId === 'spring'
+                ? '🌿 Spring Compost (+3 HP/turn!)'
+                : '🌿 Compost (+2 HP/turn)'
+              : destTerrain === 'mud'
+                ? '💧 Mud (2 Move cost)'
+                : destTerrain === 'gate'
+                  ? '▲ Exit Gate (Win!)'
+                  : destTerrain === 'bridge'
+                    ? '🪵 Bridge Crossing (Collapsible!)'
+                    : destTerrain === 'ramp'
+                      ? '↗ Ramp (No climb penalty)'
+                      : destElev >= 2
+                        ? `▲ Summit Lv.${destElev} (+3 DMG & Uphill Shield!)`
+                        : destElev > 0
+                          ? `▲ High Ground Lv.${destElev} (+2 DMG!)`
+                          : null;
 
   return {
     isJump,
@@ -374,6 +383,8 @@ function unitPortraitSrc(u: {
 const aimTargets = computed(() => {
   void gameStore.eventQueueVersion;
   void gameStore.selectedUnitId;
+  void selectedUnit.value?.activeWeaponSlot;
+  void selectedUnit.value?.weapon.id;
   void battle.value.turn;
   return getAttackTargetsForSelected();
 });
@@ -451,19 +462,67 @@ const worldForecastStyle = computed(() => {
   };
 });
 
-function hazardBonusDamage(haz?: 'bump' | 'water' | 'lava' | 'drop'): number {
+function hazardBonusDamage(haz?: 'bump' | 'water' | 'lava' | 'drop' | 'ice'): number {
   if (haz === 'lava') return 4;
   if (haz === 'water') return 3;
   if (haz === 'drop' || haz === 'bump') return 2;
   return 0;
 }
 
-function hazardTagLabel(haz?: 'bump' | 'water' | 'lava' | 'drop'): string {
+function hazardTagLabel(haz?: 'bump' | 'water' | 'lava' | 'drop' | 'ice'): string {
   if (haz === 'lava') return '🔥 LAVA +4';
   if (haz === 'water') return '🌊 SPLASH +3';
   if (haz === 'drop') return '↓ DROP +2';
   if (haz === 'bump') return '⇄ BUMP +2';
+  if (haz === 'ice') return '❄️ ICE SLIDE';
   return '⇄ Push';
+}
+
+const activeSeasonWeather = computed(() =>
+  battle.value.seasonId ? SEASON_WEATHER_INFO[battle.value.seasonId] ?? null : null
+);
+const comboChainCount = computed(() => battle.value.comboChain ?? 0);
+const comboChainBonus = computed(() => Math.min(3, Math.floor(comboChainCount.value / 2)));
+
+function inspectSeasonWeather(): void {
+  const w = activeSeasonWeather.value;
+  if (!w) return;
+  inspectedNote.value = { title: `${w.icon} ${w.name}`, desc: w.detail };
+}
+
+const GIMMICK_SHORT_TAGS: Record<WeaponGimmickKind, string> = {
+  vacuum_pull: '🌀 PULL',
+  hammer_cleave: '🔨 CLEAVE',
+  boomerang: '↪ CURVE',
+  grapple_yank: '🪝 YANK',
+  cone_bellows: '🔥 CONE',
+  sentry_pop: '⚡ POP',
+  lunge_skewer: '⚔️ LUNGE',
+};
+
+function gimmickShortLabel(w?: WeaponDef | null): string {
+  if (!w) return '';
+  if (w.gimmick && GIMMICK_SHORT_TAGS[w.gimmick]) return GIMMICK_SHORT_TAGS[w.gimmick];
+  if (w.pull) return '🌀 PULL';
+  if (w.cleave) return '🔨 CLEAVE';
+  if (w.curvesCover) return '↪ CURVE';
+  if (w.knockback) return '⇄ PUSH';
+  if (w.arc === 'lobbed') return '☄️ LOB';
+  if (w.arc === 'pierce') return '⚡ PIERCE';
+  return '';
+}
+
+function weaponTierStars(w?: WeaponDef | null): string {
+  const t = w?.forgeTier ?? 1;
+  if (t >= 3) return '★★★';
+  if (t >= 2) return '★★';
+  return '';
+}
+
+function handleSwitchWeapon(slot?: WeaponSlot): void {
+  showItemsMenu.value = false;
+  clearEndConfirm();
+  toggleActiveWeapon(slot);
 }
 
 const forecastHpBars = computed(() => {
@@ -534,7 +593,8 @@ const latestLogLine = computed(() =>
 );
 
 const STATUS_META: Record<StatusKind, { short: string; title: string; desc: string }> = {
-  burn: { short: 'Burn', title: 'Burn', desc: 'Takes 2 fire damage at the start of its turn.' },
+  burn: { short: 'Burn', title: 'Burn', desc: 'Takes 2 fire damage at the start of its turn (3 in Summer Heatwave!).' },
+  frost: { short: 'Frost', title: 'Frost', desc: 'Chilled — Move range reduced by 2 and takes +1 bonus DMG from melee & gimmick hits!' },
   rooted: { short: 'Root', title: 'Rooted', desc: 'Tangled in vines — cannot Move, Dash, or Team-Jump.' },
   acid: { short: 'Acid', title: 'Acid', desc: 'Corroded — takes +2 bonus damage from every attack.' },
   feared: { short: 'Fear', title: 'Feared', desc: 'Rattled by crows — Move range reduced by 2 tiles.' },
@@ -586,6 +646,8 @@ const enemiesInAttackRange = computed(() => {
   if (!selectedUnit.value || battle.value.phase !== 'player' || selectedUnit.value.actions.hasAttacked) {
     return 0;
   }
+  void selectedUnit.value.activeWeaponSlot;
+  void selectedUnit.value.weapon.id;
   const tiles = getAttackableTiles(battle.value, selectedUnit.value);
   return tiles.filter((pos) => {
     const u = unitAt(battle.value, pos);
@@ -757,7 +819,7 @@ function syncHudInsets(): void {
     activeRenderer?.setHudInsets?.(0, prep ? Math.min(measured, window.innerHeight * 0.4) : 0);
     return;
   }
-  activeRenderer?.setHudInsets?.(84, prep ? Math.max(260, measured) : 200);
+  activeRenderer?.setHudInsets?.(84, prep ? Math.max(280, measured) : 232);
 }
 
 watch(
@@ -830,6 +892,38 @@ const objectiveLine = computed(() => {
   }
   if (b.objective === 'rout') return `🏃 Rout · bonk ${routLeft.value} more · ${foes} foes`;
   return `${b.objectiveLabel} · ${foes} ${foes === 1 ? 'foe' : 'foes'} left`;
+});
+
+const mobileObjectiveLine = computed(() => {
+  void gameStore.eventQueueVersion;
+  const b = battle.value;
+  const foes = aliveEnemiesCount.value;
+  if (b.objective === 'smash_crates') {
+    const left = b.tiles.reduce(
+      (sum, row) => sum + row.filter((t) => t.cover?.isObjectiveCrate).length,
+      0
+    );
+    return `📦 ${left} Crate${left === 1 ? '' : 's'} · ${foes} foes`;
+  }
+  if (b.objective === 'survive') {
+    const total = b.surviveTurns ?? 4;
+    return `🛡️ Hold ${Math.min(b.turn, total)}/${total} · ${foes} foes`;
+  }
+  if (b.objective === 'escort' && escortCart.value) {
+    return `🛒 Cart ${escortCart.value.hp}/${escortCart.value.maxHp} · ${foes} foes`;
+  }
+  if (b.objective === 'rout') return `🏃 Rout ${routLeft.value} · ${foes} foes`;
+  if (b.objective === 'reach_gate') return `🚪 Breakout · ${foes} foes`;
+  if (b.objective === 'barn_rescue') return `🔓 Rescue · ${foes} foes`;
+  if (b.objective === 'boss') return `👑 Boss · ${foes} foes`;
+  return `⚔️ Clear · ${foes} foes`;
+});
+
+const bossPrepQuote = computed(() => {
+  const b = battle.value;
+  if (!b.prepPhase || b.objective !== 'boss' || !b.seasonId) return null;
+  const intro = SEASON_ACT_INTROS[b.seasonId];
+  return intro ? { name: intro.bossName, quote: intro.bossQuote } : null;
 });
 
 const coopPlayers = computed(() =>
@@ -1067,6 +1161,9 @@ function onKeyDown(e: KeyboardEvent): void {
     return;
   } else if (lower === 'r') {
     recenterBoard();
+    return;
+  } else if (lower === 'w' && selectedUnit.value && selectedUnit.value.secondaryWeapon) {
+    handleSwitchWeapon();
     return;
   }
 
@@ -1393,6 +1490,15 @@ onBeforeUnmount(() => {
               <span v-if="previewDashDamage !== null" class="wf-dash-chip">
                 ⚡ Dash -{{ previewDashDamage }}
               </span>
+              <span v-if="activeForecast?.pullDir" class="wf-pull-chip">
+                🌀 PULL
+              </span>
+              <span
+                v-if="activeForecast?.cleaveUnitIds && activeForecast.cleaveUnitIds.length > 0"
+                class="wf-cleave-chip"
+              >
+                🔨 CLEAVE +{{ activeForecast.cleaveUnitIds.length }}
+              </span>
               <span
                 v-if="activeForecast?.knockbackDir"
                 class="wf-kb-chip"
@@ -1469,7 +1575,24 @@ onBeforeUnmount(() => {
           <strong>{{ battle.mapName }}</strong>
           <small>{{ objectiveLine }}</small>
         </div>
-        <span class="mobile-obj-inline mobile-only">{{ objectiveLine }}</span>
+        <span class="mobile-obj-inline mobile-only">{{ mobileObjectiveLine }}</span>
+        <button
+          v-if="activeSeasonWeather"
+          class="cam-mode-pill weather-pill"
+          :style="{ '--weather-color': activeSeasonWeather.badgeColor }"
+          :title="`${activeSeasonWeather.name}: ${activeSeasonWeather.detail}`"
+          @click="inspectSeasonWeather"
+        >
+          <span>{{ activeSeasonWeather.icon }}</span>
+          <span class="desktop-only">{{ activeSeasonWeather.name }}</span>
+        </button>
+        <span
+          v-if="!battle.prepPhase && comboChainCount > 0"
+          class="cam-mode-pill combo-chain-pill"
+          :title="`Mario+Rabbids Combo Chain: ${comboChainCount} consecutive tactical actions this turn${comboChainBonus > 0 ? ` (+${comboChainBonus} ATK!)` : ' (Reach 2× for +1 ATK!)'}`"
+        >
+          🔥 {{ comboChainCount }}×<template v-if="comboChainBonus > 0"> +{{ comboChainBonus }}</template>
+        </span>
         <span
           v-if="battle.parTurns"
           class="cam-mode-pill par desktop-only"
@@ -1923,9 +2046,17 @@ onBeforeUnmount(() => {
           <h4>3D Controls &amp; Board Toys</h4>
           <ul class="mini-rules">
             <li v-if="gameStore.isTouchMode"><strong>Camera:</strong> Drag the board to pan · Pinch to zoom.</li>
-            <li v-else><strong>Camera:</strong> Right-drag (or <strong>Q / E</strong>) orbits 3D view · Left-drag pans · Scroll zooms · <strong>T</strong> toggles Tacticam · <strong>R</strong> resets.</li>
-            <li><strong>Tactics:</strong> <strong>🍄 Mushrooms</strong> launch 3 tiles/+2 elev · <strong>🎃 Pumpkins</strong> bowl 5 tiles for 4 DMG · <strong>🪵 Bridges</strong> collapse when shot · Adjacent allies deal <strong>+1 Assist DMG</strong>!</li>
+            <li v-else><strong>Camera:</strong> Right-drag (or <strong>Q / E</strong>) orbits 3D view · Left-drag pans · Scroll zooms · <strong>W</strong> swaps Dual Weapons · <strong>T</strong> Tacticam · <strong>R</strong> resets.</li>
+            <li><strong>Dual Weapons:</strong> Every hero carries a <strong>Primary Ranged</strong> &amp; <strong>Secondary Melee/Gimmick</strong> (Vacuum Pull, Cleave Hammer, Boomerang, Grapple!) — swap freely before firing!</li>
+            <li><strong>Tactics:</strong> <strong>❄️ Glaze Ice</strong> slides pushes/pulls +1 tile · <strong>🍄 Mushrooms</strong> launch 3 tiles · <strong>🎃 Pumpkins</strong> bowl 5 tiles · <strong>🪵 Bridges</strong> collapse · Adjacent allies deal <strong>+1 Assist DMG</strong>!</li>
             <li><strong>Strong (+30%):</strong> Roots &gt; Sprayers · Vines &gt; Diggers · Fruits &gt; Blades.</li>
+          </ul>
+        </div>
+
+        <div v-if="activeSeasonWeather" class="menu-section">
+          <h4>{{ activeSeasonWeather.icon }} Seasonal Weather: {{ activeSeasonWeather.name }}</h4>
+          <ul class="mini-rules">
+            <li>{{ activeSeasonWeather.detail }}</li>
           </ul>
         </div>
 
@@ -1952,8 +2083,8 @@ onBeforeUnmount(() => {
         <div class="menu-section">
           <h4>Status Effects</h4>
           <ul class="mini-rules">
-            <li><strong>Burn (B):</strong> -2 HP at start of turn · <strong>Acid (A):</strong> +2 damage taken.</li>
-            <li><strong>Rooted (R):</strong> Cannot move · <strong>Feared (!):</strong> -2 Move range.</li>
+            <li><strong>Burn (B):</strong> -2 HP at start of turn · <strong>Frost (F):</strong> -2 Move &amp; +1 Melee/Gimmick DMG taken.</li>
+            <li><strong>Acid (A):</strong> +2 damage taken · <strong>Rooted (R):</strong> Cannot move · <strong>Feared (!):</strong> -2 Move.</li>
             <li><strong>Shield (S):</strong> -2 damage taken · <strong>Boosted (+):</strong> +2 Attack &amp; Dash.</li>
           </ul>
         </div>
@@ -2048,6 +2179,14 @@ onBeforeUnmount(() => {
             </span>
             <div class="mr-portrait-box">
               <img class="mr-portrait-img" :src="unitPortraitSrc(u)" :alt="u.name" />
+              <img
+                v-if="u.alive && u.weapon"
+                class="mr-weap-mini"
+                :class="u.activeWeaponSlot === 'secondary' ? 'sec' : 'pri'"
+                :src="getWeaponCutoutDataUrl(u.weapon.visualKind ?? 'blaster', u.weapon.forgeTier ?? 1, u.weapon.forgeBranch)"
+                :alt="u.weapon.name"
+                :title="`Holding: ${u.weapon.name}`"
+              />
               <span v-if="u.alive && (u.level ?? 1) > 1" class="mr-lvl-chip">L{{ u.level }}</span>
               <span v-if="u.alive && u.statuses.some((s) => s.kind === 'overwatch')" class="mr-watch-seal" title="On Watch">
                 👁
@@ -2176,6 +2315,11 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
+            <!-- Act Boss Signature Taunt Quote when deploying for Boss Showdown -->
+            <div v-if="bossPrepQuote" class="prep-boss-quote">
+              <span>👑 <strong>{{ bossPrepQuote.name }}:</strong> {{ bossPrepQuote.quote }}</span>
+            </div>
+
             <!-- Clear Always-Visible Contextual Guidance -->
             <div class="prep-guide-line" role="status">
               <span v-if="prepSwapNotice" class="prep-swap-ok">✓ {{ prepSwapNotice }}</span>
@@ -2202,6 +2346,71 @@ onBeforeUnmount(() => {
                   <small>{{ u.hp }}/{{ u.maxHp }} HP</small>
                 </div>
                 <span v-if="u.id === gameStore.selectedUnitId" class="prep-slot-tag">SWAP</span>
+              </button>
+            </div>
+
+            <!-- Live Dual-Weapon Quick Flip for Selected Hero in Prep -->
+            <div
+              v-if="selectedUnit && selectedUnit.primaryWeapon && selectedUnit.secondaryWeapon"
+              class="dual-weapon-bar prep-dual-bar"
+              aria-label="Hero Dual Weapons"
+            >
+              <button
+                class="dw-card primary"
+                :class="{ active: (selectedUnit.activeWeaponSlot ?? 'primary') === 'primary' }"
+                :title="`Hold Primary Ranged: ${selectedUnit.primaryWeapon.name} (${selectedUnit.primaryWeapon.damage} DMG, R${selectedUnit.primaryWeapon.minRange}-${selectedUnit.primaryWeapon.maxRange})`"
+                @click="handleSwitchWeapon('primary')"
+              >
+                <img
+                  class="dw-art"
+                  :src="getWeaponCutoutDataUrl(selectedUnit.primaryWeapon.visualKind ?? 'blaster', selectedUnit.primaryWeapon.forgeTier ?? 1, selectedUnit.primaryWeapon.forgeBranch)"
+                  :alt="selectedUnit.primaryWeapon.name"
+                />
+                <div class="dw-copy">
+                  <strong class="dw-name">
+                    {{ selectedUnit.primaryWeapon.name }}
+                    <span v-if="weaponTierStars(selectedUnit.primaryWeapon)" class="dw-stars">{{ weaponTierStars(selectedUnit.primaryWeapon) }}</span>
+                  </strong>
+                  <small class="dw-meta">
+                    🎯 {{ selectedUnit.primaryWeapon.damage }} DMG · R{{ selectedUnit.primaryWeapon.minRange }}–{{ selectedUnit.primaryWeapon.maxRange }}
+                  </small>
+                </div>
+              </button>
+
+              <button
+                class="dw-swap-btn"
+                title="Swap Held Weapon (W) — Free Action!"
+                aria-label="Swap Held Weapon"
+                @click="handleSwitchWeapon()"
+              >
+                <span class="dw-swap-arrow">⇄</span>
+                <span class="dw-swap-key desktop-only">W</span>
+                <span class="dw-swap-free mobile-only">FREE</span>
+              </button>
+
+              <button
+                class="dw-card secondary"
+                :class="{ active: selectedUnit.activeWeaponSlot === 'secondary' }"
+                :title="`Hold Secondary Gimmick: ${selectedUnit.secondaryWeapon.name} (${selectedUnit.secondaryWeapon.damage} DMG) — ${selectedUnit.secondaryWeapon.description}`"
+                @click="handleSwitchWeapon('secondary')"
+              >
+                <img
+                  class="dw-art"
+                  :src="getWeaponCutoutDataUrl(selectedUnit.secondaryWeapon.visualKind ?? 'hammer', selectedUnit.secondaryWeapon.forgeTier ?? 1, selectedUnit.secondaryWeapon.forgeBranch)"
+                  :alt="selectedUnit.secondaryWeapon.name"
+                />
+                <div class="dw-copy">
+                  <strong class="dw-name">
+                    {{ selectedUnit.secondaryWeapon.name }}
+                    <span v-if="weaponTierStars(selectedUnit.secondaryWeapon)" class="dw-stars">{{ weaponTierStars(selectedUnit.secondaryWeapon) }}</span>
+                  </strong>
+                  <small class="dw-meta">
+                    {{ selectedUnit.secondaryWeapon.damage }} DMG
+                    <span v-if="gimmickShortLabel(selectedUnit.secondaryWeapon)" class="dw-gimmick-pill">
+                      {{ gimmickShortLabel(selectedUnit.secondaryWeapon) }}
+                    </span>
+                  </small>
+                </div>
               </button>
             </div>
 
@@ -2308,6 +2517,15 @@ onBeforeUnmount(() => {
                       <span v-if="activeForecast?.isCriticalFlank" class="deck-bonus-tag crit">
                         ★ CRIT
                       </span>
+                      <span v-if="activeForecast?.pullDir" class="deck-bonus-tag pull">
+                        🌀 PULL
+                      </span>
+                      <span
+                        v-if="activeForecast?.cleaveUnitIds && activeForecast.cleaveUnitIds.length > 0"
+                        class="deck-bonus-tag cleave"
+                      >
+                        🔨 CLEAVE +{{ activeForecast.cleaveUnitIds.length }}
+                      </span>
                       <span
                         v-if="activeForecast?.knockbackHazard"
                         class="deck-bonus-tag"
@@ -2358,6 +2576,14 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="confirm-strip">
+                <button
+                  v-if="selectedUnit.secondaryWeapon && !selectedUnit.actions.hasAttacked"
+                  class="paper-btn gold aim-swap-btn"
+                  title="Switch between Ranged & Secondary Melee/Gimmick (W)"
+                  @click="handleSwitchWeapon()"
+                >
+                  <span>⇄ {{ selectedUnit.activeWeaponSlot === 'secondary' ? 'Ranged' : 'Gimmick' }}</span>
+                </button>
                 <button
                   v-if="gameStore.mode === 'attack' && aimTargets.length > 1"
                   class="paper-btn aim-cycle-btn"
@@ -2603,6 +2829,76 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
+              <!-- Tactile Paper-Craft Dual-Weapon Switcher: Primary Ranged ⇄ Secondary Melee/Gimmick -->
+              <div
+                v-if="selectedUnit.primaryWeapon && selectedUnit.secondaryWeapon"
+                class="dual-weapon-bar"
+                aria-label="Switch Active Weapon"
+              >
+                <button
+                  class="dw-card primary"
+                  :class="{ active: (selectedUnit.activeWeaponSlot ?? 'primary') === 'primary' }"
+                  :disabled="battle.phase !== 'player' || gameStore.enemyTurnRunning"
+                  :title="`Primary Ranged: ${selectedUnit.primaryWeapon.name} (${selectedUnit.primaryWeapon.damage} DMG, R${selectedUnit.primaryWeapon.minRange}-${selectedUnit.primaryWeapon.maxRange}) — ${selectedUnit.primaryWeapon.description}`"
+                  @click="handleSwitchWeapon('primary')"
+                >
+                  <img
+                    class="dw-art"
+                    :src="getWeaponCutoutDataUrl(selectedUnit.primaryWeapon.visualKind ?? 'blaster', selectedUnit.primaryWeapon.forgeTier ?? 1, selectedUnit.primaryWeapon.forgeBranch)"
+                    :alt="selectedUnit.primaryWeapon.name"
+                  />
+                  <div class="dw-copy">
+                    <strong class="dw-name">
+                      {{ selectedUnit.primaryWeapon.name }}
+                      <span v-if="weaponTierStars(selectedUnit.primaryWeapon)" class="dw-stars">{{ weaponTierStars(selectedUnit.primaryWeapon) }}</span>
+                    </strong>
+                    <small class="dw-meta">
+                      🎯 {{ selectedUnit.primaryWeapon.damage }} DMG · R{{ selectedUnit.primaryWeapon.minRange }}–{{ selectedUnit.primaryWeapon.maxRange }}
+                    </small>
+                  </div>
+                  <span v-if="(selectedUnit.activeWeaponSlot ?? 'primary') === 'primary'" class="dw-held-dot" title="Visually Equipped">★</span>
+                </button>
+
+                <button
+                  class="dw-swap-btn"
+                  :disabled="battle.phase !== 'player' || gameStore.enemyTurnRunning"
+                  title="Swap Primary ⇄ Secondary Weapon (W) — Free Action!"
+                  aria-label="Swap Weapon"
+                  @click="handleSwitchWeapon()"
+                >
+                  <span class="dw-swap-arrow">⇄</span>
+                  <span class="dw-swap-key desktop-only">W</span>
+                  <span class="dw-swap-free mobile-only">FREE</span>
+                </button>
+
+                <button
+                  class="dw-card secondary"
+                  :class="{ active: selectedUnit.activeWeaponSlot === 'secondary' }"
+                  :disabled="battle.phase !== 'player' || gameStore.enemyTurnRunning"
+                  :title="`Secondary Gimmick: ${selectedUnit.secondaryWeapon.name} (${selectedUnit.secondaryWeapon.damage} DMG, R${selectedUnit.secondaryWeapon.minRange}-${selectedUnit.secondaryWeapon.maxRange}) — ${selectedUnit.secondaryWeapon.description}`"
+                  @click="handleSwitchWeapon('secondary')"
+                >
+                  <img
+                    class="dw-art"
+                    :src="getWeaponCutoutDataUrl(selectedUnit.secondaryWeapon.visualKind ?? 'hammer', selectedUnit.secondaryWeapon.forgeTier ?? 1, selectedUnit.secondaryWeapon.forgeBranch)"
+                    :alt="selectedUnit.secondaryWeapon.name"
+                  />
+                  <div class="dw-copy">
+                    <strong class="dw-name">
+                      {{ selectedUnit.secondaryWeapon.name }}
+                      <span v-if="weaponTierStars(selectedUnit.secondaryWeapon)" class="dw-stars">{{ weaponTierStars(selectedUnit.secondaryWeapon) }}</span>
+                    </strong>
+                    <small class="dw-meta">
+                      {{ selectedUnit.secondaryWeapon.damage }} DMG
+                      <span v-if="gimmickShortLabel(selectedUnit.secondaryWeapon)" class="dw-gimmick-pill">
+                        {{ gimmickShortLabel(selectedUnit.secondaryWeapon) }}
+                      </span>
+                    </small>
+                  </div>
+                  <span v-if="selectedUnit.activeWeaponSlot === 'secondary'" class="dw-held-dot" title="Visually Equipped">★</span>
+                </button>
+              </div>
+
               <!-- 5 Roomy Hero Action Buttons (≥48px touch targets on mobile): Move / Weapon / Watch / Skill / Bag -->
               <div class="mr-action-bar">
                 <button
@@ -2643,7 +2939,15 @@ onBeforeUnmount(() => {
                   <span v-if="enemiesInAttackRange > 0" class="tab-badge">{{ enemiesInAttackRange }}</span>
                   <CraftIcon name="attack" :size="15" />
                   <div class="act-copy">
-                    <span class="act-title">{{ gameStore.mode === 'attack' ? 'Aiming' : 'Weapon' }}</span>
+                    <span class="act-title">
+                      {{
+                        gameStore.mode === 'attack'
+                          ? 'Aiming'
+                          : selectedUnit.activeWeaponSlot === 'secondary'
+                            ? 'Gimmick'
+                            : 'Weapon'
+                      }}
+                    </span>
                     <small class="act-sub">{{ selectedUnit.weapon.damage }} DMG</small>
                   </div>
                 </button>
@@ -5683,6 +5987,311 @@ onBeforeUnmount(() => {
   }
   50% {
     box-shadow: 0 3px 0 #7a1c14, 0 0 0 5px rgba(217, 56, 41, 0.22);
+  }
+}
+
+/* ===== Seasonal Weather Pill & Live Mario+Rabbids Combo Chain ===== */
+.cam-mode-pill.weather-pill {
+  background: #fff8e2;
+  color: var(--ink);
+  border: 1.8px solid var(--weather-color, #5ea342);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.cam-mode-pill.combo-chain-pill {
+  background: linear-gradient(180deg, #ff9933 0%, #d93b1a 100%);
+  color: #fffef4;
+  border: 1.8px solid #591609;
+  font-weight: 900;
+  animation: comboPop 0.32s cubic-bezier(0.22, 1.4, 0.36, 1);
+}
+
+@keyframes comboPop {
+  0% {
+    transform: scale(0.8);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ===== Pull / Cleave / Ice Forecast & Frost Status Chips ===== */
+.wf-pull-chip,
+.deck-bonus-tag.pull {
+  background: #d0f4ff;
+  color: #0e4f6e;
+  border: 1.4px solid #1b78a3;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.67rem;
+  font-weight: 900;
+}
+
+.wf-cleave-chip,
+.deck-bonus-tag.cleave {
+  background: #ffe0b8;
+  color: #7d3105;
+  border: 1.4px solid #c95f14;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.67rem;
+  font-weight: 900;
+}
+
+.wf-kb-chip.ice,
+.deck-bonus-tag.ice {
+  background: #d8f2ff;
+  color: #0e4a73;
+  border-color: #2c7fb8;
+}
+
+.status-chip.frost {
+  background: #d6f0ff;
+  border-color: #2b79b5;
+  color: #0f3f6b;
+}
+
+.aim-swap-btn {
+  padding: 6px 10px;
+  font-size: 0.74rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+/* ===== Tactile Paper-Craft Dual-Weapon Switcher Bar ===== */
+.dual-weapon-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 6px;
+  margin: 4px 0 5px;
+}
+
+.prep-dual-bar {
+  margin: 2px 0;
+}
+
+.dw-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: 11px;
+  border: 2px solid rgba(74, 44, 23, 0.45);
+  background: rgba(251, 244, 226, 0.85);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+  min-height: 40px;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.dw-card:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #fffaf0;
+}
+
+.dw-card.primary.active {
+  border-color: #2468a8;
+  background: linear-gradient(180deg, #f3faff 0%, #d4ecff 100%);
+  box-shadow: 0 3px 0 #1b4e7d, 0 0 10px rgba(74, 168, 255, 0.35);
+}
+
+.dw-card.secondary.active {
+  border-color: #c25b14;
+  background: linear-gradient(180deg, #fff9ec 0%, #ffe0b2 100%);
+  box-shadow: 0 3px 0 #7a3609, 0 0 10px rgba(245, 160, 48, 0.38);
+}
+
+.dw-card:not(.active) {
+  opacity: 0.76;
+}
+
+.dw-art {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 3px rgba(42, 20, 6, 0.28));
+}
+
+.dw-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.16;
+}
+
+.dw-name {
+  font-size: 0.75rem;
+  font-weight: 900;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dw-card.active .dw-name {
+  padding-right: 14px;
+}
+
+.dw-stars {
+  color: #c77b08;
+  font-size: 0.68rem;
+  margin-left: 2px;
+}
+
+.dw-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dw-gimmick-pill {
+  background: rgba(194, 91, 20, 0.16);
+  color: #7c3105;
+  border-radius: 6px;
+  padding: 0 4px;
+  font-size: 0.61rem;
+  font-weight: 900;
+}
+
+.dw-held-dot {
+  position: absolute;
+  top: -6px;
+  right: 6px;
+  background: #4a2c17;
+  color: #ffe878;
+  font-size: 0.6rem;
+  font-weight: 900;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1.5px solid #fffdf5;
+  line-height: 1.3;
+}
+
+.dw-swap-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 2px solid var(--ink);
+  background: linear-gradient(180deg, #ffe791 0%, #f0b635 100%);
+  box-shadow: 0 2.5px 0 var(--ink);
+  color: var(--ink);
+  cursor: pointer;
+  min-width: 34px;
+  transition: transform 0.12s ease;
+}
+
+.dw-swap-btn:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.04);
+}
+
+.dw-swap-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.dw-swap-arrow {
+  font-size: 0.92rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.dw-swap-key,
+.dw-swap-free {
+  font-size: 0.54rem;
+  font-weight: 900;
+  background: #4a2c17;
+  color: #ffe891;
+  padding: 0 4px;
+  border-radius: 4px;
+  margin-top: 2px;
+  letter-spacing: 0.02em;
+}
+
+.mr-weap-mini {
+  position: absolute;
+  bottom: -4px;
+  right: -5px;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  background: #fff9e6;
+  border: 1.5px solid #2468a8;
+  border-radius: 7px;
+  padding: 1px;
+  box-shadow: 0 1.5px 0 rgba(54, 30, 10, 0.35);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.mr-weap-mini.sec {
+  background: #fff0d1;
+  border-color: #c25b14;
+}
+
+.prep-boss-quote {
+  padding: 4px 10px;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #fff1df 0%, #f5cfa6 100%);
+  border: 1.6px solid #8c2218;
+  font-size: 0.72rem;
+  font-style: italic;
+  font-weight: 700;
+  color: #5e1d10;
+  line-height: 1.25;
+}
+
+@media (max-width: 767px) {
+  .mr-weap-mini {
+    width: 18px;
+    height: 18px;
+    bottom: -3px;
+    right: -4px;
+  }
+
+  .dual-weapon-bar {
+    gap: 4px;
+    margin: 3px 0 4px;
+  }
+
+  .dw-card {
+    padding: 3px 6px;
+    gap: 5px;
+    min-height: 36px;
+  }
+
+  .dw-art {
+    width: 26px;
+    height: 26px;
+  }
+
+  .dw-name {
+    font-size: 0.69rem;
+  }
+
+  .dw-meta {
+    font-size: 0.6rem;
+  }
+
+  .dw-swap-btn {
+    min-width: 34px;
+    padding: 2px 4px;
   }
 }
 </style>

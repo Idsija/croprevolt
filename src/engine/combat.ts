@@ -3,6 +3,7 @@ import {
   getEffectiveCoverDamage,
   getMatchup,
   getMatchupMultiplier,
+  getSeasonFromBattle,
   getUnitPerkEffects,
   hasGraft,
   hasRelic,
@@ -20,9 +21,42 @@ export function computePushDirection(from: GridPos, to: GridPos): GridPos {
   return { x: 0, y: dy >= 0 ? 1 : -1 };
 }
 
+export function computePullDestination(
+  state: BattleState,
+  attackerPos: GridPos,
+  targetPos: GridPos,
+  steps: number
+): { dir: GridPos; dest: GridPos; slidIce: boolean } | null {
+  const push = computePushDirection(attackerPos, targetPos);
+  const dir: GridPos = { x: -push.x || 0, y: -push.y || 0 };
+  let cur: GridPos = { ...targetPos };
+  let moved = 0;
+  let slidIce = false;
+  let totalSteps = Math.max(1, steps);
+
+  for (let i = 0; i < totalSteps; i++) {
+    const next = { x: cur.x + dir.x, y: cur.y + dir.y };
+    if (!inBounds(state, next)) break;
+    if (next.x === attackerPos.x && next.y === attackerPos.y) break;
+    const t = tileAt(state, next);
+    if (!t || t.cover || unitAt(state, next)) break;
+    cur = next;
+    moved++;
+    // Glaze Ice extends a pull slide by +1 extra tile (once)!
+    if (t.terrain === 'ice' && !slidIce) {
+      slidIce = true;
+      totalSteps += 1;
+    }
+    if (t.terrain === 'water' || t.terrain === 'lava') break;
+  }
+  if (moved === 0) return null;
+  return { dir, dest: cur, slidIce };
+}
+
 /**
  * Predicts exact hit chance (100 / 50 / 0), cover protection, high-ground elevation bonus,
- * triangle multiplier, knockback hazards (bump / water / lava / cliff drop), and damage.
+ * triangle multiplier, knockback/pull hazards (bump / water / lava / cliff drop / ice slide),
+ * cleave targets, seasonal weather & damage.
  * Shared identically by the Hover Forecast UI and the Battle Executor!
  */
 export function forecastAttack(
@@ -36,6 +70,7 @@ export function forecastAttack(
   const fx = getUnitPerkEffects(attacker);
   const targetUnit = unitAt(state, targetPos);
   const targetTile = tileAt(state, targetPos);
+  const season = getSeasonFromBattle(state);
 
   const invalid = (reason: string): CombatForecast => ({
     attackerId: attacker.id,
@@ -74,10 +109,20 @@ export function forecastAttack(
     return invalid('No valid target');
   }
 
-  // Raw base attack including temporary bonuses (Bouncy Mulch, Cluck Norris jump, Spicy Pep, Sunbeam tile!)
+  // Raw base attack including temporary bonuses (Bouncy Mulch, Cluck Norris jump, Spicy Pep, Sunbeam, Dual-Swap Boost & Combo Momentum!)
   const attackerTile = tileAt(state, attacker.pos);
-  const sunbeamBonus = attackerTile?.terrain === 'sunbeam' ? 2 : 0;
-  const boostBonus = (hasStatus(attacker, 'boosted') ? 2 : 0) + attacker.tempAttackBonus + sunbeamBonus;
+  const sunbeamBonus = attackerTile?.terrain === 'sunbeam' ? (season === 'summer' ? 3 : 2) : 0;
+  const swapBoost = attacker.actions.swappedWeaponThisTurn && fx.dualSwapBoost ? 2 : 0;
+  const gimmickBonus = w.slot === 'secondary' ? fx.gimmickBonusDmg : 0;
+  const momentumBonus =
+    attacker.team === 'player' ? Math.min(3, Math.floor((state.comboChain ?? 0) / 2)) : 0;
+  const boostBonus =
+    (hasStatus(attacker, 'boosted') ? 2 : 0) +
+    attacker.tempAttackBonus +
+    sunbeamBonus +
+    swapBoost +
+    gimmickBonus +
+    momentumBonus;
   const rawBase = w.damage + boostBonus;
   const effCoverDmg = getEffectiveCoverDamage(attacker) + boostBonus;
 
@@ -101,6 +146,7 @@ export function forecastAttack(
       isBridgeTarget,
       isPumpkinTarget: isPumpkin,
       pumpkinRollDir: isPumpkin ? computePushDirection(attacker.pos, targetPos) : undefined,
+      gimmick: w.gimmick,
       canAttack: true,
     };
   }
@@ -118,11 +164,15 @@ export function forecastAttack(
   const baseHighGround = elevationDiff >= 2 ? 3 : elevationDiff > 0 ? 2 : 0;
   const highGroundBonus = elevationDiff > 0 ? baseHighGround + weathervaneBonus + fx.bonusHighGroundDmg : 0;
 
-  // Discrete Mario + Rabbids cover resolution (including Living Cover + High Ground + Wind Slicer override!)
+  // Discrete Mario + Rabbids cover resolution (including Living Cover + High Ground + Boomerang/Vacuum Gimmicks!)
   let coverEval = evaluateCover(state, attacker.pos, defender.pos, defender.team);
   let hitChance = 100;
 
   if (w.arc === 'lobbed') {
+    coverEval = { level: 'none' };
+    hitChance = 100;
+  } else if (w.gimmick === 'vacuum_pull' || w.gimmick === 'grapple_yank') {
+    // Luigi-style Vacuum Dusters & Grapple Whips yank hunkered enemies straight OUT of cover!
     coverEval = { level: 'none' };
     hitChance = 100;
   } else if (w.arc === 'melee') {
@@ -132,10 +182,10 @@ export function forecastAttack(
       hitChance = 100;
     }
   } else {
-    if ((elevationDiff > 0 || fx.ignoreHalfCoverOnFlank) && coverEval.level === 'half') {
+    if ((elevationDiff > 0 || fx.ignoreHalfCoverOnFlank || w.curvesCover) && coverEval.level === 'half') {
       coverEval = { level: 'none' };
     }
-    if (elevationDiff <= -2 && coverEval.level === 'none') {
+    if (elevationDiff <= -2 && coverEval.level === 'none' && !w.curvesCover) {
       coverEval = { level: 'half' };
     }
 
@@ -148,12 +198,13 @@ export function forecastAttack(
     }
   }
 
-  // Final damage calculation (+ High Ground + Flank Crit + Rooted/Burn synergies!)
+  // Final damage calculation (+ High Ground + Flank Crit + Rooted/Burn/Frost synergies!)
   const isCriticalFlank = hitChance >= 100 && fx.bonusFlankCrit > 0;
   let dmg = Math.round((rawBase + highGroundBonus) * mult);
   if (isCriticalFlank) dmg += fx.bonusFlankCrit;
   if (fx.rootedTargetBonus > 0 && hasStatus(defender, 'rooted')) dmg += fx.rootedTargetBonus;
   if (fx.burnDetonateBonus > 0 && hasStatus(defender, 'burn')) dmg += fx.burnDetonateBonus;
+  if (hasStatus(defender, 'frost') && (w.arc === 'melee' || w.slot === 'secondary')) dmg += 1;
   if (hasStatus(defender, 'acid')) dmg += 2;
   if (hasStatus(defender, 'shield')) dmg -= 2;
   dmg = Math.max(1, dmg);
@@ -199,7 +250,11 @@ export function forecastAttack(
     fx.attackStatus ??
     (hitChance === 100 && hasGraft(attacker, 'spicy_shot') ? 'burn' : undefined);
 
-  const effectiveKnockback = (w.knockback ?? 0) + fx.extraKnockback;
+  const gimmickForceBonus = w.slot === 'secondary' ? fx.gimmickExtraPullPush : 0;
+  const effectiveKnockback = (w.knockback ?? 0) + fx.extraKnockback + (w.knockback ? gimmickForceBonus : 0);
+  const effectivePull = (w.pull ?? 0) + (w.pull ? gimmickForceBonus : 0);
+  const autumnBumpBonus = season === 'autumn' ? 1 : 0;
+
   let knockbackDir: GridPos | undefined;
   let knockbackWillBump = false;
   let knockbackHazard: CombatForecast['knockbackHazard'];
@@ -212,7 +267,7 @@ export function forecastAttack(
     if (!inBounds(state, dest) || Boolean(destTile?.cover) || Boolean(unitAt(state, dest))) {
       knockbackWillBump = true;
       knockbackHazard = 'bump';
-      extraHazardDmg = 2 + fx.bonusBumpDmg;
+      extraHazardDmg = 2 + fx.bonusBumpDmg + autumnBumpBonus;
     } else if (destTile?.terrain === 'lava') {
       knockbackWillBump = true;
       knockbackHazard = 'lava';
@@ -221,10 +276,41 @@ export function forecastAttack(
       knockbackWillBump = true;
       knockbackHazard = 'water';
       extraHazardDmg = 3;
+    } else if (destTile?.terrain === 'ice') {
+      knockbackHazard = 'ice';
     } else if (destTile && (destTile.elevation ?? 0) < defenderElev) {
       knockbackHazard = 'drop';
       extraHazardDmg = 2;
     }
+  }
+
+  let pullDir: GridPos | undefined;
+  let pullDest: GridPos | undefined;
+  if (effectivePull > 0 && hitChance > 0) {
+    const pullInfo = computePullDestination(state, attacker.pos, defender.pos, effectivePull);
+    if (pullInfo) {
+      pullDir = pullInfo.dir;
+      pullDest = pullInfo.dest;
+    }
+  }
+
+  // Hammer / Bellows Cleave: sweeps adjacent enemies BESIDE the primary target (preserving foes directly behind as BUMP pins!)
+  let cleaveUnitIds: string[] | undefined;
+  if (w.cleave && hitChance > 0) {
+    const pushBehind = computePushDirection(attacker.pos, defender.pos);
+    const behindX = defender.pos.x + pushBehind.x;
+    const behindY = defender.pos.y + pushBehind.y;
+    const extras = state.units
+      .filter(
+        (u) =>
+          u.alive &&
+          u.team !== attacker.team &&
+          u.id !== defender.id &&
+          manhattan(u.pos, defender.pos) === 1 &&
+          !(u.pos.x === behindX && u.pos.y === behindY)
+      )
+      .map((u) => u.id);
+    if (extras.length > 0) cleaveUnitIds = extras;
   }
 
   return {
@@ -242,6 +328,10 @@ export function forecastAttack(
     knockbackDir,
     knockbackWillBump,
     knockbackHazard,
+    pullDir,
+    pullDest,
+    cleaveUnitIds,
+    gimmick: w.gimmick,
     elevationDiff,
     highGroundBonus,
     isCriticalFlank,
@@ -250,7 +340,7 @@ export function forecastAttack(
     partnerAssistUnitName,
     appliesStatus,
     canAttack: hitChance > 0,
-    reason: hitChance === 0 ? 'Blocked by Full Cover! Flank, lob, or smash cover.' : undefined,
+    reason: hitChance === 0 ? 'Blocked by Full Cover! Flank, lob, or use your Duster/Gimmick!' : undefined,
   };
 }
 

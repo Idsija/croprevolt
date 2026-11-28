@@ -42,6 +42,7 @@ const TERRAIN_Y_OFFSET: Record<TerrainType, number> = {
   ramp: 0.22,
   burrow: 0.015,
   bounce_pad: 0.02,
+  ice: -0.025,
 };
 
 export function getTerrainSurfaceY(terrain: TerrainType): number {
@@ -156,7 +157,13 @@ export class PaperDioramaWorld {
       metalness: 0.02,
     });
     const topMatColor =
-      theme === 'autumn' ? '#ad8838' : theme === 'greenhouse' ? '#6b9d44' : '#7ea53e';
+      theme === 'winter'
+        ? '#90b4cc'
+        : theme === 'autumn'
+          ? '#ad8838'
+          : theme === 'greenhouse'
+            ? '#6b9d44'
+            : '#7ea53e';
     const topSlabMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(topMatColor),
       roughness: 0.92,
@@ -186,7 +193,7 @@ export class PaperDioramaWorld {
     // Cream cardstock border lip framing the playable grid cleanly beneath recessed water/lava
     const lipGeo = new THREE.BoxGeometry(boardW + 0.18, 0.04, boardH + 0.18);
     const lipMat = new THREE.MeshStandardMaterial({
-      color: '#efe2c2',
+      color: theme === 'winter' ? '#e8f3fa' : '#efe2c2',
       roughness: 0.88,
       bumpMap: this.textures.paperBump,
       bumpScale: 0.01,
@@ -197,11 +204,11 @@ export class PaperDioramaWorld {
     addInkEdges(lip, 0x5c391e, 0.45);
     this.boardGroup.add(lip);
 
-    // 2. Individual 3D Terrain Tiles with Full Multi-Elevation Terraces, Ramps, Water, Bridges, Lava & Burrows!
+    // 2. Individual 3D Terrain Tiles with Full Multi-Elevation Terraces, Ramps, Water, Bridges, Lava, Ice & Burrows!
     const tileFootprint = TILE_SIZE_3D - 0.022;
     const baseTileH = 0.14;
     const sideTileMat = new THREE.MeshStandardMaterial({
-      color: '#8f6237',
+      color: theme === 'winter' ? '#6a7f96' : '#8f6237',
       roughness: 0.92,
     });
     const cliffSideMat = new THREE.MeshStandardMaterial({
@@ -243,14 +250,17 @@ export class PaperDioramaWorld {
           continue;
         }
 
-        // Standard or Elevated Terraced Block (grass, soil, mud, compost, barn_floor, gate, sunbeam, burrow)
+        // Standard or Elevated Terraced Block (grass, soil, mud, compost, barn_floor, gate, sunbeam, burrow, ice)
         const tex = this.textures.getTerrainTexture(theme, tile.terrain, checker);
+        const isIce = tile.terrain === 'ice';
         const topMat = new THREE.MeshStandardMaterial({
           map: tex,
-          roughness: tile.terrain === 'mud' ? 0.34 : 0.88,
-          metalness: tile.terrain === 'mud' ? 0.08 : 0.02,
+          roughness: isIce ? 0.1 : tile.terrain === 'mud' ? 0.34 : 0.88,
+          metalness: isIce ? 0.22 : tile.terrain === 'mud' ? 0.08 : 0.02,
+          emissive: isIce ? new THREE.Color('#38a8db') : new THREE.Color('#000000'),
+          emissiveIntensity: isIce ? 0.14 : 0,
           bumpMap: this.textures.paperBump,
-          bumpScale: tile.terrain === 'mud' ? 0.005 : 0.018,
+          bumpScale: isIce ? 0.002 : tile.terrain === 'mud' ? 0.005 : 0.018,
         });
 
         const bottomY = -0.14;
@@ -272,6 +282,8 @@ export class PaperDioramaWorld {
         mesh.userData.gridPos = { x, y };
         if (elev > 0) {
           addInkEdges(mesh, 0x3e220f, 0.52);
+        } else if (isIce) {
+          addInkEdges(mesh, 0x9cecff, 0.42);
         }
         this.boardGroup.add(mesh);
         this.tilePickMeshes.push(mesh);
@@ -878,6 +890,55 @@ export class PaperDioramaWorld {
           }
         },
       });
+    } else if (theme === 'winter') {
+      // WINTER: 30 gently tumbling translucent cut-paper snowflakes + warm drifting hearth embers!
+      const flakeGeo = new THREE.OctahedronGeometry(0.068, 0);
+      const flakeMat = new THREE.MeshBasicMaterial({
+        color: '#f2fbff',
+        transparent: true,
+        opacity: 0.88,
+      });
+      const flakes: Array<{ mesh: THREE.Mesh; bx: number; bz: number; speed: number; phase: number }> = [];
+      for (let i = 0; i < 30; i++) {
+        const m = new THREE.Mesh(flakeGeo, flakeMat);
+        const bx = ((i * 37) % 100) / 100 * spanX - spanX / 2;
+        const bz = ((i * 53) % 100) / 100 * spanZ - spanZ / 2;
+        weatherGroup.add(m);
+        flakes.push({ mesh: m, bx, bz, speed: 0.42 + (i % 5) * 0.09, phase: i * 1.19 });
+      }
+      const emberGeo = new THREE.SphereGeometry(0.048, 6, 6);
+      const embers: Array<{ mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; bx: number; by: number; bz: number; phase: number }> = [];
+      for (let i = 0; i < 8; i++) {
+        const em = new THREE.MeshBasicMaterial({ color: '#ffcf6b', transparent: true, opacity: 0.85 });
+        const m = new THREE.Mesh(emberGeo, em);
+        const bx = ((i * 47) % 100) / 100 * spanX - spanX / 2;
+        const bz = ((i * 71) % 100) / 100 * spanZ - spanZ / 2;
+        weatherGroup.add(m);
+        embers.push({ mesh: m, mat: em, bx, by: 0.65 + (i % 3) * 0.4, bz, phase: i * 1.9 });
+      }
+      this.sceneryGroup.add(weatherGroup);
+      this.animatedParts.push({
+        update: (time) => {
+          for (const fl of flakes) {
+            const cyc = (time * fl.speed + fl.phase) % 4.0;
+            const y = 4.6 - cyc * 1.12;
+            fl.mesh.position.set(
+              fl.bx + Math.sin(time * 1.3 + fl.phase) * 0.48,
+              Math.max(0.05, y),
+              fl.bz + Math.cos(time * 0.95 + fl.phase) * 0.34
+            );
+            fl.mesh.rotation.set(time * 1.6 + fl.phase, time * 1.2, fl.phase);
+          }
+          for (const em of embers) {
+            em.mesh.position.set(
+              em.bx + Math.sin(time * 1.0 + em.phase) * 0.38,
+              em.by + Math.sin(time * 1.7 + em.phase) * 0.24,
+              em.bz + Math.cos(time * 0.85 + em.phase) * 0.38
+            );
+            em.mat.opacity = 0.3 + (0.5 + 0.5 * Math.sin(time * 4.2 + em.phase)) * 0.65;
+          }
+        },
+      });
     } else {
       // AUTUMN: Tumbling cut-paper crimson/amber maple leaves + warm glowing twilight fireflies!
       const leafGeo = new THREE.PlaneGeometry(0.18, 0.14);
@@ -957,7 +1018,14 @@ export class PaperDioramaWorld {
     // Keep micro-props near tile corners so standees & tactical rings stay crystal clear
     const cornerX = (seed % 2 === 0 ? 1 : -1) * (0.31 + ((seed >> 2) % 3) * 0.05);
     const cornerZ = (((seed >> 1) % 2 === 0) ? 1 : -1) * (0.31 + ((seed >> 3) % 3) * 0.05);
-    const color = theme === 'autumn' ? '#c98e2b' : theme === 'greenhouse' ? '#58a836' : '#58a62d';
+    const color =
+      theme === 'winter'
+        ? '#588a7a'
+        : theme === 'autumn'
+          ? '#c98e2b'
+          : theme === 'greenhouse'
+            ? '#58a836'
+            : '#58a62d';
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide });
     const tuft = new THREE.Group();
     tuft.position.set(x + cornerX, y, z + cornerZ);
@@ -969,8 +1037,16 @@ export class PaperDioramaWorld {
       tuft.add(b);
     }
 
-    // Seasonal micro-detail: bright spring/greenhouse wildflower, mossy pebble, or autumn leaf!
-    if (seed % 5 === 0) {
+    // Seasonal micro-detail: bright spring/greenhouse wildflower, mossy pebble, winter snow puff, or autumn leaf!
+    if (theme === 'winter') {
+      const snowPuff = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(0.06, 0),
+        new THREE.MeshStandardMaterial({ color: '#f2f9ff', roughness: 0.72 })
+      );
+      snowPuff.scale.set(1.25, 0.55, 1.15);
+      snowPuff.position.set(-0.04, 0.025, 0.03);
+      tuft.add(snowPuff);
+    } else if (seed % 5 === 0) {
       // Cute smooth miniature garden pebble beside grass blades
       const pebble = new THREE.Mesh(
         new THREE.DodecahedronGeometry(0.055, 0),
@@ -1119,14 +1195,21 @@ export class PaperDioramaWorld {
   private buildPerimeterFences(boardW: number, boardH: number, theme: BoardTheme): void {
     const woodMat = new THREE.MeshStandardMaterial({
       map: this.textures.fenceWoodMap,
-      color: theme === 'greenhouse' ? '#d4e8cf' : theme === 'autumn' ? '#ebd2ab' : '#fff6e0',
+      color:
+        theme === 'winter'
+          ? '#e8f4fa'
+          : theme === 'greenhouse'
+            ? '#d4e8cf'
+            : theme === 'autumn'
+              ? '#ebd2ab'
+              : '#fff6e0',
       roughness: 0.84,
       bumpMap: this.textures.paperBump,
       bumpScale: 0.015,
     });
     const railMat = new THREE.MeshStandardMaterial({
       map: this.textures.fenceWoodMap,
-      color: theme === 'greenhouse' ? '#aac7a4' : '#e0c496',
+      color: theme === 'winter' ? '#b8d1e0' : theme === 'greenhouse' ? '#aac7a4' : '#e0c496',
       roughness: 0.88,
     });
 
@@ -1218,7 +1301,7 @@ export class PaperDioramaWorld {
       this.sceneryGroup.add(hill);
     });
 
-    // Layered Cartoon-Watercolor Trees flanking the diorama (mixed cherry blossom / orchard / maple crowns!)
+    // Layered Cartoon-Watercolor Trees flanking the diorama (mixed cherry blossom / orchard / maple / winter pine crowns!)
     const treePositions = [
       { x: -boardW / 2 - 1.4, z: -boardH * 0.36, s: 1.12 },
       { x: boardW / 2 + 1.42, z: -boardH * 0.3, s: 1.04 },
@@ -1237,21 +1320,56 @@ export class PaperDioramaWorld {
     } else if (theme === 'autumn') {
       this.addMiniatureBarn(boardW * 0.36, -0.68, northZ - 0.15, true);
       this.addMiniPumpkins(-boardW / 2 - 0.95, -0.68, -boardH * 0.08);
+    } else if (theme === 'winter') {
+      this.addMiniatureBarn(-boardW * 0.32, -0.68, northZ - 0.2, false);
+      // Warm glowing hearth lanterns perched on wooden posts flanking the winter snow-field!
+      const postMat = new THREE.MeshStandardMaterial({ map: this.textures.treeBarkMap, color: '#6b4528', roughness: 0.9 });
+      const glowMat = new THREE.MeshStandardMaterial({
+        color: '#ffdf85',
+        emissive: '#ff9624',
+        emissiveIntensity: 1.1,
+        roughness: 0.2,
+      });
+      const hearthLights: Array<{ light: THREE.PointLight; phase: number }> = [];
+      for (const sx of [-1, 1]) {
+        const lGroup = new THREE.Group();
+        lGroup.position.set(sx * (boardW / 2 + 0.85), -0.68, -boardH * 0.12);
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.85, 0.14), postMat);
+        post.position.y = 0.92;
+        post.castShadow = true;
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.1, 0.1), postMat);
+        arm.position.set(-sx * 0.18, 1.78, 0);
+        const lantern = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), glowMat);
+        lantern.position.set(-sx * 0.32, 1.52, 0);
+        const hearthLight = new THREE.PointLight(0xffa438, 3.6, 8.8, 1.45);
+        hearthLight.position.set(-sx * 0.32, 1.55, 0.12);
+        lGroup.add(post, arm, lantern, hearthLight);
+        hearthLights.push({ light: hearthLight, phase: sx > 0 ? 1.7 : 0.3 });
+        this.sceneryGroup.add(lGroup);
+      }
+      this.animatedParts.push({
+        update: (time) => {
+          for (const hl of hearthLights) {
+            hl.light.intensity =
+              3.2 + Math.sin(time * 5.2 + hl.phase) * 0.42 + Math.sin(time * 11.7 + hl.phase) * 0.18;
+          }
+        },
+      });
     } else {
       this.addMiniatureBarn(-boardW * 0.32, -0.68, northZ - 0.2, false);
     }
 
-    // Cheerful Hanging Cut-Paper Sun Medallion suspended on brass wire behind the hills!
+    // Cheerful Hanging Cut-Paper Sun / Winter Moon Medallion suspended on brass wire behind the hills!
     const sunGroup = new THREE.Group();
     const sunX = theme === 'autumn' ? -boardW * 0.38 : boardW * 0.42;
     const sunY = 3.55;
     const sunZ = northZ - 2.65;
     sunGroup.position.set(sunX, sunY, sunZ);
     const sunCoreMat = new THREE.MeshStandardMaterial({
-      color: theme === 'autumn' ? '#ff9933' : '#ffe159',
-      emissive: theme === 'autumn' ? '#b34b00' : '#d48d00',
-      emissiveIntensity: 0.32,
-      roughness: 0.55,
+      color: theme === 'winter' ? '#e8f6ff' : theme === 'autumn' ? '#ff9933' : '#ffe159',
+      emissive: theme === 'winter' ? '#7abce8' : theme === 'autumn' ? '#b34b00' : '#d48d00',
+      emissiveIntensity: 0.38,
+      roughness: 0.5,
     });
     const sunDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.1, 18), sunCoreMat);
     sunDisc.rotation.x = Math.PI / 2;
@@ -1259,8 +1377,8 @@ export class PaperDioramaWorld {
     sunGroup.add(sunDisc);
     const rayGeo = new THREE.ConeGeometry(0.11, 0.28, 3);
     const rayMat = new THREE.MeshStandardMaterial({
-      color: theme === 'autumn' ? '#ffba42' : '#fff08a',
-      emissive: '#b36b00',
+      color: theme === 'winter' ? '#c2e8ff' : theme === 'autumn' ? '#ffba42' : '#fff08a',
+      emissive: theme === 'winter' ? '#589ec9' : '#b36b00',
       emissiveIntensity: 0.25,
       roughness: 0.6,
     });
@@ -1319,9 +1437,9 @@ export class PaperDioramaWorld {
     tree.position.set(x, y, z);
     tree.scale.setScalar(scale);
 
-    // Grassy soil root mound + tiny pebble anchoring the tree to the desk!
+    // Grassy or snowy root mound anchoring the tree to the desk!
     const moundMat = new THREE.MeshStandardMaterial({
-      color: theme === 'autumn' ? '#c99338' : '#76b53c',
+      color: theme === 'winter' ? '#e8f4fa' : theme === 'autumn' ? '#c99338' : '#76b53c',
       roughness: 0.9,
       bumpMap: this.textures.paperBump,
       bumpScale: 0.015,
@@ -1344,15 +1462,17 @@ export class PaperDioramaWorld {
     tree.add(trunk);
 
     const foliageVariant =
-      theme === 'autumn'
-        ? idx % 2 === 0
-          ? 'autumn_crimson'
-          : 'autumn_gold'
-        : theme === 'greenhouse'
-          ? 'summer_citrus'
-          : idx % 2 === 1
-            ? 'spring_blossom'
-            : 'spring_green';
+      theme === 'winter'
+        ? 'winter_pine'
+        : theme === 'autumn'
+          ? idx % 2 === 0
+            ? 'autumn_crimson'
+            : 'autumn_gold'
+          : theme === 'greenhouse'
+            ? 'summer_citrus'
+            : idx % 2 === 1
+              ? 'spring_blossom'
+              : 'spring_green';
 
     const foliageMat = new THREE.MeshStandardMaterial({
       map: this.textures.getTreeFoliageTexture(foliageVariant),
@@ -1361,7 +1481,7 @@ export class PaperDioramaWorld {
       bumpScale: 0.018,
     });
 
-    if (idx % 2 === 1 || theme === 'autumn') {
+    if (theme !== 'winter' && (idx % 2 === 1 || theme === 'autumn')) {
       // Plump cartoon storybook round-crown tree (cherry blossom / golden maple / citrus!)
       const crownSpecs: Array<[number, number, number, number]> = [
         [0, 1.65, 0, 0.66],
@@ -1378,7 +1498,7 @@ export class PaperDioramaWorld {
         tree.add(puff);
       }
     } else {
-      // Layered scalloped orchard pine with textured painted foliage tiers!
+      // Layered scalloped orchard or winter frosted pine with textured painted foliage tiers!
       const tiers = [
         { y: 1.32, r: 0.82, h: 0.6 },
         { y: 1.8, r: 0.64, h: 0.54 },

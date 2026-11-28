@@ -3,7 +3,8 @@ import { ENEMY_BLUEPRINTS } from '../data/enemies';
 import { ITEM_REGISTRY } from '../data/items';
 import { MAP_TEMPLATES } from '../data/maps';
 import { PRODUCE_BLUEPRINTS } from '../data/produce';
-import { computePushDirection, forecastAttack } from './combat';
+import { ensureHeroDualWeapons, getDualWeaponKit } from '../data/weapons';
+import { computePullDestination, computePushDirection, forecastAttack } from './combat';
 import {
   MAX_ENEMIES_PER_BATTLE,
   REGULAR_ENEMY_POOL,
@@ -30,6 +31,7 @@ import {
   getCooldownForUnit,
   getMaxDashesForUnit,
   getMaxOverwatchCharges,
+  getSeasonFromBattle,
   getUnitPerkEffects,
   hasGraft,
   hasRelic,
@@ -51,6 +53,8 @@ import type {
   RosterHero,
   StatusKind,
   Tile,
+  WeaponGimmickKind,
+  WeaponSlot,
 } from './types';
 
 /**
@@ -162,7 +166,7 @@ function promoteToVeteran(unit: BattleUnit): void {
   applyStatusToUnit(unit, 'shield', 1);
 }
 
-function emptyActions() {
+function emptyActions(preserveDualTapUsed = false) {
   return {
     hasMoved: false,
     moveSpent: 0,
@@ -174,10 +178,49 @@ function emptyActions() {
     hasAttacked: false,
     hasUsedSkill: false,
     overwatchCharges: 0,
+    swappedWeaponThisTurn: false,
+    dualTapUsed: preserveDualTapUsed,
   };
 }
 
+function cloneWeapon(w: RosterHero['weapon']): RosterHero['weapon'] {
+  return { ...w, appliesStatus: w.appliesStatus ? { ...w.appliesStatus } : undefined };
+}
+
 export function createBattleUnitFromHero(hero: RosterHero, pos: GridPos): BattleUnit {
+  const kit = getDualWeaponKit(hero.species);
+  // Preserve exact weapon stats if a test passed a custom RosterHero without primaryWeapon/secondaryWeapon,
+  // while still equipping the hero's full dual-weapon kit!
+  const hasExplicitDual = Boolean(hero.primaryWeapon && hero.secondaryWeapon);
+  if (!hasExplicitDual) {
+    const heroCopy = { ...hero };
+    ensureHeroDualWeapons(heroCopy);
+    // Keep hero's existing weapon intact as primary if it came from a unit test fixture (e.g. potato melee)
+    // unless it matches our kit; always populate secondaryWeapon so dual swap works everywhere!
+    const primary = hero.primaryWeapon ? cloneWeapon(hero.primaryWeapon) : cloneWeapon(hero.weapon);
+    if (!primary.slot) primary.slot = 'primary';
+    if (!primary.visualKind) primary.visualKind = kit.primary.visualKind;
+    const secondary = hero.secondaryWeapon ? cloneWeapon(hero.secondaryWeapon) : cloneWeapon(heroCopy.secondaryWeapon!);
+    const activeSlot: WeaponSlot = hero.activeWeaponSlot ?? 'primary';
+    const activeW = activeSlot === 'secondary' ? secondary : primary;
+    return buildUnitRecord(hero, pos, primary, secondary, activeSlot, activeW);
+  }
+
+  const primary = cloneWeapon(hero.primaryWeapon!);
+  const secondary = cloneWeapon(hero.secondaryWeapon!);
+  const activeSlot: WeaponSlot = hero.activeWeaponSlot ?? 'primary';
+  const activeW = activeSlot === 'secondary' ? secondary : primary;
+  return buildUnitRecord(hero, pos, primary, secondary, activeSlot, activeW);
+}
+
+function buildUnitRecord(
+  hero: RosterHero,
+  pos: GridPos,
+  primaryWeapon: RosterHero['weapon'],
+  secondaryWeapon: RosterHero['weapon'],
+  activeWeaponSlot: WeaponSlot,
+  activeWeapon: RosterHero['weapon']
+): BattleUnit {
   const unit: BattleUnit = {
     id: `hero_${hero.uid}`,
     rosterUid: hero.uid,
@@ -201,7 +244,10 @@ export function createBattleUnitFromHero(hero: RosterHero, pos: GridPos): Battle
     dashDamage: hero.dashDamage,
     dashKnockback: hero.dashKnockback,
     dashStatus: hero.dashStatus ? { ...hero.dashStatus } : undefined,
-    weapon: { ...hero.weapon, appliesStatus: hero.weapon.appliesStatus ? { ...hero.weapon.appliesStatus } : undefined },
+    weapon: cloneWeapon(activeWeapon),
+    primaryWeapon,
+    secondaryWeapon,
+    activeWeaponSlot,
     ability: { ...hero.ability, appliesStatus: hero.ability.appliesStatus ? { ...hero.ability.appliesStatus } : undefined },
     abilityCooldown: 0,
     graftIds: [...hero.graftIds],
@@ -226,6 +272,62 @@ export function createBattleUnitFromHero(hero: RosterHero, pos: GridPos): Battle
     applyStatusToUnit(unit, 'boosted', fx.startBoostTurns);
   }
   return unit;
+}
+
+/**
+ * Freely swaps a hero's visually equipped active weapon between Primary (Ranged)
+ * and Secondary (Melee / Mario+Rabbids Gimmick) before attacking!
+ */
+export function switchActiveWeapon(
+  state: BattleState,
+  unitId: string,
+  slot?: WeaponSlot
+): boolean {
+  if (state.status !== 'ongoing' || state.phase !== 'player' || state.prepPhase) return false;
+  const unit = getUnitById(state, unitId);
+  if (!unit || !unit.alive || unit.team !== 'player' || unit.isEscortCart) return false;
+  if (unit.actions.hasAttacked) return false;
+  if (!unit.primaryWeapon || !unit.secondaryWeapon) return false;
+
+  const curSlot: WeaponSlot = unit.activeWeaponSlot ?? 'primary';
+  const nextSlot: WeaponSlot = slot ?? (curSlot === 'primary' ? 'secondary' : 'primary');
+  if (nextSlot === curSlot) return false;
+
+  const nextWeapon = nextSlot === 'secondary' ? unit.secondaryWeapon : unit.primaryWeapon;
+  unit.activeWeaponSlot = nextSlot;
+  unit.weapon = cloneWeapon(nextWeapon);
+  unit.actions.swappedWeaponThisTurn = true;
+
+  state.pendingEvents.push({
+    type: 'weapon_swap',
+    unitId: unit.id,
+    slot: nextSlot,
+    weaponName: nextWeapon.name,
+    visualKind: nextWeapon.visualKind ?? (nextSlot === 'secondary' ? 'hammer' : 'blaster'),
+  });
+  pushLog(state, `${unit.name} drew ${nextWeapon.name} (${nextSlot === 'secondary' ? 'Gimmick/Melee' : 'Ranged'})!`);
+  return true;
+}
+
+function recordComboLink(state: BattleState, pos: GridPos): void {
+  if (state.phase !== 'player') return;
+  const next = (state.comboChain ?? 0) + 1;
+  state.comboChain = next;
+  if (next >= 2) {
+    const label =
+      next >= 4
+        ? `${next}× REVOLT FINISHER! (+1 ATK)`
+        : next === 3
+          ? `3× SUPER COMBO! (+1 ATK)`
+          : `2× COMBO CHAIN! (+1 ATK)`;
+    state.pendingEvents.push({
+      type: 'combo_chain',
+      count: next,
+      label,
+      pos: { ...pos },
+    });
+    pushLog(state, `MARIO+RABBIDS ${label}`);
+  }
 }
 
 export function createEscortSeedCart(pos: GridPos): BattleUnit {
@@ -497,10 +599,22 @@ export function createBattleFromTemplate(
     ? units.find((u) => u.team === 'player' && u.alive && !u.isEscortCart)?.ownerPlayerIdx ?? 0
     : undefined;
 
+  const resolvedTheme = setup?.theme ?? map.theme ?? 'spring';
+  const resolvedSeasonId =
+    resolvedTheme === 'winter'
+      ? 'winter'
+      : resolvedTheme === 'autumn'
+        ? 'autumn'
+        : resolvedTheme === 'greenhouse'
+          ? 'summer'
+          : 'spring';
+
   const state: BattleState = {
     mapId: map.id,
     mapName: map.name,
-    theme: setup?.theme ?? map.theme ?? 'spring',
+    theme: resolvedTheme,
+    seasonId: resolvedSeasonId,
+    comboChain: 0,
     objective: map.objective,
     objectiveLabel: map.objectiveLabel,
     width: map.width,
@@ -952,6 +1066,23 @@ export function scheduleBossTelegraph(state: BattleState, boss: BattleUnit): voi
       addTile(h.pos);
       for (const n of getNeighbors(state, h.pos)) addTile(n);
     }
+  } else if (boss.visualKind === 'frostboss') {
+    name = isPhase2 ? 'Glacial Auger Sweep' : 'Boiler Blizzard';
+    damage = (isPhase2 ? 6 : 5) + heatTelegraphBonus;
+    status = 'frost';
+    const anchor = [...players].sort((a, b) => manhattan(boss.pos, a.pos) - manhattan(boss.pos, b.pos))[0];
+    if (isPhase2) {
+      for (let dx = -2; dx <= 2; dx++) {
+        addTile({ x: anchor.pos.x + dx, y: anchor.pos.y });
+        addTile({ x: anchor.pos.x + dx, y: anchor.pos.y - 1 });
+      }
+    } else {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          addTile({ x: anchor.pos.x + dx, y: anchor.pos.y + dy });
+        }
+      }
+    }
   } else {
     // Captain Scarecrow: Crow Storm cross (Phase 1) or full 3x3 (Phase 2)!
     name = isPhase2 ? 'Blazing Crow Storm' : 'Crow Storm';
@@ -1210,11 +1341,14 @@ export function applyKnockback(
   dir: GridPos,
   rosterLookup?: RosterHero[],
   visitedHazards: Set<string> = new Set(),
-  bonusBumpDmg = 0
+  bonusBumpDmg = 0,
+  allowIceSlide = true
 ): void {
   if (!target.alive) return;
   if (dir.x === 0 && dir.y === 0) return;
 
+  const season = getSeasonFromBattle(state);
+  const autumnBump = season === 'autumn' ? 1 : 0;
   const curTile = tileAt(state, target.pos);
   const nextPos: GridPos = { x: target.pos.x + dir.x, y: target.pos.y + dir.y };
   const inGrid = inBounds(state, nextPos);
@@ -1252,6 +1386,7 @@ export function applyKnockback(
     const from = { ...target.pos };
     const fromElev = curTile?.elevation ?? 0;
     const toElev = nextTile.elevation ?? 0;
+    const slidIce = nextTile.terrain === 'ice';
     target.pos = { ...nextPos };
     state.pendingEvents.push({
       type: 'knockback',
@@ -1259,6 +1394,7 @@ export function applyKnockback(
       from,
       to: { ...nextPos },
       bumped: false,
+      slidIce,
     });
     if (fromElev > toElev) {
       const dropDmg = 2;
@@ -1273,13 +1409,20 @@ export function applyKnockback(
       pushLog(state, `CLIFF DROP! ${target.name} tumbled off high ground (-${dropDmg} HP)!`);
       handleUnitKO(state, target);
     } else {
-      pushLog(state, `${target.name} was knocked back!`);
+      pushLog(
+        state,
+        slidIce ? `ICE SLIDE! ${target.name} skidded across glare ice!` : `${target.name} was knocked back!`
+      );
+    }
+    // Glaze Ice extends knockback slide by +1 extra tile along the push vector!
+    if (target.alive && slidIce && allowIceSlide) {
+      applyKnockback(state, target, dir, rosterLookup, visitedHazards, bonusBumpDmg, false);
     }
     return;
   }
 
   // BUMP CRUNCH!
-  const bumpDmg = 2 + bonusBumpDmg;
+  const bumpDmg = 2 + bonusBumpDmg + autumnBump;
   target.hp -= bumpDmg;
 
   if (blockerUnit && blockerUnit.alive) {
@@ -1321,6 +1464,85 @@ export function applyKnockback(
   }
 
   handleUnitKO(state, target);
+}
+
+/**
+ * Mario+Rabbids Luigi-style Vacuum Duster & Vine Grapple Pull!
+ * Yanks enemies straight out of cover toward the attacker, sliding +1 extra tile across Glaze Ice!
+ */
+export function applyPull(
+  state: BattleState,
+  attacker: BattleUnit,
+  target: BattleUnit,
+  steps: number,
+  gimmick: WeaponGimmickKind
+): void {
+  if (!target.alive || steps <= 0) return;
+  const pullInfo = computePullDestination(state, attacker.pos, target.pos, steps);
+  if (!pullInfo) return;
+
+  const from = { ...target.pos };
+  const fromElev = tileAt(state, from)?.elevation ?? 0;
+  const destTile = tileAt(state, pullInfo.dest);
+  if (!destTile) return;
+
+  if (isHazardLiquid(destTile.terrain)) {
+    const isLava = destTile.terrain === 'lava';
+    const hazDmg = isLava ? 4 : 3;
+    target.hp -= hazDmg;
+    if (isLava) applyStatusToUnit(target, 'burn', 2);
+    state.pendingEvents.push({
+      type: 'pull',
+      unitId: target.id,
+      from,
+      to: { ...pullInfo.dest },
+      slidIce: pullInfo.slidIce,
+      gimmick,
+    });
+    state.pendingEvents.push({
+      type: 'terrain_hazard',
+      kind: isLava ? 'lava' : 'water',
+      unitId: target.id,
+      pos: { ...pullInfo.dest },
+      damage: hazDmg,
+    });
+    pushLog(
+      state,
+      `VACUUM DUNK! ${attacker.name} yanked ${target.name} straight into ${destTile.terrain} (-${hazDmg} HP)!`
+    );
+    handleUnitKO(state, target);
+    return;
+  }
+
+  target.pos = { ...pullInfo.dest };
+  state.pendingEvents.push({
+    type: 'pull',
+    unitId: target.id,
+    from,
+    to: { ...pullInfo.dest },
+    slidIce: pullInfo.slidIce,
+    gimmick,
+  });
+  pushLog(
+    state,
+    gimmick === 'grapple_yank'
+      ? `GRAPPLE YANK! ${attacker.name} reeled ${target.name} out of cover!`
+      : `VACUUM PULL! ${attacker.name} sucked ${target.name} ${pullInfo.slidIce ? 'across the ice ' : ''}out of cover!`
+  );
+
+  if ((destTile.elevation ?? 0) < fromElev) {
+    const dropDmg = 2;
+    target.hp -= dropDmg;
+    state.pendingEvents.push({
+      type: 'terrain_hazard',
+      kind: 'drop',
+      unitId: target.id,
+      pos: { ...pullInfo.dest },
+      damage: dropDmg,
+    });
+    pushLog(state, `CLIFF YANK! ${target.name} tumbled off the ledge (-${dropDmg} HP)!`);
+    handleUnitKO(state, target);
+  }
 }
 
 function damageCoverAt(
@@ -1686,6 +1908,15 @@ export function executeDash(state: BattleState, unitId: string, targetEnemyId: s
   );
 
   const dashFx = getUnitPerkEffects(unit);
+  if (unit.team === 'player') {
+    recordComboLink(state, opt.stopPos);
+    if (dashFx.dashChainsJump) {
+      unit.actions.bonusMove = (unit.actions.bonusMove ?? 0) + 1;
+      unit.actions.hasMoved = false;
+      unit.actions.hasJumped = false;
+      pushLog(state, `ACROBAT CHAIN! ${unit.name} gained +1 Move & fresh Team-Jump!`);
+    }
+  }
   const wasTargetAlive = target.alive;
   handleUnitKO(state, target);
   if (wasTargetAlive && !target.alive && dashFx.killRefreshesDash) {
@@ -1795,6 +2026,7 @@ export function executeTeamJump(state: BattleState, unitId: string, dest: GridPo
     coopBoost,
   });
   pushLog(state, `${unit.name} Team-Jumped across the garden!`);
+  recordComboLink(state, dest);
 
   // Jump Stomp character perks (Spudnik Tater Quake, Chili Ember Leap, Carroteer Pop-Up, Rooster Divebomb, Sheep Avalanche!)
   if (unitFx.jumpStompDmg > 0) {
@@ -1850,8 +2082,8 @@ export function executeAttack(
 
   const targetTile = tileAt(state, targetPos);
   const defender = fc.targetUnitId ? getUnitById(state, fc.targetUnitId) : undefined;
-
   const attackerFx = getUnitPerkEffects(attacker);
+  const w = attacker.weapon;
 
   // Case A: Attacking destructible cover / Barn Cage / Pumpkin / Collapsible Bridge directly (or lobbing at empty tile)
   if (!defender) {
@@ -1895,16 +2127,20 @@ export function executeAttack(
       attackerKind: attacker.visualKind,
       from: { ...attacker.pos },
       to: { ...targetPos },
-      arc: attacker.weapon.arc,
+      arc: w.arc,
       hit: true,
       damage: fc.coverDamage,
       matchup: 'neutral',
       coverHitPos: targetTile?.cover || coverDestroyed || fc.isBridgeTarget ? { ...targetPos } : undefined,
       coverDestroyed,
+      weaponVisual: w.visualKind,
+      gimmick: w.gimmick,
+      forgeTier: w.forgeTier,
+      forgeBranch: w.forgeBranch,
     });
 
     // Lobbed AoE splash on empty/cover/bridge tile!
-    if (attacker.weapon.aoeRadius && attacker.weapon.aoeRadius > 0) {
+    if (w.aoeRadius && w.aoeRadius > 0) {
       applyWeaponSplash(state, attacker, targetPos, undefined, rosterLookup);
     }
 
@@ -1936,15 +2172,19 @@ export function executeAttack(
       attackerKind: attacker.visualKind,
       from: { ...attacker.pos },
       to: { ...targetPos },
-      arc: attacker.weapon.arc,
+      arc: w.arc,
       hit: false,
       damage: 0,
       targetId: defender.id,
       matchup: fc.matchup,
       coverHitPos: fc.coverPos ? { ...fc.coverPos } : undefined,
       coverDestroyed,
+      weaponVisual: w.visualKind,
+      gimmick: w.gimmick,
+      forgeTier: w.forgeTier,
+      forgeBranch: w.forgeBranch,
     });
-    pushLog(state, `${attacker.name}'s ${attacker.weapon.name} clipped ${defender.name}'s cover!`);
+    pushLog(state, `${attacker.name}'s ${w.name} clipped ${defender.name}'s cover!`);
     checkBattleEnd(state);
     return true;
   }
@@ -1953,8 +2193,8 @@ export function executeAttack(
   const wasDefenderAcid = hasStatus(defender, 'acid');
   defender.hp -= fc.finalDamage;
   let appliedStatusKind = fc.appliesStatus;
-  if (attacker.weapon.appliesStatus) {
-    applyStatusToUnit(defender, attacker.weapon.appliesStatus.kind, attacker.weapon.appliesStatus.turns);
+  if (w.appliesStatus) {
+    applyStatusToUnit(defender, w.appliesStatus.kind, w.appliesStatus.turns);
   }
   if (attackerFx.attackStatus) {
     applyStatusToUnit(defender, attackerFx.attackStatus, 2);
@@ -1971,20 +2211,29 @@ export function executeAttack(
     attackerKind: attacker.visualKind,
     from: { ...attacker.pos },
     to: { ...targetPos },
-    arc: attacker.weapon.arc,
+    arc: w.arc,
     hit: true,
     damage: fc.finalDamage,
     targetId: defender.id,
     matchup: fc.matchup,
     status: appliedStatusKind,
+    weaponVisual: w.visualKind,
+    gimmick: w.gimmick,
+    forgeTier: w.forgeTier,
+    forgeBranch: w.forgeBranch,
   });
 
   const matchupTag =
     fc.matchup === 'advantage' ? ' [STRONG!]' : fc.matchup === 'disadvantage' ? ' [WEAK]' : '';
   pushLog(
     state,
-    `${attacker.name} hit ${defender.name} with ${attacker.weapon.name} for ${fc.finalDamage} dmg${matchupTag}!`
+    `${attacker.name} hit ${defender.name} with ${w.name} for ${fc.finalDamage} dmg${matchupTag}!`
   );
+
+  // Secondary Gimmicks build Mario+Rabbids Combo Chains!
+  if (attacker.team === 'player' && w.slot === 'secondary') {
+    recordComboLink(state, targetPos);
+  }
 
   // Bramble Thorns Graft + Character Thorns perks recoil!
   const defenderFx = getUnitPerkEffects(defender);
@@ -2039,11 +2288,44 @@ export function executeAttack(
           ? `CO-OP ASSIST! ${assistAlly.name} & ${attacker.name} synced up for +${assistDmg} DMG!`
           : `PARTNER ASSIST! ${assistAlly.name} piled on ${defender.name} for +${assistDmg} DMG!`
       );
+      recordComboLink(state, defender.pos);
       handleUnitKO(state, defender);
     }
   }
 
-  // On-Kill Character Perk Synergies (Citric Meltdown 3x3 Acid, Dash Refresh & Skill CD Reset!)
+  // Secondary Melee Hammer / Bellows Cleave: sweeps adjacent enemies beside primary target!
+  if (w.cleave && fc.cleaveUnitIds && fc.cleaveUnitIds.length > 0) {
+    const cleaveDmg = Math.max(2, Math.round(fc.finalDamage * 0.75));
+    for (const cid of fc.cleaveUnitIds) {
+      const extraFoe = getUnitById(state, cid);
+      if (!extraFoe || !extraFoe.alive) continue;
+      extraFoe.hp -= cleaveDmg;
+      if (w.appliesStatus) {
+        applyStatusToUnit(extraFoe, w.appliesStatus.kind, w.appliesStatus.turns);
+      }
+      state.pendingEvents.push({
+        type: 'status_tick',
+        unitId: extraFoe.id,
+        pos: { ...extraFoe.pos },
+        status: w.appliesStatus?.kind ?? 'burn',
+        damage: cleaveDmg,
+      });
+      pushLog(state, `CLEAVE! ${w.name} swept ${extraFoe.name} for ${cleaveDmg} dmg!`);
+      handleUnitKO(state, extraFoe);
+      if (extraFoe.alive && (w.knockback ?? 0) > 0) {
+        applyKnockback(
+          state,
+          extraFoe,
+          computePushDirection(attacker.pos, extraFoe.pos),
+          rosterLookup,
+          new Set(),
+          attackerFx.bonusBumpDmg
+        );
+      }
+    }
+  }
+
+  // On-Kill Character Perk Synergies (Citric Meltdown, Dash Refresh, Skill CD Reset & Tier-4 Dual-Tap Finisher!)
   if (defenderWasAlive && !defender.alive) {
     if (attackerFx.acidExplosionOnKill && (wasDefenderAcid || appliedStatusKind === 'acid')) {
       for (let dy = -1; dy <= 1; dy++) {
@@ -2074,22 +2356,60 @@ export function executeAttack(
     if (attackerFx.killRefundsCd) {
       attacker.abilityCooldown = 0;
     }
+    // Tier-4 Capstone: Dual-Tap Finisher (1× per battle, KO swaps to off-hand weapon for a FREE shot!)
+    if (
+      attackerFx.dualTapSecondShot &&
+      !attacker.actions.dualTapUsed &&
+      attacker.primaryWeapon &&
+      attacker.secondaryWeapon
+    ) {
+      attacker.actions.dualTapUsed = true;
+      attacker.actions.hasAttacked = false;
+      const otherSlot: WeaponSlot = (attacker.activeWeaponSlot ?? 'primary') === 'primary' ? 'secondary' : 'primary';
+      const otherW = otherSlot === 'secondary' ? attacker.secondaryWeapon : attacker.primaryWeapon;
+      attacker.activeWeaponSlot = otherSlot;
+      attacker.weapon = cloneWeapon(otherW);
+      state.pendingEvents.push({
+        type: 'weapon_swap',
+        unitId: attacker.id,
+        slot: otherSlot,
+        weaponName: otherW.name,
+        visualKind: otherW.visualKind ?? (otherSlot === 'secondary' ? 'hammer' : 'blaster'),
+      });
+      state.pendingEvents.push({
+        type: 'combo_chain',
+        count: Math.max(3, (state.comboChain ?? 2) + 1),
+        label: `DUAL-TAP FINISHER! FREE ${otherW.name.toUpperCase()} SHOT!`,
+        pos: { ...attacker.pos },
+      });
+      pushLog(state, `DUAL-TAP FINISHER! ${attacker.name} whipped out ${otherW.name} for a FREE off-hand attack!`);
+    }
   }
 
-  // Weapon Knockback (+ extraKnockback & bonusBumpDmg perks!)
-  const totalKnockback = (attacker.weapon.knockback ?? 0) + attackerFx.extraKnockback;
+  // Secondary Vacuum Duster / Grapple Whip Pull!
+  const gimmickForceBonus = w.slot === 'secondary' ? attackerFx.gimmickExtraPullPush : 0;
+  const totalPull = (w.pull ?? 0) + (w.pull ? gimmickForceBonus : 0);
+  if (defender.alive && totalPull > 0) {
+    applyPull(state, attacker, defender, totalPull, w.gimmick ?? 'vacuum_pull');
+  }
+
+  // Weapon Knockback (supports multi-tile knockback + extraKnockback + bonusBumpDmg perks!)
+  const totalKnockback = (w.knockback ?? 0) + attackerFx.extraKnockback + (w.knockback ? gimmickForceBonus : 0);
   if (defender.alive && totalKnockback > 0) {
     const pushDir = fc.knockbackDir ?? computePushDirection(attacker.pos, defender.pos);
-    applyKnockback(state, defender, pushDir, rosterLookup, new Set(), attackerFx.bonusBumpDmg);
+    for (let step = 0; step < Math.min(3, totalKnockback); step++) {
+      if (!defender.alive) break;
+      applyKnockback(state, defender, pushDir, rosterLookup, new Set(), attackerFx.bonusBumpDmg);
+    }
   }
 
   // Lobbed AoE splash (e.g. Zestia's Citrus Mortar, Corn-elius, Pesticide Pete, Captain Scarecrow)
-  if (attacker.weapon.aoeRadius && attacker.weapon.aoeRadius > 0) {
+  if (w.aoeRadius && w.aoeRadius > 0) {
     applyWeaponSplash(state, attacker, targetPos, defender.id, rosterLookup);
   }
 
   // Pierce weapon (Carroteer / Snap-Pea Railpod / Citric Beam): skewers 1 tile behind target along cardinal line!
-  if (attacker.weapon.arc === 'pierce') {
+  if (w.arc === 'pierce') {
     const dx = targetPos.x - attacker.pos.x;
     const dy = targetPos.y - attacker.pos.y;
     if (dx === 0 || dy === 0) {
@@ -2110,7 +2430,7 @@ export function executeAttack(
             status: 'acid',
             damage: pierceDmg,
           });
-          pushLog(state, `${attacker.weapon.name} pierced through to ${behindUnit.name} for ${pierceDmg} dmg!`);
+          pushLog(state, `${w.name} pierced through to ${behindUnit.name} for ${pierceDmg} dmg!`);
           handleUnitKO(state, behindUnit);
         } else if (behindTile?.cover) {
           damageCoverAt(
@@ -2599,7 +2919,9 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
     if (unit.team === prevPhase) {
       unit.statuses = unit.statuses
         .map((s) =>
-          s.kind === 'rooted' || s.kind === 'feared' ? { ...s, turns: s.turns - 1 } : s
+          s.kind === 'rooted' || s.kind === 'feared' || s.kind === 'frost'
+            ? { ...s, turns: s.turns - 1 }
+            : s
         )
         .filter((s) => s.turns > 0);
     } else {
@@ -2610,9 +2932,11 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
   }
 
   state.phase = nextPhase;
+  const season = getSeasonFromBattle(state);
 
   if (nextPhase === 'player') {
     state.turn += 1;
+    state.comboChain = 0;
     if (state.coopPlayers && state.coopPlayers.length > 1) {
       const firstCoopUnit = state.units.find(
         (u) => u.team === 'player' && u.alive && !u.isEscortCart
@@ -2647,23 +2971,24 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
     if (!unit.alive || unit.team !== nextPhase) continue;
 
     if (!unit.isEscortCart) {
-      unit.actions = emptyActions();
+      unit.actions = emptyActions(Boolean(unit.actions.dualTapUsed));
       unit.tempAttackBonus = 0;
       if (unit.abilityCooldown > 0) unit.abilityCooldown -= 1;
     }
 
-    // Burn damage tick (deals damage first, then ticks down)
+    // Burn damage tick (deals damage first, then ticks down; Summer Heatwave adds +1 Burn DMG!)
     const burn = unit.statuses.find((s) => s.kind === 'burn' && s.turns > 0);
     if (burn) {
-      unit.hp -= 2;
+      const burnDmg = season === 'summer' ? 3 : 2;
+      unit.hp -= burnDmg;
       state.pendingEvents.push({
         type: 'status_tick',
         unitId: unit.id,
         pos: { ...unit.pos },
         status: 'burn',
-        damage: 2,
+        damage: burnDmg,
       });
-      pushLog(state, `${unit.name} sizzled from Burn (-2 HP)!`);
+      pushLog(state, `${unit.name} sizzled from Burn (-${burnDmg} HP)!`);
       handleUnitKO(state, unit);
     }
 
@@ -2678,10 +3003,11 @@ export function startPhase(state: BattleState, nextPhase: 'player' | 'enemy'): v
       )
       .filter((s) => s.turns > 0);
 
-    // Rich Compost terrain heal (+2 HP for produce!)
+    // Rich Compost terrain heal (+3 HP in Spring Pollen Breeze, +2 HP otherwise!)
     const standingTile = tileAt(state, unit.pos);
     if (unit.team === 'player' && standingTile?.terrain === 'compost' && unit.hp < unit.maxHp) {
-      const heal = Math.min(2, unit.maxHp - unit.hp);
+      const baseCompost = season === 'spring' ? 3 : 2;
+      const heal = Math.min(baseCompost, unit.maxHp - unit.hp);
       unit.hp += heal;
       state.pendingEvents.push({
         type: 'heal',

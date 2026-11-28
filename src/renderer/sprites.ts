@@ -1,12 +1,13 @@
 import { GRAFT_REGISTRY } from '../data/grafts';
-import type { BattleUnit, CoverObject } from '../engine/types';
+import type { BattleUnit, CoverObject, WeaponForgeBranch, WeaponVisualKind } from '../engine/types';
+import { getWeaponCutoutDataUrl } from '../renderer3d/weaponProps';
 import { roundRect } from './particles';
 
 /**
  * Paper-Craft Sprite Registry:
- * Preloads all 20 hand-inked watercolor die-cut PNG sprites:
- * - 6 Produce heroes + 4 Barnyard Animal allies (pig, rooster, sheep, goat)
- * - 5 Farmer/Contraption/Boss enemies + 5 Isometric Cover props
+ * Preloads all hand-inked watercolor die-cut PNG sprites:
+ * - Produce heroes + Barnyard Animal allies
+ * - Farmer/Contraption/Boss enemies + Isometric Cover props
  */
 const PNG_SPRITE_KEYS = [
   'potato',
@@ -39,9 +40,12 @@ const PNG_SPRITE_KEYS = [
   'blower',
   'sapper',
   'kettlebot',
+  'snowplow',
+  'frostblower',
   'scarecrow',
   'harvester',
   'tractor',
+  'frostboss',
   'crate',
   'haystack',
   'stone',
@@ -52,7 +56,26 @@ const PNG_SPRITE_KEYS = [
 ] as const;
 
 const SPRITE_MAP = new Map<string, HTMLImageElement>();
+const WEAPON_IMG_CACHE = new Map<string, HTMLImageElement>();
 let spritesPreloaded = false;
+
+function getReadyWeaponCutoutImg(
+  kind: WeaponVisualKind = 'blaster',
+  tier = 1,
+  branch?: WeaponForgeBranch
+): HTMLImageElement | null {
+  if (typeof Image === 'undefined') return null;
+  const key = `${kind}|t${tier}|${branch ?? 's'}`;
+  let img = WEAPON_IMG_CACHE.get(key);
+  if (!img) {
+    const url = getWeaponCutoutDataUrl(kind, tier, branch);
+    if (!url) return null;
+    img = new Image();
+    img.src = url;
+    WEAPON_IMG_CACHE.set(key, img);
+  }
+  return img.complete && img.naturalWidth > 0 ? img : null;
+}
 
 export function preloadPaperCraftSprites(): void {
   if (spritesPreloaded || typeof Image === 'undefined') return;
@@ -155,9 +178,12 @@ const UNIT_HEIGHTS: Record<string, number> = {
   blower: 94,
   sapper: 94,
   kettlebot: 102,
+  snowplow: 92,
+  frostblower: 96,
   scarecrow: 118,
   harvester: 122,
   tractor: 102,
+  frostboss: 126,
 };
 
 const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
@@ -191,9 +217,12 @@ const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   blower: 'left',
   sapper: 'left',
   kettlebot: 'left',
+  snowplow: 'left',
+  frostblower: 'left',
   scarecrow: 'left',
   harvester: 'left',
   tractor: 'left',
+  frostboss: 'left',
 };
 
 function drawSoftGroundShadow(
@@ -392,6 +421,25 @@ export function drawUnitStandee(
   }
 
   ctx.globalAlpha = 1;
+
+  // Visually equipped Paper Mario die-cut weapon cutout beside playable heroes in Classic 2D!
+  if (unit.team === 'player' && !unit.isEscortCart && unit.weapon) {
+    const wImg = getReadyWeaponCutoutImg(
+      unit.weapon.visualKind ?? 'blaster',
+      unit.weapon.forgeTier ?? 1,
+      unit.weapon.forgeBranch
+    );
+    if (wImg) {
+      const wSize = 32 * s * activeLift;
+      const side = unit.facing === 'right' ? 1 : -1;
+      ctx.save();
+      ctx.translate(side * 22 * s, -targetH * 0.44);
+      if (side < 0) ctx.scale(-1, 1);
+      ctx.rotate(Math.sin(time * 3.2 + unit.pos.x) * 0.08);
+      ctx.drawImage(wImg, -wSize / 2, -wSize / 2, wSize, wSize);
+      ctx.restore();
+    }
+  }
 
   // Living Wool Half-Cover badge on Woolly Bulwark!
   if (unit.livingHalfCover) {

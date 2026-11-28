@@ -19,6 +19,7 @@ import {
   getAbilityTargetTiles,
   getItemTargetTiles,
   startPhase,
+  switchActiveWeapon,
 } from '../engine/battle';
 import { forecastAttack } from '../engine/combat';
 import { battleRng, difficultyFor } from '../engine/difficulty';
@@ -31,6 +32,7 @@ import {
   applyBattleOutcomeToRun,
   applyGraftToHero,
   applyTravelCardMove,
+  claimLoreReward,
   claimRecruitReward,
   claimRelicReward,
   claimShrineBlessing,
@@ -38,7 +40,11 @@ import {
   createNewRun,
   defaultMetaProgress,
   finishRewardsAndReturnToMap,
+  forgeHeroWeapon,
   getBoardPathsForCard,
+  leaveForgeNode,
+  openForgeNode,
+  openLoreNode,
   openShrineNode,
   openVaultNode,
 } from '../engine/run';
@@ -261,7 +267,20 @@ function playHeroTurn(state: BattleState, hero: BattleUnit, rng: Rng): void {
   if (state.status !== 'ongoing' || !hero.alive || hero.isEscortCart) return;
   useSkillOrItem(state, hero);
   if (state.status !== 'ongoing' || !hero.alive) return;
-  const attack = bestAttackFrom(state, hero, hero.pos);
+  let attack = bestAttackFrom(state, hero, hero.pos);
+  if (hero.primaryWeapon && hero.secondaryWeapon) {
+    const origSlot = hero.activeWeaponSlot ?? 'primary';
+    const altSlot = origSlot === 'primary' ? 'secondary' : 'primary';
+    const origWeapon = hero.weapon;
+    hero.weapon = altSlot === 'secondary' ? hero.secondaryWeapon : hero.primaryWeapon;
+    const altAttack = bestAttackFrom(state, hero, hero.pos);
+    hero.weapon = origWeapon;
+    if (altAttack && (!attack || altAttack.score > attack.score + 2)) {
+      if (switchActiveWeapon(state, hero.id, altSlot)) {
+        attack = altAttack;
+      }
+    }
+  }
   if (attack) executeAttack(state, hero.id, attack.target, rng);
 }
 
@@ -355,6 +374,18 @@ export function simulateRun(seed: number, heat = 0): RunLog {
       run.status = 'map';
       continue;
     }
+    if (node.type === 'lore') {
+      openLoreNode(run, node.id, meta);
+      claimLoreReward(run, 'voucher');
+      continue;
+    }
+    if (node.type === 'forge') {
+      openForgeNode(run, node.id);
+      const lead = run.roster.find((h) => !h.harvested && run.activeSquadUids.includes(h.uid));
+      if (lead) forgeHeroWeapon(run, lead.uid, 'primary', 'elemental', true);
+      leaveForgeNode(run);
+      continue;
+    }
     if (node.type === 'vault' || node.type === 'shop' || node.type === 'armory') {
       openVaultNode(run, node.id);
       if (!run.completedNodeIds.includes(node.id)) run.completedNodeIds.push(node.id);
@@ -397,6 +428,7 @@ export function simulateRun(seed: number, heat = 0): RunLog {
         bossEmpowered: node.type === 'boss' && (run.boardTurn ?? 0) > (run.harvestBellLimit ?? HARVEST_BELL_LIMIT),
       }
     );
+    battle.seasonId = run.seasonId ?? ACTS[run.act]?.id ?? 'spring';
     run.nextBattleBuff = null;
     const outcome = playBattle(battle, rng);
     const turns = battle.turn;

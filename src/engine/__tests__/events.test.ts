@@ -34,7 +34,7 @@ describe('garden events', () => {
       const nodes = generateActNodes(0, actRng(seed, 0));
       const events = nodes.filter((n) => n.type === 'event');
       total += events.length;
-      expect(events.every((n) => n.stage >= 1 && n.stage <= 5)).toBe(true);
+      expect(events.every((n) => n.stage >= 1 && n.stage <= 6)).toBe(true);
     }
     expect(total).toBeGreaterThan(100); // more than one per act on average
   });

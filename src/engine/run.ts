@@ -1,5 +1,6 @@
 import { ALL_GRAFT_IDS, GRAFT_REGISTRY } from '../data/grafts';
 import { ALL_ITEM_IDS, ITEM_REGISTRY } from '../data/items';
+import { getLoreForSeason } from '../data/lore';
 import {
   HERO_UNLOCK_CATALOG,
   PRODUCE_BLUEPRINTS,
@@ -12,7 +13,11 @@ import { canUnlockPerk, getXpToNextLevel, MAX_HERO_LEVEL, SKILL_PERKS } from '..
 import {
   ALL_ALT_WEAPON_IDS,
   ALT_WEAPON_REGISTRY,
+  applyWeaponForge,
   buildScaledWeaponForHero,
+  ensureHeroDualWeapons,
+  getDualWeaponKit,
+  getWeaponForgeOptions,
   STARTER_UNLOCKED_WEAPONS,
 } from '../data/weapons';
 import { battleRng, getHeatSeedMultiplier, heatRunRules, MAX_HARVEST_HEAT } from './difficulty';
@@ -47,6 +52,8 @@ import type {
   RunState,
   SeasonId,
   SeasonNode,
+  WeaponForgeBranch,
+  WeaponSlot,
 } from './types';
 
 const META_STORAGE_KEY = 'crop_revolt_meta_v1';
@@ -106,6 +113,7 @@ export function defaultMetaProgress(): MetaProgress {
     maxHeatUnlocked: 1,
     selectedHeat: 0,
     unlockedHeroIds: [...STARTER_BLUEPRINT_IDS],
+    discoveredLoreIds: ['lore_spring_1'],
     guidedHintsEnabled: true,
     unlocks: {
       extraItemSatchel: false,
@@ -132,10 +140,14 @@ export function loadMetaProgress(): MetaProgress {
     const mergedHeroes = Array.from(
       new Set([...STARTER_BLUEPRINT_IDS, ...(parsed.unlockedHeroIds ?? [])])
     );
+    const mergedLore = Array.from(
+      new Set(['lore_spring_1', ...(parsed.discoveredLoreIds ?? [])])
+    );
     return {
       ...defaults,
       ...parsed,
       unlockedHeroIds: mergedHeroes,
+      discoveredLoreIds: mergedLore,
       guidedHintsEnabled: parsed.guidedHintsEnabled ?? true,
       bestEndlessFloor: parsed.bestEndlessFloor ?? 0,
       unlocks: {
@@ -155,6 +167,16 @@ export function saveMetaProgress(meta: MetaProgress): void {
   } catch {
     // Ignore storage quota errors
   }
+}
+
+export function discoverLorePage(meta: MetaProgress, loreId: string): boolean {
+  if (!Array.isArray(meta.discoveredLoreIds)) {
+    meta.discoveredLoreIds = ['lore_spring_1'];
+  }
+  if (meta.discoveredLoreIds.includes(loreId)) return false;
+  meta.discoveredLoreIds.push(loreId);
+  saveMetaProgress(meta);
+  return true;
 }
 
 export function unlockHeroPermanently(meta: MetaProgress, blueprintId: string): boolean {
@@ -285,8 +307,11 @@ export function purchaseMetaUnlock(
 export function createHeroFromBlueprint(blueprintId: string, bonusMaxHp = 0): RosterHero {
   const bp = PRODUCE_BLUEPRINTS[blueprintId];
   if (!bp) throw new Error(`Unknown produce blueprint: ${blueprintId}`);
+  const kit = getDualWeaponKit(bp.species);
+  const startSlot = kit.defaultSlot ?? 'primary';
+  const startWeapon = startSlot === 'secondary' ? kit.secondary : kit.primary;
   const maxHp = bp.maxHp + bonusMaxHp;
-  return {
+  const hero: RosterHero = {
     uid: `${bp.id}_${Math.random().toString(36).slice(2, 8)}`,
     blueprintId: bp.id,
     name: bp.name,
@@ -305,8 +330,12 @@ export function createHeroFromBlueprint(blueprintId: string, bonusMaxHp = 0): Ro
     dashDamage: bp.dashDamage,
     dashKnockback: bp.dashKnockback,
     dashStatus: bp.dashStatus ? { ...bp.dashStatus } : undefined,
-    weapon: { ...bp.weapon, appliesStatus: bp.weapon.appliesStatus ? { ...bp.weapon.appliesStatus } : undefined },
-    equippedWeaponId: bp.weapon.id,
+    weapon: { ...startWeapon, appliesStatus: startWeapon.appliesStatus ? { ...startWeapon.appliesStatus } : undefined },
+    primaryWeapon: { ...kit.primary, appliesStatus: kit.primary.appliesStatus ? { ...kit.primary.appliesStatus } : undefined },
+    secondaryWeapon: { ...kit.secondary, appliesStatus: kit.secondary.appliesStatus ? { ...kit.secondary.appliesStatus } : undefined },
+    activeWeaponSlot: startSlot,
+    weaponForge: { primary: { tier: 1 }, secondary: { tier: 1 } },
+    equippedWeaponId: kit.primary.id,
     ability: { ...bp.ability, appliesStatus: bp.ability.appliesStatus ? { ...bp.ability.appliesStatus } : undefined },
     graftIds: [],
     level: 1,
@@ -318,6 +347,8 @@ export function createHeroFromBlueprint(blueprintId: string, bonusMaxHp = 0): Ro
     color: bp.color,
     accentColor: bp.accentColor,
   };
+  ensureHeroDualWeapons(hero);
+  return hero;
 }
 
 /**
@@ -386,6 +417,10 @@ export function createNewRun(
     heroOwnerByUid: coopPlayers ? {} : undefined,
     activeBoardPickerIdx: coopPlayers ? 0 : undefined,
     unlockedWeaponIds: [...STARTER_UNLOCKED_WEAPONS],
+    forgeVouchers: 1,
+    pendingLore: null,
+    pendingForge: null,
+    seenActIntros: [],
     recruitBonusHp: hpBonus,
     seenEventIds: [],
     pendingEvent: null,
@@ -521,7 +556,14 @@ export function migrateSavedRun(run: RunState): RunState {
         hero.skillPoints += refunded;
       }
       if (!hero.equippedWeaponId) hero.equippedWeaponId = hero.weapon.id;
+      ensureHeroDualWeapons(hero);
     }
+  }
+  if (typeof run.forgeVouchers !== 'number') {
+    run.forgeVouchers = 1;
+  }
+  if (!Array.isArray(run.seenActIntros)) {
+    run.seenActIntros = [];
   }
   if (!run.mode) {
     run.mode = 'standard';
@@ -890,6 +932,78 @@ export function claimShrineBlessing(
   return true;
 }
 
+export function openLoreNode(run: RunState, nodeId: string, meta?: MetaProgress): boolean {
+  const node = run.nodes.find((n) => n.id === nodeId);
+  if (!node || node.type !== 'lore') return false;
+  run.currentNodeId = nodeId;
+  const season = run.seasonId ?? ACTS[run.act]?.id ?? 'spring';
+  const seasonLore = getLoreForSeason(season);
+  const discovered = new Set(meta?.discoveredLoreIds ?? []);
+  const unread = seasonLore.find((entry) => !discovered.has(entry.id));
+  const chosen = unread ?? seasonLore[Math.abs(run.seed + node.stage) % Math.max(1, seasonLore.length)];
+  const loreId = chosen?.id ?? 'lore_spring_1';
+  if (meta) {
+    discoverLorePage(meta, loreId);
+  }
+  run.pendingLore = { loreId, nodeId, claimed: false };
+  run.status = 'lore';
+  return true;
+}
+
+export function claimLoreReward(
+  run: RunState,
+  choice: 'sp' | 'voucher' | 'seeds'
+): boolean {
+  if (!run.pendingLore || run.pendingLore.claimed) return false;
+  const nodeId = run.pendingLore.nodeId;
+  if (choice === 'sp') {
+    for (const h of run.roster) {
+      if (!h.harvested) h.skillPoints += 1;
+    }
+  } else if (choice === 'voucher') {
+    run.forgeVouchers = (run.forgeVouchers ?? 0) + 1;
+  } else if (choice === 'seeds') {
+    run.seeds += 10;
+    for (const h of run.roster) {
+      if (!h.harvested) h.hp = Math.min(h.maxHp, h.hp + 3);
+    }
+  }
+  run.pendingLore.claimed = true;
+  const node = run.nodes.find((n) => n.id === nodeId);
+  if (node) node.completed = true;
+  if (!run.completedNodeIds.includes(nodeId)) {
+    run.completedNodeIds.push(nodeId);
+  }
+  run.pendingLore = null;
+  run.status = 'map';
+  return true;
+}
+
+export function openForgeNode(run: RunState, nodeId: string): boolean {
+  const node = run.nodes.find((n) => n.id === nodeId);
+  if (!node || node.type !== 'forge') return false;
+  run.currentNodeId = nodeId;
+  if (!node.completed) {
+    run.forgeVouchers = (run.forgeVouchers ?? 0) + 1;
+  }
+  run.pendingForge = { nodeId, discount: 0.7 };
+  run.status = 'forge';
+  return true;
+}
+
+export function leaveForgeNode(run: RunState): void {
+  const nodeId = run.pendingForge?.nodeId;
+  if (nodeId) {
+    const node = run.nodes.find((n) => n.id === nodeId);
+    if (node) node.completed = true;
+    if (!run.completedNodeIds.includes(nodeId)) {
+      run.completedNodeIds.push(nodeId);
+    }
+  }
+  run.pendingForge = null;
+  run.status = 'map';
+}
+
 export function buyMarketOffer(run: RunState, offerId: string, targetHeroUid?: string): boolean {
   const offers = run.pendingReward?.marketOffers;
   if (!offers) return false;
@@ -955,8 +1069,13 @@ export function awardBattleXpAndLevels(
         hero.maxHp += 2;
         hero.hp = Math.min(hero.maxHp, hero.hp + 2);
         bonusHp += 2;
-        if (hero.level === 3 || hero.level === 5 || hero.level === 7) {
-          hero.weapon = { ...hero.weapon, damage: hero.weapon.damage + 1 };
+        if (hero.level === 3 || hero.level === 5 || hero.level === 7 || hero.level === 9) {
+          ensureHeroDualWeapons(hero);
+          hero.primaryWeapon = { ...hero.primaryWeapon!, damage: hero.primaryWeapon!.damage + 1 };
+          hero.secondaryWeapon = { ...hero.secondaryWeapon!, damage: hero.secondaryWeapon!.damage + 1 };
+          const active =
+            (hero.activeWeaponSlot ?? 'primary') === 'secondary' ? hero.secondaryWeapon : hero.primaryWeapon;
+          hero.weapon = { ...active, appliesStatus: active.appliesStatus ? { ...active.appliesStatus } : undefined };
           bonusAttack += 1;
         }
       }
@@ -1163,7 +1282,10 @@ export function applyBattleOutcomeToRun(
   const { xpEarned, levelUps } = awardBattleXpAndLevels(run, battle, node?.type ?? 'skirmish');
 
   if (node?.type === 'boss' && !isFinalAct(run)) {
-    // Act cleared: bank the boss reward, then continue on the next act's map.
+    // Act cleared: unlock boss lore, award +1 Free Weapon Forge Voucher, bank rewards & advance!
+    const clearedSeason = run.seasonId ?? ACTS[run.act]?.id ?? 'spring';
+    discoverLorePage(meta, `lore_${clearedSeason}_4`);
+    run.forgeVouchers = (run.forgeVouchers ?? 0) + 1;
     const reward = generateRewardForNode(run, node);
     reward.xpEarned = xpEarned;
     reward.levelUps = levelUps;
@@ -1181,6 +1303,7 @@ export function applyBattleOutcomeToRun(
   }
 
   if (node?.type === 'boss') {
+    discoverLorePage(meta, 'lore_winter_4');
     const heatMult = getHeatSeedMultiplier(run.harvestHeat ?? 0);
     run.seeds = Math.round((run.seeds + 40) * heatMult);
     run.status = 'victory';
@@ -1299,15 +1422,16 @@ export function resolveEndlessBonusChoice(
   } else if (bonus.kind === 'tinkerer') {
     if (choice === 'weapon') {
       const locked = getLockedWeaponPool(run);
+      run.forgeVouchers = (run.forgeVouchers ?? 0) + 1;
       if (locked.length > 0) {
         const wid = locked[Math.floor(rng() * locked.length)];
         unlockRunWeapon(run, wid);
         const entry = ALT_WEAPON_REGISTRY[wid];
         run.seeds += 8;
-        message = `🛠️ FORGED! Unlocked ${entry?.weapon.name ?? wid} in the Armory + 8 Seeds!`;
+        message = `🛠️ FORGED! Unlocked ${entry?.weapon.name ?? wid}, +1 Free Forge Voucher & +8 Seeds!`;
       } else {
         run.seeds += 18;
-        message = '🛠️ MASTERWORK! All weapons owned — received +18 Seeds!';
+        message = '🛠️ MASTERWORK! +1 Free Forge Voucher & +18 Seeds!';
       }
     } else if (choice === 'sp') {
       for (const h of run.roster) {
@@ -1483,10 +1607,31 @@ export function equipHeroWeapon(run: RunState, heroUid: string, weaponId: string
   if (!hero) return false;
   const bp = PRODUCE_BLUEPRINTS[hero.blueprintId];
   if (!bp) return false;
+  const kit = getDualWeaponKit(hero.species);
 
-  if (weaponId === bp.weapon.id) {
-    hero.weapon = buildScaledWeaponForHero(hero, bp.weapon);
-    hero.equippedWeaponId = bp.weapon.id;
+  // Compute scaled weapons FIRST before ensureHeroDualWeapons can touch hero.weapon!
+  const scaledSec = buildScaledWeaponForHero(hero, kit.secondary);
+
+  if (weaponId === kit.secondary.id) {
+    const scaledPrim = buildScaledWeaponForHero(hero, kit.primary);
+    hero.primaryWeapon = scaledPrim;
+    hero.secondaryWeapon = scaledSec;
+    hero.activeWeaponSlot = 'secondary';
+    hero.equippedWeaponId = kit.primary.id;
+    hero.weapon = {
+      ...scaledSec,
+      appliesStatus: scaledSec.appliesStatus ? { ...scaledSec.appliesStatus } : undefined,
+    };
+    return true;
+  }
+
+  if (weaponId === bp.weapon.id || weaponId === kit.primary.id) {
+    const scaled = buildScaledWeaponForHero(hero, kit.primary);
+    hero.primaryWeapon = scaled;
+    hero.secondaryWeapon = scaledSec;
+    hero.equippedWeaponId = kit.primary.id;
+    hero.activeWeaponSlot = 'primary';
+    hero.weapon = { ...scaled, appliesStatus: scaled.appliesStatus ? { ...scaled.appliesStatus } : undefined };
     return true;
   }
 
@@ -1494,8 +1639,101 @@ export function equipHeroWeapon(run: RunState, heroUid: string, weaponId: string
   if (!altEntry || altEntry.species !== hero.species) return false;
   if (!(run.unlockedWeaponIds ?? []).includes(weaponId)) return false;
 
-  hero.weapon = buildScaledWeaponForHero(hero, altEntry.weapon);
+  const altWithMeta = {
+    ...altEntry.weapon,
+    slot: 'primary' as const,
+    visualKind: altEntry.weapon.visualKind ?? kit.primary.visualKind,
+  };
+  const scaled = buildScaledWeaponForHero(hero, altWithMeta);
+  hero.primaryWeapon = scaled;
+  hero.secondaryWeapon = scaledSec;
   hero.equippedWeaponId = altEntry.weapon.id;
+  hero.activeWeaponSlot = 'primary';
+  hero.weapon = { ...scaled, appliesStatus: scaled.appliesStatus ? { ...scaled.appliesStatus } : undefined };
+  return true;
+}
+
+/** Sets whether this hero starts battle holding their Primary Ranged or Secondary Melee/Gimmick weapon! */
+export function setHeroDefaultWeaponSlot(run: RunState, heroUid: string, slot: WeaponSlot): boolean {
+  const hero = run.roster.find((h) => h.uid === heroUid && !h.harvested);
+  if (!hero) return false;
+  ensureHeroDualWeapons(hero);
+  hero.activeWeaponSlot = slot;
+  const active = slot === 'secondary' ? hero.secondaryWeapon! : hero.primaryWeapon!;
+  hero.weapon = {
+    ...active,
+    appliesStatus: active.appliesStatus ? { ...active.appliesStatus } : undefined,
+  };
+  return true;
+}
+
+/**
+ * Branching Weapon Forge: upgrades a hero's Primary Ranged OR Secondary Melee/Gimmick weapon
+ * from Tier 1 -> Tier 2 (Tactical or Elemental) -> Tier 3 Masterwork!
+ * Spends a Free Forge Voucher if available (when `useVoucher !== false`), else Run Seeds.
+ */
+export function forgeHeroWeapon(
+  run: RunState,
+  heroUid: string,
+  slot: WeaponSlot,
+  branch: WeaponForgeBranch,
+  useVoucher = true
+): boolean {
+  const hero = run.roster.find((h) => h.uid === heroUid && !h.harvested);
+  if (!hero) return false;
+  ensureHeroDualWeapons(hero);
+  const kit = getDualWeaponKit(hero.species);
+  const baseW =
+    slot === 'secondary'
+      ? kit.secondary
+      : hero.equippedWeaponId && ALT_WEAPON_REGISTRY[hero.equippedWeaponId]
+        ? {
+            ...ALT_WEAPON_REGISTRY[hero.equippedWeaponId].weapon,
+            slot: 'primary' as const,
+            visualKind: kit.primary.visualKind,
+          }
+        : kit.primary;
+
+  if (!hero.weaponForge) hero.weaponForge = { primary: { tier: 1 }, secondary: { tier: 1 } };
+  const currentProg = hero.weaponForge[slot] ?? { tier: 1 };
+  const discount = run.pendingForge?.discount ?? 1;
+  const opts = getWeaponForgeOptions(baseW, hero.species, currentProg, discount);
+  const chosen = opts.find((o) => o.branch === branch);
+  if (!chosen) return false;
+
+  const canVoucher = useVoucher && (run.forgeVouchers ?? 0) > 0;
+  if (canVoucher) {
+    run.forgeVouchers = (run.forgeVouchers ?? 1) - 1;
+  } else {
+    if (run.seeds < chosen.cost) return false;
+    run.seeds -= chosen.cost;
+  }
+
+  // Preserve non-forge deltas (level, grafts, perks) cleanly when forging to next tier!
+  const prevForged = applyWeaponForge(baseW, hero.species, currentProg);
+  const curHeld = slot === 'secondary' ? hero.secondaryWeapon! : hero.primaryWeapon!;
+  const dmgBonus = Math.max(0, curHeld.damage - prevForged.damage);
+  const covBonus = Math.max(0, curHeld.coverDamage - prevForged.coverDamage);
+  const rngBonus = Math.max(0, curHeld.maxRange - prevForged.maxRange);
+
+  hero.weaponForge[slot] = { tier: chosen.targetTier, branch: chosen.branch };
+  const nextForged = applyWeaponForge(baseW, hero.species, hero.weaponForge[slot]);
+  const upgraded = {
+    ...nextForged,
+    damage: nextForged.damage + dmgBonus,
+    coverDamage: nextForged.coverDamage + covBonus,
+    maxRange: nextForged.maxRange + rngBonus,
+    appliesStatus: nextForged.appliesStatus ? { ...nextForged.appliesStatus } : undefined,
+  };
+
+  if (slot === 'secondary') {
+    hero.secondaryWeapon = upgraded;
+  } else {
+    hero.primaryWeapon = upgraded;
+  }
+  if ((hero.activeWeaponSlot ?? 'primary') === slot) {
+    hero.weapon = { ...upgraded, appliesStatus: upgraded.appliesStatus ? { ...upgraded.appliesStatus } : undefined };
+  }
   return true;
 }
 
@@ -1519,6 +1757,7 @@ export function unlockHeroPerk(run: RunState, heroUid: string, perkId: string): 
   if (!hero || !perk) return false;
   if (!canUnlockPerk(hero.perkIds, hero.skillPoints, perkId, hero.species)) return false;
 
+  ensureHeroDualWeapons(hero);
   hero.skillPoints -= perk.cost;
   hero.perkIds.push(perkId);
 
@@ -1530,11 +1769,20 @@ export function unlockHeroPerk(run: RunState, heroUid: string, perkId: string): 
   if (e.bonusMove) hero.moveRange += e.bonusMove;
   if (e.bonusJump) hero.jumpRange += e.bonusJump;
   if (e.bonusAttack || e.bonusRange) {
-    hero.weapon = {
-      ...hero.weapon,
-      damage: hero.weapon.damage + (e.bonusAttack ?? 0),
-      maxRange: hero.weapon.maxRange + (e.bonusRange ?? 0),
+    const addAtk = e.bonusAttack ?? 0;
+    const addRng = e.bonusRange ?? 0;
+    hero.primaryWeapon = {
+      ...hero.primaryWeapon!,
+      damage: hero.primaryWeapon!.damage + addAtk,
+      maxRange: hero.primaryWeapon!.maxRange + addRng,
     };
+    hero.secondaryWeapon = {
+      ...hero.secondaryWeapon!,
+      damage: hero.secondaryWeapon!.damage + addAtk,
+      maxRange: hero.secondaryWeapon!.maxRange + addRng,
+    };
+    const active = (hero.activeWeaponSlot ?? 'primary') === 'secondary' ? hero.secondaryWeapon : hero.primaryWeapon;
+    hero.weapon = { ...active, appliesStatus: active.appliesStatus ? { ...active.appliesStatus } : undefined };
   }
 
   return true;
@@ -1547,6 +1795,7 @@ export function unlockHeroPerk(run: RunState, heroUid: string, perkId: string): 
 export function respecHeroPerks(run: RunState, heroUid: string): boolean {
   const hero = run.roster.find((h) => h.uid === heroUid && !h.harvested);
   if (!hero || hero.perkIds.length === 0) return false;
+  ensureHeroDualWeapons(hero);
 
   let refundedSp = 0;
   let hpDelta = 0;
@@ -1573,11 +1822,18 @@ export function respecHeroPerks(run: RunState, heroUid: string): boolean {
   hero.moveRange = Math.max(2, hero.moveRange - moveDelta);
   hero.jumpRange = Math.max(2, hero.jumpRange - jumpDelta);
   if (atkDelta > 0 || rangeDelta > 0) {
-    hero.weapon = {
-      ...hero.weapon,
-      damage: Math.max(1, hero.weapon.damage - atkDelta),
-      maxRange: Math.max(hero.weapon.minRange, hero.weapon.maxRange - rangeDelta),
+    hero.primaryWeapon = {
+      ...hero.primaryWeapon!,
+      damage: Math.max(1, hero.primaryWeapon!.damage - atkDelta),
+      maxRange: Math.max(hero.primaryWeapon!.minRange, hero.primaryWeapon!.maxRange - rangeDelta),
     };
+    hero.secondaryWeapon = {
+      ...hero.secondaryWeapon!,
+      damage: Math.max(1, hero.secondaryWeapon!.damage - atkDelta),
+      maxRange: Math.max(hero.secondaryWeapon!.minRange, hero.secondaryWeapon!.maxRange - rangeDelta),
+    };
+    const active = (hero.activeWeaponSlot ?? 'primary') === 'secondary' ? hero.secondaryWeapon : hero.primaryWeapon;
+    hero.weapon = { ...active, appliesStatus: active.appliesStatus ? { ...active.appliesStatus } : undefined };
   }
   return true;
 }

@@ -43,12 +43,13 @@ const ARCHETYPES: ElevationArchetype[] = [
   'bridge_canyon',
 ];
 
-const THEMES: BoardTheme[] = ['spring', 'greenhouse', 'autumn'];
+const THEMES: BoardTheme[] = ['spring', 'greenhouse', 'autumn', 'winter'];
 
 const THEME_ADJECTIVES: Record<BoardTheme, string[]> = {
   spring: ['Clover', 'Blossom', 'Dewdrop', 'Brookside', 'Dandelion'],
   greenhouse: ['Sunbeam', 'Terracotta', 'Glasshouse', 'Copper', 'Conservatory'],
   autumn: ['Pumpkin', 'Cider', 'Amber', 'Maple', 'Lantern'],
+  winter: ['Frostbite', 'Icicle', 'Hearth', 'Snowdrift', 'Glacier'],
 };
 
 const ARCHETYPE_NOUNS: Record<ElevationArchetype, string[]> = {
@@ -59,7 +60,7 @@ const ARCHETYPE_NOUNS: Record<ElevationArchetype, string[]> = {
   bridge_canyon: ['Twin Bridges', 'Canyon Locks', 'Millstream Flats'],
 };
 
-const BOSS_ROTATION = ['scarecrow', 'tractor', 'harvester'] as const;
+const BOSS_ROTATION = ['scarecrow', 'tractor', 'harvester', 'frostboss'] as const;
 
 const OBJECTIVE_META: Record<
   Exclude<ObjectiveType, 'rout' | 'escort'>,

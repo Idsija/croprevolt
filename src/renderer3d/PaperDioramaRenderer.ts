@@ -52,13 +52,14 @@ import {
 } from './types';
 
 interface PathMoveAnim {
-  kind: 'path' | 'dash' | 'jump' | 'bounce' | 'knockback';
+  kind: 'path' | 'dash' | 'jump' | 'bounce' | 'knockback' | 'pull';
   points: THREE.Vector3[];
   elapsed: number;
   duration: number;
   arcHeight: number;
   spinFull?: boolean;
   leanAngle?: number;
+  lastHopSeg?: number;
 }
 
 type ActionPoseKind = 'none' | 'attack' | 'skill' | 'dash' | 'jump' | 'bounce';
@@ -77,6 +78,7 @@ interface UnitVisualEntry {
   actionPoseKind: ActionPoseKind;
   coverBlend: number;
   squash: number;
+  swapSpinTimer: number;
   anim: PathMoveAnim | null;
   koTimer: number; // > 0 means playing Paper Mario KO flutter tumble!
   koOrigin?: THREE.Vector3;
@@ -90,6 +92,23 @@ interface Projectile3D {
   duration: number;
   arcHeight: number;
   spinSpeed: number;
+  curveLateral?: number;
+}
+
+interface ShockwaveRing3D {
+  mesh: THREE.Mesh;
+  mat: THREE.MeshBasicMaterial;
+  elapsed: number;
+  duration: number;
+  startScale: number;
+  endScale: number;
+}
+
+interface CombatFlashLight {
+  light: THREE.PointLight;
+  elapsed: number;
+  duration: number;
+  peakIntensity: number;
 }
 
 interface Particle3D {
@@ -151,6 +170,7 @@ const STATUS_BADGE_STYLE: Record<string, { label: string; bg: string; fg: string
   shield: { label: 'S', bg: '#3282c8', fg: '#ebf6ff' },
   boosted: { label: '+', bg: '#e39a1c', fg: '#331d00' },
   overwatch: { label: 'W', bg: '#f2b824', fg: '#3b2100' },
+  frost: { label: 'F', bg: '#3fa9d9', fg: '#eefaff' },
 };
 
 export class PaperDioramaRenderer implements BattleRendererHandle {
@@ -169,6 +189,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   private hemiLight: THREE.HemisphereLight | null = null;
   private sunLight: THREE.DirectionalLight | null = null;
   private rimLight: THREE.DirectionalLight | null = null;
+  private combatLights: CombatFlashLight[] = [];
 
   private unitGroup = new THREE.Group();
   private fxGroup = new THREE.Group();
@@ -185,6 +206,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   private ghostAspect = 1;
 
   private projectiles: Projectile3D[] = [];
+  private shockwaves: ShockwaveRing3D[] = [];
   private particles: Particle3D[] = [];
   private popups: WorldPopup3D[] = [];
   private banner: ActiveBanner | null = null;
@@ -218,10 +240,11 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   private lastPinchDist = 0;
   private lastPinchMid: { x: number; y: number } | null = null;
 
-  // Shared particle geometries
+  // Shared particle & ring geometries
   private confettiGeo = new THREE.BoxGeometry(0.11, 0.02, 0.11);
   private plankGeo = new THREE.BoxGeometry(0.28, 0.055, 0.09);
   private dropletGeo = new THREE.SphereGeometry(0.065, 6, 6);
+  private ringFxGeo = new THREE.RingGeometry(0.36, 0.52, 24);
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -331,6 +354,57 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     rim.position.set(-9, 7, -8);
     this.rimLight = rim;
     this.scene.add(rim);
+
+    // Pooled dynamic combat PointLights for crisp weapon muzzle flashes, Hammer shockwaves & Duster suction!
+    this.ringFxGeo.rotateX(-Math.PI / 2);
+    for (let i = 0; i < 3; i++) {
+      const pl = new THREE.PointLight(0xffffff, 0, 6.8, 1.7);
+      pl.position.set(0, 2, 0);
+      this.scene.add(pl);
+      this.combatLights.push({ light: pl, elapsed: 1, duration: 0.25, peakIntensity: 0 });
+    }
+  }
+
+  private flashCombatLight(pos: THREE.Vector3, colorHex: number | string, intensity = 5.5, duration = 0.28): void {
+    if (this.combatLights.length === 0) return;
+    // Pick an idle light or overwrite the oldest active light
+    let slot = this.combatLights[0];
+    for (const c of this.combatLights) {
+      if (c.elapsed >= c.duration) {
+        slot = c;
+        break;
+      }
+      if (c.elapsed / c.duration > slot.elapsed / slot.duration) {
+        slot = c;
+      }
+    }
+    slot.light.position.set(pos.x, pos.y + 0.65, pos.z);
+    slot.light.color.set(colorHex);
+    slot.light.intensity = intensity;
+    slot.peakIntensity = intensity;
+    slot.elapsed = 0;
+    slot.duration = duration;
+  }
+
+  private spawnShockwaveRing(
+    pos: THREE.Vector3,
+    colorHex: string | number,
+    startScale = 0.4,
+    endScale = 2.6,
+    duration = 0.34
+  ): void {
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(colorHex),
+      transparent: true,
+      opacity: 0.88,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(this.ringFxGeo, mat);
+    mesh.position.set(pos.x, pos.y + 0.12, pos.z);
+    mesh.scale.setScalar(startScale);
+    this.fxGroup.add(mesh);
+    this.shockwaves.push({ mesh, mat, elapsed: 0, duration, startScale, endScale });
   }
 
   private resize(): void {
@@ -592,6 +666,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       entry.actionPoseDuration = 0.5;
       entry.actionPoseKind = 'none';
       entry.squash = 0;
+      entry.swapSpinTimer = 0;
     }
     this.hitstopTimer = 0;
     this.clearProjectiles();
@@ -744,20 +819,29 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
                 kind: 'knockback',
                 points: [pFrom, pTo],
                 elapsed: 0,
-                duration: 0.24,
-                arcHeight: 0.3,
+                duration: ev.slidIce ? 0.34 : 0.24,
+                arcHeight: ev.slidIce ? 0.08 : 0.3,
                 leanAngle: -0.28,
               };
               entry.squash = 0.85;
               entry.hitPoseTimer = Math.max(entry.hitPoseTimer, 0.34);
             }
-            this.spawnBurst(pTo.clone().add(new THREE.Vector3(0, 0.2, 0)), ['#fbf3df', '#d9c095'], 10, 'confetti');
+            this.spawnBurst(
+              pTo.clone().add(new THREE.Vector3(0, 0.2, 0)),
+              ev.slidIce ? ['#b8f0ff', '#ffffff', '#64c8eb'] : ['#fbf3df', '#d9c095'],
+              ev.slidIce ? 14 : 10,
+              'confetti'
+            );
+            if (ev.slidIce) {
+              this.spawnPopup(pTo.clone().add(new THREE.Vector3(0, 1.35, 0)), 'ICE SLIDE!', '#0b4a6e', '#d6f7ff', 1.08);
+            }
           } else {
             this.triggerUnitHit(ev.unitId, true);
             if (ev.bumpedUnitId) {
               this.triggerUnitHit(ev.bumpedUnitId, true);
             }
             this.cameraCtrl.triggerShake(0.32, 0.24);
+            this.flashCombatLight(pTo, '#ff9d3b', 5.2, 0.24);
             this.spawnBurst(pTo.clone().add(new THREE.Vector3(0, 0.65, 0)), ['#ff9f43', '#e53e30', '#fbf3df'], 20, 'plank');
             this.spawnPopup(pTo.clone().add(new THREE.Vector3(0, 1.65, 0)), `BUMP! -${ev.bumpDamage ?? 2}`, '#8a1c0b', '#ffe09e', 1.18);
             sfx.coverBreak();
@@ -769,6 +853,8 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           const p = this.worldPointForTile(b, ev.pos, 0.55);
           this.cameraCtrl.triggerShake(0.38, 0.28);
           this.hitstopTimer = Math.max(this.hitstopTimer, 0.065);
+          this.flashCombatLight(p, ev.kind === 'beehive' ? '#ffcf38' : '#58d4ff', 6.2, 0.34);
+          this.spawnShockwaveRing(p, ev.kind === 'beehive' ? '#ffd245' : '#58d4ff', 0.45, 3.1, 0.36);
           if (ev.kind === 'beehive') {
             this.spawnBurst(p, ['#f6c945', '#2b1b0e', '#fff2a6', '#e67e22'], 30, 'confetti');
             this.spawnPopup(p.clone().add(new THREE.Vector3(0, 0.9, 0)), 'BEEHIVE BOOM! -3', '#7a3500', '#ffe985', 1.22);
@@ -785,11 +871,52 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           const pFrom = this.worldPointForTile(b, ev.from, 0.72);
           const pTo = this.worldPointForTile(b, ev.to, 0.55);
           const lobbed = ev.arc === 'lobbed';
+          const isCleave = ev.gimmick === 'hammer_cleave' || ev.gimmick === 'cone_bellows' || ev.gimmick === 'lunge_skewer';
+          const isVacuum = ev.gimmick === 'vacuum_pull' || ev.gimmick === 'grapple_yank';
+          const isBoomerang = ev.gimmick === 'boomerang';
+          const attackerEntry = this.unitMap.get(ev.attackerId);
+          if (attackerEntry?.rig.equippedWeapon) {
+            const ew = attackerEntry.rig.equippedWeapon;
+            ew.recoilTimer = isCleave ? 0.36 : isVacuum ? 0.38 : 0.26;
+            ew.recoilKind = isCleave || ev.arc === 'melee'
+              ? 'swing'
+              : isVacuum
+                ? 'vacuum'
+                : isBoomerang
+                  ? 'throw'
+                  : 'shoot';
+          }
           this.triggerUnitActionPose(ev.attackerId, 'attack', 0.54);
-          this.spawnProjectile3D(pFrom, pTo, ev.arc, ev.attackerKind);
+          this.spawnProjectile3D(pFrom, pTo, ev.arc, ev.attackerKind, ev.gimmick);
           this.focusOnGrid(ev.to);
-          if (lobbed) sfx.lob();
-          else sfx.shoot();
+
+          // Dynamic weapon muzzle & gimmick VFX + SFX!
+          const muzzleColor = isVacuum
+            ? '#4ee8ff'
+            : ev.gimmick === 'cone_bellows' || ev.status === 'burn'
+              ? '#ff7828'
+              : ev.status === 'frost'
+                ? '#7be2ff'
+                : '#ffe378';
+          this.flashCombatLight(pFrom, muzzleColor, 4.4, 0.22);
+
+          if (isCleave) {
+            this.spawnShockwaveRing(
+              pTo,
+              ev.gimmick === 'cone_bellows' ? '#ff7b24' : '#ffe052',
+              0.42,
+              2.55,
+              0.32
+            );
+            sfx.hammerCleave();
+          } else if (isVacuum) {
+            this.spawnShockwaveRing(pTo, '#52e8ff', 2.1, 0.35, 0.32);
+            sfx.vacuumPull();
+          } else if (lobbed) {
+            sfx.lob();
+          } else {
+            sfx.shoot();
+          }
 
           if (!ev.hit) {
             this.spawnBurst(pTo, ['#c89457', '#e6c28b'], 12, 'plank');
@@ -800,10 +927,20 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
             if (ev.targetId) {
               this.triggerUnitHit(ev.targetId, strong || ev.damage >= 5);
             }
+            this.flashCombatLight(
+              pTo,
+              ev.status === 'frost' ? '#70e0ff' : strong ? '#ffcf38' : '#ff6b42',
+              strong ? 6.0 : 3.8,
+              0.24
+            );
             this.cameraCtrl.triggerShake(strong ? 0.3 : 0.16, strong ? 0.22 : 0.14);
             this.spawnBurst(
               pTo,
-              strong ? ['#f6d55c', '#e53e30', '#fbf3df'] : ['#e53e30', '#fbf3df'],
+              ev.status === 'frost'
+                ? ['#a3eeff', '#ffffff', '#43b3e6']
+                : strong
+                  ? ['#f6d55c', '#e53e30', '#fbf3df']
+                  : ['#e53e30', '#fbf3df'],
               strong ? 20 : 12,
               'confetti'
             );
@@ -823,8 +960,8 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
               this.spawnPopup(
                 pTo.clone().add(new THREE.Vector3(0, 1.42, 0)),
                 `${ev.status.toUpperCase()}!`,
-                '#4a2c17',
-                '#fff0b8',
+                ev.status === 'frost' ? '#084b6e' : '#4a2c17',
+                ev.status === 'frost' ? '#d4f6ff' : '#fff0b8',
                 0.94
               );
             }
@@ -1167,6 +1304,103 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           break;
         }
 
+        case 'pull': {
+          const entry = this.unitMap.get(ev.unitId);
+          const pFrom = this.worldPointForTile(b, ev.from, 0);
+          const pTo = this.worldPointForTile(b, ev.to, 0);
+          if (entry) {
+            entry.anim = {
+              kind: 'pull',
+              points: [pFrom, pTo],
+              elapsed: 0,
+              duration: ev.slidIce ? 0.34 : 0.28,
+              arcHeight: ev.slidIce ? 0.08 : 0.22,
+              leanAngle: 0.24,
+            };
+            entry.squash = 0.8;
+            entry.hitPoseTimer = Math.max(entry.hitPoseTimer, 0.3);
+          }
+          this.flashCombatLight(pTo, '#4ee8ff', 4.8, 0.28);
+          this.spawnShockwaveRing(pTo, '#4ee8ff', 2.2, 0.3, 0.32);
+          this.spawnBurst(
+            pTo.clone().add(new THREE.Vector3(0, 0.4, 0)),
+            ev.gimmick === 'grapple_yank'
+              ? ['#6cd458', '#f2cf52', '#fff8e2']
+              : ['#52e8ff', '#ccf8ff', '#fff8e2'],
+            14,
+            'confetti'
+          );
+          this.spawnPopup(
+            pTo.clone().add(new THREE.Vector3(0, 1.45, 0)),
+            ev.slidIce ? 'ICE YOINK!' : ev.gimmick === 'grapple_yank' ? 'GRAPPLED!' : 'VACUUM PULL!',
+            '#0b4d6b',
+            '#d4f8ff',
+            1.12
+          );
+          sfx.vacuumPull();
+          break;
+        }
+
+        case 'weapon_swap': {
+          const entry = this.unitMap.get(ev.unitId);
+          const unit = b.units.find((u) => u.id === ev.unitId);
+          if (entry?.rig.equippedWeapon && unit) {
+            entry.rig.equippedWeapon.setWeapon(
+              ev.visualKind,
+              unit.weapon.forgeTier ?? 1,
+              unit.weapon.forgeBranch,
+              true
+            );
+            entry.squash = 0.72;
+            entry.swapSpinTimer = 0.32;
+          }
+          if (unit) {
+            const p = this.worldPointForTile(b, unit.pos, 0.85);
+            const swapCol = ev.slot === 'secondary' ? '#52e8ff' : '#ffd852';
+            this.flashCombatLight(p, swapCol, 4.2, 0.24);
+            this.spawnShockwaveRing(
+              this.worldPointForTile(b, unit.pos, 0.06),
+              swapCol,
+              0.35,
+              1.45,
+              0.28
+            );
+            this.spawnBurst(
+              p,
+              ev.slot === 'secondary'
+                ? ['#52e8ff', '#ffe052', '#fff8e2']
+                : ['#ffd852', '#ff9f43', '#fff8e2'],
+              14,
+              'confetti'
+            );
+            this.spawnPopup(
+              p.clone().add(new THREE.Vector3(0, 0.55, 0)),
+              `⇄ ${ev.weaponName.toUpperCase()}`,
+              ev.slot === 'secondary' ? '#0b4a6e' : '#6b3e00',
+              ev.slot === 'secondary' ? '#d9f8ff' : '#fff2bd',
+              1.02
+            );
+          }
+          sfx.weaponSwap();
+          break;
+        }
+
+        case 'combo_chain': {
+          const p = this.worldPointForTile(b, ev.pos, 0.75);
+          this.flashCombatLight(p, '#ffd845', 6.5, 0.34);
+          this.spawnShockwaveRing(p, '#ffe052', 0.45, 2.8, 0.38);
+          this.spawnBurst(p, ['#ffd845', '#ff7b24', '#52e8ff', '#fff9d6'], 22, 'confetti');
+          this.spawnPopup(
+            p.clone().add(new THREE.Vector3(0, 0.95, 0)),
+            `★ ${ev.count}× ${ev.label.toUpperCase()}!`,
+            '#732800',
+            '#ffea85',
+            1.24
+          );
+          sfx.coopCombo();
+          break;
+        }
+
         case 'banner': {
           this.banner = {
             text: ev.text,
@@ -1209,7 +1443,13 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     });
   }
 
-  private spawnProjectile3D(from: THREE.Vector3, to: THREE.Vector3, arc: string, attackerKind: string): void {
+  private spawnProjectile3D(
+    from: THREE.Vector3,
+    to: THREE.Vector3,
+    arc: string,
+    attackerKind: string,
+    gimmick?: string
+  ): void {
     const group = new THREE.Group();
     const colorMap: Record<string, number> = {
       pea: 0x7be054,
@@ -1222,6 +1462,9 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       strawberry: 0xe63956,
       mushroom: 0xb968e6,
       duck: 0x3ec6e8,
+      owl: 0xc2935b,
+      pumpkin: 0xf28222,
+      blueberry: 0x4b74d9,
       sprayer: 0x99cc44,
       beekeeper: 0xf5b324,
       barrow: 0xc97f3b,
@@ -1229,18 +1472,29 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       sapper: 0x8f6c47,
       pitchfork: 0xdba93b,
       scarecrow: 0x3a2e28,
+      snowplow: 0x85dcff,
+      frostblower: 0x62ccf5,
+      frostboss: 0x4dbef0,
     };
-    const col = colorMap[attackerKind] ?? (arc === 'lobbed' ? 0xf5d742 : 0x8be05c);
+    const isBoomerang = gimmick === 'boomerang';
+    const isVacuum = gimmick === 'vacuum_pull' || gimmick === 'grapple_yank';
+    const isBellows = gimmick === 'cone_bellows';
+    const col = isVacuum
+      ? 0x52e8ff
+      : isBellows
+        ? 0xff7024
+        : colorMap[attackerKind] ?? (arc === 'lobbed' ? 0xf5d742 : 0x8be05c);
     const mat = new THREE.MeshStandardMaterial({
       color: col,
       emissive: col,
-      emissiveIntensity: 0.25,
-      roughness: 0.55,
+      emissiveIntensity: 0.35,
+      roughness: 0.45,
     });
 
     let core: THREE.Mesh;
-    if (attackerKind === 'lettuce') {
-      core = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.04, 10), mat);
+    if (isBoomerang || attackerKind === 'lettuce') {
+      core = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.055, 6, 12, Math.PI * 1.25), mat);
+      core.rotation.x = Math.PI / 2;
     } else if (attackerKind === 'carrot' || attackerKind === 'strawberry') {
       core = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.42, 7), mat);
       core.rotation.x = Math.PI / 2;
@@ -1253,7 +1507,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     // Paper Mario cream halo ring
     const halo = new THREE.Mesh(
       new THREE.RingGeometry(0.15, 0.22, 14),
-      new THREE.MeshBasicMaterial({ color: 0xfff8dc, side: THREE.DoubleSide, transparent: true, opacity: 0.7 })
+      new THREE.MeshBasicMaterial({ color: 0xfff8dc, side: THREE.DoubleSide, transparent: true, opacity: 0.72 })
     );
     group.add(halo);
 
@@ -1265,9 +1519,10 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       from: from.clone(),
       to: to.clone(),
       elapsed: 0,
-      duration: arc === 'lobbed' ? 0.36 : arc === 'melee' ? 0.16 : 0.22,
-      arcHeight: arc === 'lobbed' ? 2.1 : 0.24,
-      spinSpeed: attackerKind === 'lettuce' ? 18 : 9,
+      duration: isBoomerang ? 0.34 : arc === 'lobbed' ? 0.36 : arc === 'melee' ? 0.16 : 0.22,
+      arcHeight: arc === 'lobbed' ? 2.1 : isBoomerang ? 0.48 : 0.24,
+      spinSpeed: isBoomerang || attackerKind === 'lettuce' ? 22 : 9,
+      curveLateral: isBoomerang ? 1.15 : 0,
     });
   }
 
@@ -1357,7 +1612,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     const unitSig = b.units
       .map(
         (u) =>
-          `${u.id}:${u.pos.x},${u.pos.y}:${u.hp}:${u.alive ? 1 : 0}:${u.actions.hasMoved ? 1 : 0}${u.actions.hasDashed ? 1 : 0}${u.actions.hasAttacked ? 1 : 0}${u.actions.hasUsedSkill ? 1 : 0}:${u.abilityCooldown}:${u.statuses.map((s) => s.kind[0]).join('')}`
+          `${u.id}:${u.pos.x},${u.pos.y}:${u.hp}:${u.alive ? 1 : 0}:${u.actions.hasMoved ? 1 : 0}${u.actions.hasDashed ? 1 : 0}${u.actions.hasAttacked ? 1 : 0}${u.actions.hasUsedSkill ? 1 : 0}:${u.abilityCooldown}:${u.activeWeaponSlot ?? 'p'}:${u.weapon.id}:${u.weapon.forgeTier ?? 1}:${u.statuses.map((s) => s.kind[0]).join('')}`
       )
       .join(';');
 
@@ -1600,6 +1855,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           actionPoseKind: 'none',
           coverBlend: 0,
           squash: 0,
+          swapSpinTimer: 0,
           anim: null,
           koTimer: 0,
         };
@@ -1726,6 +1982,15 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           const scaled = t * segCount;
           const segIdx = Math.min(segCount - 1, Math.floor(scaled));
           const segT = scaled - segIdx;
+          if (anim.kind === 'path' && anim.lastHopSeg !== segIdx) {
+            anim.lastHopSeg = segIdx;
+            this.spawnBurst(
+              anim.points[segIdx].clone().add(new THREE.Vector3(0, 0.08, 0)),
+              b.theme === 'winter' ? ['#eef8ff', '#b8dcf0'] : ['#f5ead2', '#cfb282'],
+              4,
+              'confetti'
+            );
+          }
           entry.rig.root.position.lerpVectors(anim.points[segIdx], anim.points[segIdx + 1], segT);
           hopY = Math.sin(segT * Math.PI) * anim.arcHeight;
           tiltZ = Math.sin(segT * Math.PI) * (anim.leanAngle ?? 0.14);
@@ -1749,6 +2014,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       const hasFeared = u.statuses.some((s) => s.kind === 'feared');
       const hasShield = u.statuses.some((s) => s.kind === 'shield');
       const hasBoosted = u.statuses.some((s) => s.kind === 'boosted');
+      const hasFrost = u.statuses.some((s) => s.kind === 'frost');
 
       // 4. Expressive Battle Poses: Cover Crouch & Peek, Action Lunge, Skill Flourish, Overwatch Brace & Celebration!
       let actionHopY = 0;
@@ -1771,6 +2037,14 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           extraSpinY += p * Math.PI * 2;
           actionStretchY = flourish * 0.14;
         }
+      }
+
+      if (entry.swapSpinTimer > 0) {
+        entry.swapSpinTimer = Math.max(0, entry.swapSpinTimer - dt);
+        const sp = 1 - entry.swapSpinTimer / 0.32;
+        actionHopY += Math.sin(sp * Math.PI) * 0.26;
+        extraSpinY += sp * Math.PI * 2;
+        actionStretchY += Math.sin(sp * Math.PI) * 0.1;
       }
 
       const breatheSpeed = isCelebrating ? 7.8 : isLowHp ? 6.2 : isSelected ? 4.4 : 2.6;
@@ -1855,6 +2129,59 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       );
       entry.rig.flipGroup.rotation.y = entry.rig.currentFlipYaw + extraSpinY;
 
+      // 5B. Live Visually Equipped 3D Paper Mario Weapon Prop Sync & Animation!
+      const ew = entry.rig.equippedWeapon;
+      if (ew) {
+        ew.setWeapon(
+          u.weapon.visualKind ?? 'blaster',
+          u.weapon.forgeTier ?? 1,
+          u.weapon.forgeBranch,
+          false
+        );
+        let wRotZ = Math.sin(idlePhase * 0.65) * 0.07 + (isAimingHero || isOverwatching ? 0.18 : 0);
+        let wRotY = 0;
+        let wPosX = 0;
+        let wPosY = Math.sin(idlePhase * 0.9) * 0.035 + (isAimingHero ? 0.06 : 0);
+        let wScale = isSelected ? 1.08 : 0.96;
+
+        if (ew.swapPopTimer > 0) {
+          ew.swapPopTimer = Math.max(0, ew.swapPopTimer - dt);
+          const sp = 1 - ew.swapPopTimer / 0.34;
+          wRotY += sp * Math.PI * 2;
+          wScale *= 1 + Math.sin(sp * Math.PI) * 0.42;
+          wPosY += Math.sin(sp * Math.PI) * 0.22;
+        }
+        if (ew.recoilTimer > 0) {
+          ew.recoilTimer = Math.max(0, ew.recoilTimer - dt);
+          const rp = 1 - ew.recoilTimer / 0.36;
+          if (ew.recoilKind === 'swing') {
+            // Dramatic Paper Mario Hammer / Rapier 115° overhead cleave swing!
+            wRotZ -= Math.sin(rp * Math.PI) * 2.05;
+            wPosX += Math.sin(rp * Math.PI) * 0.28;
+            wPosY += Math.sin(rp * Math.PI) * 0.14;
+            wScale *= 1 + Math.sin(rp * Math.PI) * 0.24;
+          } else if (ew.recoilKind === 'vacuum') {
+            // Luigi Vacuum Duster suction rumble jitter!
+            wPosX += 0.18 + Math.sin(this.elapsedTotal * 55) * 0.04;
+            wRotZ += Math.sin(this.elapsedTotal * 48) * 0.12;
+          } else if (ew.recoilKind === 'throw') {
+            // Boomerang flick spin
+            wRotZ -= Math.sin(rp * Math.PI) * 1.4;
+            wPosX += Math.sin(rp * Math.PI) * 0.16;
+          } else {
+            // Crisp ranged kickback recoil
+            wPosX -= Math.sin(rp * Math.PI) * 0.16;
+            wRotZ += Math.sin(rp * Math.PI) * 0.34;
+          }
+        }
+        ew.pivot.position.set(wPosX, wPosY, 0);
+        ew.pivot.rotation.set(0, wRotY, wRotZ);
+        ew.pivot.scale.setScalar(wScale);
+        if (ew.auraMesh.visible) {
+          ew.auraMesh.rotation.z = this.elapsedTotal * 2.1;
+        }
+      }
+
       // 6. Animate Universal 3D Paper-Craft Status & Low-HP Overlays!
       const ov = entry.rig.statusOverlay;
       ov.burn.visible = hasBurn;
@@ -1905,6 +2232,13 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         ov.overwatch.scale.setScalar(osc);
       }
 
+      ov.frost.visible = hasFrost;
+      if (hasFrost) {
+        ov.frost.rotation.y = this.elapsedTotal * 0.9;
+        const fsc = 1 + Math.sin(this.elapsedTotal * 4.4) * 0.05;
+        ov.frost.scale.set(fsc, 1, fsc);
+      }
+
       ov.lowHp.visible = isLowHp;
       if (isLowHp) {
         // Show 3D Band-Aid sticker on units without a custom hand-drawn _lowhp PNG, while keeping sweat drops on ALL!
@@ -1940,7 +2274,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         entry.rig.promoTrimMesh.visible = false;
       }
 
-      // 8. Hit-Flash, Boss Enraged Glow, Selected Highlight & Done Desaturation
+      // 8. Hit-Flash, Boss Enraged Glow, Frost Sheen, Selected Highlight & Done Desaturation
       if (entry.hitFlash > 0) {
         entry.hitFlash = Math.max(0, entry.hitFlash - dt * 4.2);
       }
@@ -1952,6 +2286,11 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       } else if (isBossEnraged) {
         entry.rig.frontMat.emissive.set('#ff3b14');
         entry.rig.frontMat.emissiveIntensity = 0.14 + Math.sin(this.elapsedTotal * 6.5) * 0.08;
+        entry.rig.backMat.emissive.copy(entry.rig.frontMat.emissive);
+        entry.rig.backMat.emissiveIntensity = entry.rig.frontMat.emissiveIntensity;
+      } else if (hasFrost) {
+        entry.rig.frontMat.emissive.set('#5ad4ff');
+        entry.rig.frontMat.emissiveIntensity = 0.16 + Math.sin(this.elapsedTotal * 4.2) * 0.05;
         entry.rig.backMat.emissive.copy(entry.rig.frontMat.emissive);
         entry.rig.backMat.emissiveIntensity = entry.rig.frontMat.emissiveIntensity;
       } else if (isSelected) {
@@ -2035,13 +2374,21 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   }
 
   private updateEffects(dt: number): void {
-    // 3D Projectiles
+    // 3D Projectiles (with Mario+Rabbids curving boomerang lateral sweep!)
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.elapsed += dt;
       const t = Math.min(1, p.elapsed / p.duration);
       p.mesh.position.lerpVectors(p.from, p.to, t);
       p.mesh.position.y += Math.sin(t * Math.PI) * p.arcHeight;
+      if (p.curveLateral && p.curveLateral !== 0) {
+        const dx = p.to.x - p.from.x;
+        const dz = p.to.z - p.from.z;
+        const len = Math.hypot(dx, dz) || 1;
+        const offset = Math.sin(t * Math.PI) * p.curveLateral;
+        p.mesh.position.x += (-dz / len) * offset;
+        p.mesh.position.z += (dx / len) * offset;
+      }
       p.mesh.rotation.y += dt * p.spinSpeed;
       p.mesh.rotation.x += dt * p.spinSpeed * 0.6;
       if (t >= 1) {
@@ -2055,6 +2402,33 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
           }
         });
         this.projectiles.splice(i, 1);
+      }
+    }
+
+    // 3D Expanding Shockwave & Imploding Vacuum Vortex Rings
+    for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+      const sw = this.shockwaves[i];
+      sw.elapsed += dt;
+      const t = Math.min(1, sw.elapsed / sw.duration);
+      const ease = 1 - Math.pow(1 - t, 2);
+      const sc = THREE.MathUtils.lerp(sw.startScale, sw.endScale, ease);
+      sw.mesh.scale.setScalar(sc);
+      sw.mat.opacity = (1 - t) * 0.85;
+      if (t >= 1) {
+        this.fxGroup.remove(sw.mesh);
+        sw.mat.dispose();
+        this.shockwaves.splice(i, 1);
+      }
+    }
+
+    // Dynamic Combat PointLight Flash Decay
+    for (const cl of this.combatLights) {
+      if (cl.elapsed < cl.duration) {
+        cl.elapsed += dt;
+        const rem = Math.max(0, 1 - cl.elapsed / cl.duration);
+        cl.light.intensity = cl.peakIntensity * rem * rem;
+      } else if (cl.light.intensity > 0) {
+        cl.light.intensity = 0;
       }
     }
 
@@ -2453,13 +2827,27 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
         this.cssW / Math.max(1, this.cssH)
       );
       const bgHex =
-        b.theme === 'greenhouse' ? '#496352' : b.theme === 'autumn' ? '#4d2b22' : '#664022';
+        b.theme === 'winter'
+          ? '#2a4158'
+          : b.theme === 'greenhouse'
+            ? '#496352'
+            : b.theme === 'autumn'
+              ? '#4d2b22'
+              : '#664022';
       this.scene.background = new THREE.Color(bgHex);
       (this.scene.fog as THREE.FogExp2).color.set(bgHex);
 
       // Act-specific Paper Mario stage lighting!
       if (this.sunLight && this.hemiLight && this.rimLight) {
-        if (b.theme === 'autumn') {
+        if (b.theme === 'winter') {
+          this.sunLight.color.set('#e0f3ff');
+          this.sunLight.intensity = 1.52;
+          this.hemiLight.color.set('#eef8ff');
+          this.hemiLight.groundColor.set('#536d8a');
+          this.hemiLight.intensity = 1.02;
+          this.rimLight.color.set('#ffbe6b');
+          this.rimLight.intensity = 0.68;
+        } else if (b.theme === 'autumn') {
           this.sunLight.color.set('#ffbe78');
           this.sunLight.intensity = 1.48;
           this.hemiLight.color.set('#ffd6a6');
@@ -2644,6 +3032,11 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     }
     this.unitMap.clear();
     this.clearProjectiles();
+    for (const sw of this.shockwaves) {
+      this.fxGroup.remove(sw.mesh);
+      sw.mat.dispose();
+    }
+    this.shockwaves = [];
     for (const pt of this.particles) {
       this.fxGroup.remove(pt.mesh);
       (pt.mesh.material as THREE.Material).dispose();
@@ -2656,6 +3049,7 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     this.confettiGeo.dispose();
     this.plankGeo.dispose();
     this.dropletGeo.dispose();
+    this.ringFxGeo.dispose();
 
     this.overlays.dispose();
     this.world.dispose();

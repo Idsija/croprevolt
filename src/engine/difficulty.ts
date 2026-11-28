@@ -23,10 +23,10 @@ export interface BattleDifficulty {
 export const MAX_ENEMIES_PER_BATTLE = 6;
 
 export const TUNING = {
-  /** Enemy HP grows with threat, so the first floor of an act is harder than the last one before it. */
-  hpPerThreat: 0.05,
-  /** Bosses only scale with the act: their arenas are already tuned as finales. */
-  bossHpPerAct: 0.35,
+  /** Enemy HP grows smoothly across all 4 Seasons (28+ threat ranks). */
+  hpPerThreat: 0.04,
+  /** Bosses scale with the act: their arenas are already tuned as finales. */
+  bossHpPerAct: 0.25,
   /** Boss escorts are promoted to Veterans: this many per act after the first. */
   bossVeteransPerAct: 1,
   /** Floors (0-based) from which enemies hit 1 harder. */
@@ -140,7 +140,7 @@ export function difficultyFor(
   };
 }
 
-/** Regular farmhands that can be rolled into any battle. */
+/** Regular farmhands & mechanical contraptions that can be rolled into any battle. */
 export const REGULAR_ENEMY_POOL = [
   'digger',
   'trimmer',
@@ -152,6 +152,8 @@ export const REGULAR_ENEMY_POOL = [
   'blower',
   'sapper',
   'kettlebot',
+  'snowplow',
+  'frostblower',
 ] as const;
 
 /** Stable 32-bit hash so each node of a seeded run always gets the same battle. */

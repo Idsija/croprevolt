@@ -254,6 +254,35 @@ class CartoonSfx {
     });
     this.haptic([18, 16, 18, 16, 36]);
   }
+
+  public weaponSwap(): void {
+    // Crisp Paper Mario card-flip snap + brass click!
+    this.tone(420, 740, 0.07, 'triangle', 0.11);
+    this.tone(760, 1040, 0.08, 'sine', 0.09, 0.045);
+    this.haptic(10);
+  }
+
+  public vacuumPull(): void {
+    // Whooshing rising Poltergust vacuum suction swirl!
+    this.tone(220, 660, 0.24, 'sawtooth', 0.07);
+    this.tone(330, 880, 0.22, 'triangle', 0.09, 0.04);
+    this.haptic([14, 12, 22]);
+  }
+
+  public hammerCleave(): void {
+    // Heavy Paper Mario wooden mallet wallop + bright star chime!
+    this.tone(180, 72, 0.18, 'square', 0.11);
+    this.tone(587, 880, 0.14, 'triangle', 0.1, 0.06);
+    this.haptic([28, 16, 18]);
+  }
+
+  public forgeClang(): void {
+    // Crisp Tinker Anvil ring + golden masterwork shimmer!
+    this.tone(1174, 1568, 0.14, 'triangle', 0.12);
+    this.tone(880, 1318, 0.18, 'sine', 0.11, 0.05);
+    this.tone(1568, 2093, 0.22, 'sine', 0.09, 0.12);
+    this.haptic([20, 14, 24]);
+  }
 }
 
 export const sfx = new CartoonSfx();

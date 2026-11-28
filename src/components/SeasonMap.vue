@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { getLoreById, SEASON_ACT_INTROS, SEASON_WEATHER_INFO } from '../data/lore';
 import { RELIC_REGISTRY } from '../data/relics';
 import { ACTS, HARVEST_BELL_LIMIT } from '../engine/mapgen';
 import { objectiveBlurb, rollObjectiveForNode } from '../engine/objectives';
@@ -7,8 +8,11 @@ import { getBoardPathsForCard } from '../engine/run';
 import type { BoardTheme, BoardTravelCard, NodeType, SeasonNode } from '../engine/types';
 import { OverworldMapRenderer } from '../renderer3d/OverworldMapRenderer';
 import {
+  dismissActIntro,
   enterSeasonNode,
+  exitForgeStop,
   gameStore,
+  pickLoreReward,
   pickShrineBlessing,
   returnToTitle,
   toggleGuidedHints,
@@ -21,8 +25,25 @@ import HeroBuildModal from './HeroBuildModal.vue';
 const run = computed(() => gameStore.run!);
 const actDef = computed(() => ACTS[run.value.act] ?? ACTS[0]);
 const actTheme = computed<BoardTheme>(() =>
-  run.value.act === 1 ? 'greenhouse' : run.value.act === 2 ? 'autumn' : 'spring'
+  run.value.act === 3
+    ? 'winter'
+    : run.value.act === 2
+      ? 'autumn'
+      : run.value.act === 1
+        ? 'greenhouse'
+        : 'spring'
 );
+const activeSeasonWeather = computed(() => SEASON_WEATHER_INFO[actDef.value.id]);
+const activeActIntro = computed(() => {
+  if (run.value.status !== 'map') return null;
+  const seen = run.value.seenActIntros ?? [];
+  if (seen.includes(actDef.value.id)) return null;
+  return SEASON_ACT_INTROS[actDef.value.id] ?? null;
+});
+const pendingLoreEntry = computed(() =>
+  run.value.pendingLore ? getLoreById(run.value.pendingLore.loreId) ?? null : null
+);
+const SEASON_ICONS = ['🌸', '☀️', '🍂', '❄️'] as const;
 
 const coopPlayers = computed(() =>
   run.value.coopPlayers && run.value.coopPlayers.length > 1 ? run.value.coopPlayers : null
@@ -48,9 +69,11 @@ const selectedNodeId = ref<string | null>(null);
 const hoveredNodeId = ref<string | null>(null);
 const showBuildModal = ref(false);
 const buildModalHeroUid = ref<string | null>(null);
+const buildModalInitialTab = ref<'trees' | 'armory' | 'squad'>('trees');
 const showAlmanac = ref(false);
 const showRelicsPopover = ref(false);
 const showOwMenu = ref(false);
+const showWeatherTip = ref(false);
 const isTraveling = ref(false);
 
 let mapRenderer: OverworldMapRenderer | null = null;
@@ -133,8 +156,9 @@ const leadHeroKind = computed(() => {
 });
 
 const bossKind = computed(() => {
-  if (run.value.act === 1) return 'tractor';
+  if (run.value.act === 3) return 'frostboss';
   if (run.value.act === 2) return 'harvester';
+  if (run.value.act === 1) return 'tractor';
   return 'scarecrow';
 });
 
@@ -222,6 +246,8 @@ const NODE_META: Record<NodeType, { label: string; icon: string; tone: string }>
   armory: { label: 'Armory Wagon', icon: '⚒️', tone: 'gold' },
   vault: { label: 'Supply Camp', icon: '⛺', tone: 'gold' },
   event: { label: 'Lucky Clover', icon: '🍀', tone: 'plum' },
+  lore: { label: 'Lore Monument', icon: '📜', tone: 'plum' },
+  forge: { label: 'Tinker Forge', icon: '🔥', tone: 'gold' },
   boss: { label: 'Act Boss', icon: '👑', tone: 'boss' },
 };
 
@@ -301,9 +327,17 @@ function enterSelectedStop(): void {
   void travelAndEnterNode(selectedNode.value.id);
 }
 
-function openHeroBuilds(uid?: string): void {
+function openHeroBuilds(uid?: string, tab: 'trees' | 'armory' | 'squad' = 'trees'): void {
   buildModalHeroUid.value = uid ?? activeHeroes.value[0]?.uid ?? null;
+  buildModalInitialTab.value = tab;
   showBuildModal.value = true;
+}
+
+function handleBuildModalClose(): void {
+  if (run.value.status === 'forge') {
+    exitForgeStop();
+  }
+  showBuildModal.value = false;
 }
 
 function recenterMap(): void {
@@ -311,7 +345,14 @@ function recenterMap(): void {
 }
 
 function onMapKeyDown(e: KeyboardEvent): void {
-  if (showBuildModal.value || showAlmanac.value || isTraveling.value) {
+  if (showBuildModal.value || showAlmanac.value || isTraveling.value || run.value.status === 'forge') {
+    return;
+  }
+  if (activeActIntro.value) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') {
+      e.preventDefault();
+      dismissActIntro(activeActIntro.value.seasonId);
+    }
     return;
   }
   if (run.value.status === 'shrine') {
@@ -320,8 +361,15 @@ function onMapKeyDown(e: KeyboardEvent): void {
     else if (e.key === '3') pickShrineBlessing('seeds');
     return;
   }
+  if (run.value.status === 'lore' && pendingLoreEntry.value) {
+    if (e.key === '1') pickLoreReward('sp');
+    else if (e.key === '2') pickLoreReward('voucher');
+    else if (e.key === '3') pickLoreReward('seeds');
+    return;
+  }
   if (e.key === 'Escape') {
     showBellHelp.value = false;
+    showWeatherTip.value = false;
     showRelicsPopover.value = false;
     showOwMenu.value = false;
     return;
@@ -437,11 +485,48 @@ onBeforeUnmount(() => {
     <header class="ow-top-bar">
       <div class="ow-left-cluster">
         <div class="kraft-ribbon ow-act-pill">
-          <span class="act-stamp">ACT {{ run.act + 1 }}/3</span>
+          <span class="act-stamp">
+            <span class="ow-desktop-only">ACT </span><span class="ow-mobile-only">A</span>{{ run.act + 1 }}/{{ ACTS.length }}
+          </span>
           <div class="act-copy">
             <strong>{{ actDef.name }}</strong>
-            <small>Pick a Travel Card · Click a lit space to hop</small>
+            <div class="season-strip" aria-label="Four Seasons Progress">
+              <span
+                v-for="(sIcon, sIdx) in SEASON_ICONS"
+                :key="sIdx"
+                class="season-dot"
+                :class="{
+                  done: sIdx < run.act,
+                  current: sIdx === run.act,
+                }"
+                :title="ACTS[sIdx]?.name"
+              >
+                {{ sIcon }}
+              </span>
+            </div>
           </div>
+        </div>
+
+        <!-- Seasonal Weather Rule Pill -->
+        <div
+          v-if="activeSeasonWeather"
+          class="weather-dial"
+          role="button"
+          tabindex="0"
+          :style="{ '--weather-accent': activeSeasonWeather.badgeColor }"
+          :title="`${activeSeasonWeather.name}: ${activeSeasonWeather.detail}`"
+          @click="showWeatherTip = !showWeatherTip"
+          @keydown.enter="showWeatherTip = !showWeatherTip"
+        >
+          <span class="weather-icon">{{ activeSeasonWeather.icon }}</span>
+          <div class="weather-copy ow-desktop-only">
+            <strong>{{ activeSeasonWeather.name }}</strong>
+            <small>{{ activeSeasonWeather.shortRule }}</small>
+          </div>
+          <p v-if="showWeatherTip" class="bell-help weather-help">
+            <strong>{{ activeSeasonWeather.icon }} {{ activeSeasonWeather.name }}:</strong>
+            {{ activeSeasonWeather.detail }} (Tap to close.)
+          </p>
         </div>
 
         <!-- Brass Harvest Bell Turn Pressure Dial -->
@@ -460,7 +545,7 @@ onBeforeUnmount(() => {
         >
           <span class="bell-icon">{{ isBellOverdue ? '⚠️' : '🔔' }}</span>
           <div class="bell-copy">
-            <strong>
+            <strong class="ow-desktop-only">
               {{
                 isBellOverdue
                   ? 'Farmers Alerted!'
@@ -468,6 +553,9 @@ onBeforeUnmount(() => {
                     ? 'Final Bell Turn!'
                     : `${turnsLeft} ${turnsLeft === 1 ? 'Turn' : 'Turns'} Left`
               }}
+            </strong>
+            <strong class="ow-mobile-only">
+              {{ isBellOverdue ? 'Alert!' : turnsLeft === 0 ? 'Last!' : `${turnsLeft}T` }}
             </strong>
             <small>
               {{ isBellOverdue ? 'Boss Empowered' : 'Swift Bonus: +15 🌱' }}
@@ -482,7 +570,7 @@ onBeforeUnmount(() => {
         <!-- Active Next-Battle Blessing / Sprint Buff Pill -->
         <span
           v-if="nextBattleBuffLabel"
-          class="paper-pill ow-buff-pill"
+          class="paper-pill ow-buff-pill ow-desktop-only"
           :title="nextBattleBuffLabel"
         >
           ✨ {{ nextBattleBuffLabel }}
@@ -506,6 +594,15 @@ onBeforeUnmount(() => {
         >
           🔥 Heat {{ run.harvestHeat }}
         </span>
+
+        <button
+          v-if="(run.forgeVouchers ?? 0) > 0"
+          class="paper-pill ow-voucher-btn ow-desktop-only"
+          title="Free Weapon Forge Voucher — click to upgrade a hero's Primary or Secondary weapon!"
+          @click="openHeroBuilds(undefined, 'armory')"
+        >
+          🎟️ {{ run.forgeVouchers }} Forge
+        </button>
 
         <span class="paper-pill ow-seed-pill">
           <CraftIcon name="seed" :size="14" /> {{ run.seeds }}
@@ -565,13 +662,22 @@ onBeforeUnmount(() => {
 
     <!-- Toggleable Guided Board Tip Pill -->
     <div v-if="(gameStore.meta.guidedHintsEnabled ?? true) && !showOwMenu" class="ow-guided-tip">
-      <span>
+      <span class="ow-desktop-only">
         💡
         <template v-if="activeBoardPicker">
           <strong>{{ activeBoardPicker.name }}'s turn!</strong> Pick a Travel Card below, then tap a glowing stop on the board.
         </template>
         <template v-else>
           Pick a <strong>Travel Card</strong> below, then tap any glowing stop on the board to hop &amp; claim its bonus!
+        </template>
+      </span>
+      <span class="ow-mobile-only">
+        💡
+        <template v-if="activeBoardPicker">
+          <strong>{{ activeBoardPicker.badge }}'s turn:</strong> Pick a card &amp; glowing stop!
+        </template>
+        <template v-else>
+          Pick a <strong>Travel Card</strong> &amp; tap a glowing stop!
         </template>
       </span>
       <button class="ow-tip-hide" title="Turn off Guided Tips" @click="toggleGuidedHints">Hide</button>
@@ -646,11 +752,12 @@ onBeforeUnmount(() => {
 
         <button
           class="paper-btn ow-builds-btn"
-          :class="{ gold: totalUnspentSp > 0 }"
-          @click="openHeroBuilds()"
+          :class="{ gold: totalUnspentSp > 0 || (run.forgeVouchers ?? 0) > 0 }"
+          @click="openHeroBuilds(undefined, totalUnspentSp > 0 ? 'trees' : (run.forgeVouchers ?? 0) > 0 ? 'armory' : 'trees')"
         >
           <span>★ Squad</span>
           <span v-if="totalUnspentSp > 0" class="sp-count-pill">{{ totalUnspentSp }}</span>
+          <span v-if="(run.forgeVouchers ?? 0) > 0" class="voucher-count-pill ow-mobile-only">🎟️{{ run.forgeVouchers }}</span>
         </button>
       </div>
 
@@ -791,11 +898,111 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <!-- Illustrated 2-Path Unique Hero Skill Trees & Armory Drawer -->
+    <!-- Storybook Lore Monument Discovery Overlay -->
+    <div v-if="run.status === 'lore' && pendingLoreEntry" class="shrine-backdrop">
+      <section class="corrugated-slab shrine-sheet lore-sheet pinned-card">
+        <div class="washi-tape"></div>
+        <span class="brass-pin tl"></span>
+        <span class="brass-pin tr"></span>
+
+        <div class="shrine-head">
+          <span class="shrine-badge lore-badge">
+            {{ pendingLoreEntry.icon }} FIELD CHRONICLE #{{ pendingLoreEntry.order }} · {{ pendingLoreEntry.region }}
+          </span>
+          <h2>{{ pendingLoreEntry.title }}</h2>
+        </div>
+
+        <blockquote class="lore-parchment">
+          <p>{{ pendingLoreEntry.body }}</p>
+          <footer class="lore-tac-note">🧭 {{ pendingLoreEntry.tacticalNote }}</footer>
+        </blockquote>
+
+        <p class="lore-pick-hint">Chronicle recorded in Almanac! Claim one discovery boon (or press 1–3):</p>
+
+        <div class="shrine-grid">
+          <button class="shrine-opt blessing" @click="pickLoreReward('sp')">
+            <span class="so-icon">🌿</span>
+            <strong>1 · +1 SP to All Heroes</strong>
+            <small>Every living produce &amp; barnyard ally gains +1 Skill Point for their 4-tier tree!</small>
+            <span class="paper-btn gold so-cta">Study Tactics</span>
+          </button>
+
+          <button class="shrine-opt forge-opt" @click="pickLoreReward('voucher')">
+            <span class="so-icon">🎟️</span>
+            <strong>2 · +1 Free Forge Voucher</strong>
+            <small>Upgrade any Primary or Secondary weapon at a Tinker Forge or Armory for 0 Seeds!</small>
+            <span class="paper-btn primary so-cta">Claim Blueprint</span>
+          </button>
+
+          <button class="shrine-opt heal" @click="pickLoreReward('seeds')">
+            <span class="so-icon">🌱</span>
+            <strong>3 · +10 Seeds &amp; +3 HP</strong>
+            <small>Gather 10 Run Seeds from the cache and patch every active hero up by +3 HP.</small>
+            <span class="paper-btn so-cta">Take Stash</span>
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Storybook Chapter Intro Postcard (Once Per Season Act) -->
+    <div
+      v-if="activeActIntro"
+      class="shrine-backdrop intro-backdrop"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="activeActIntro.chapterTitle"
+      @click.self="dismissActIntro(activeActIntro.seasonId)"
+    >
+      <section class="corrugated-slab intro-postcard pinned-card" :class="`season-${activeActIntro.seasonId}`">
+        <div class="washi-tape"></div>
+        <span class="brass-pin tl"></span>
+        <span class="brass-pin tr"></span>
+
+        <div class="intro-kicker-row">
+          <span class="shrine-badge intro-act-badge">
+            {{ activeSeasonWeather.icon }} ACT {{ activeActIntro.actNumber }} OF {{ ACTS.length }}
+          </span>
+          <span class="intro-weather-chip">
+            {{ activeSeasonWeather.icon }} {{ activeSeasonWeather.name }}
+          </span>
+        </div>
+
+        <h2 class="intro-title">{{ activeActIntro.chapterTitle }}</h2>
+        <p class="intro-subtitle">{{ activeActIntro.subtitle }}</p>
+
+        <div class="intro-body-split">
+          <div class="intro-story-col">
+            <p class="intro-paragraph">{{ activeActIntro.storybookParagraph }}</p>
+            <div class="intro-weather-box">
+              <strong>{{ activeSeasonWeather.icon }} Seasonal Weather: {{ activeSeasonWeather.name }}</strong>
+              <small>{{ activeActIntro.weatherTip }}</small>
+            </div>
+          </div>
+
+          <div class="intro-boss-card">
+            <span class="intro-boss-kicker">ACT BOSS</span>
+            <img :src="`/sprites/${bossKind}.png`" :alt="activeActIntro.bossName" />
+            <strong>{{ activeActIntro.bossName }}</strong>
+            <small class="intro-boss-quote">{{ activeActIntro.bossQuote }}</small>
+          </div>
+        </div>
+
+        <button
+          class="paper-btn primary intro-go-btn"
+          @click="dismissActIntro(activeActIntro.seasonId)"
+        >
+          <span>March Into {{ actDef.name }} →</span>
+        </button>
+      </section>
+    </div>
+
+    <!-- Illustrated 4-Tier Hero Skill Trees, Dual Weapons & Branching Forge Drawer -->
     <HeroBuildModal
-      v-if="showBuildModal"
+      v-if="showBuildModal || run.status === 'forge'"
       :initial-hero-uid="buildModalHeroUid"
-      @close="showBuildModal = false"
+      :initial-tab="run.status === 'forge' ? 'armory' : buildModalInitialTab"
+      :is-forge-stop="run.status === 'forge'"
+      @close="handleBuildModalClose"
     />
 
     <!-- Storybook Field Almanac -->
@@ -1570,9 +1777,16 @@ onBeforeUnmount(() => {
   }
 
   .ow-act-pill {
-    padding: 4px 8px;
-    gap: 5px;
+    padding: 4px 7px;
+    gap: 4px;
     min-width: 0;
+    flex-shrink: 0;
+  }
+
+  .act-stamp {
+    white-space: nowrap;
+    font-size: 0.72rem;
+    padding: 2px 6px;
   }
 
   .act-copy strong {
@@ -1582,10 +1796,13 @@ onBeforeUnmount(() => {
   .bell-dial {
     padding: 4px 8px;
     gap: 4px;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .bell-copy strong {
-    font-size: 0.72rem;
+    font-size: 0.74rem;
+    white-space: nowrap;
   }
 
   .bell-copy small {
@@ -1778,11 +1995,366 @@ onBeforeUnmount(() => {
   font-weight: 800;
   line-height: 1.1;
 }
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .ow-guided-tip {
-    top: calc(56px + var(--safe-top, 0px));
-    font-size: 0.68rem;
+    top: calc(54px + var(--safe-top, 0px));
+    font-size: 0.69rem;
     padding: 4px 10px;
+    gap: 7px;
+    white-space: nowrap;
+    max-width: calc(100vw - 16px);
+  }
+
+  .ow-guided-tip .ow-mobile-only {
+    display: inline;
+  }
+}
+
+.voucher-count-pill {
+  background: #1780a6;
+  color: #fffdf5;
+  border: 1.4px solid #093b4f;
+  border-radius: 999px;
+  padding: 0 5px;
+  font-size: 0.65rem;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+/* ===== 4-Season Progress Strip & Seasonal Weather Dial ===== */
+.season-strip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 1px;
+}
+
+.season-dot {
+  font-size: 0.68rem;
+  opacity: 0.4;
+  padding: 0 3px;
+  border-radius: 6px;
+  transition: transform 0.14s ease, opacity 0.14s ease;
+}
+
+.season-dot.done {
+  opacity: 0.85;
+  background: rgba(94, 163, 66, 0.2);
+}
+
+.season-dot.current {
+  opacity: 1;
+  background: #ffe791;
+  border: 1.4px solid var(--ink);
+  transform: scale(1.08);
+}
+
+.weather-dial {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 13px;
+  border: 2.2px solid var(--ink);
+  background: linear-gradient(180deg, #fffdf4 0%, #f1e8d0 100%);
+  box-shadow: 0 3px 0 var(--ink), 0 6px 14px rgba(24, 12, 4, 0.22);
+  cursor: pointer;
+  line-height: 1.12;
+  border-left: 5px solid var(--weather-accent, #5ea342);
+}
+
+.weather-icon {
+  font-size: 1.05rem;
+}
+
+.weather-copy {
+  display: flex;
+  flex-direction: column;
+  max-width: 280px;
+}
+
+.weather-copy strong {
+  font-size: 0.76rem;
+  font-weight: 900;
+  color: var(--ink);
+}
+
+.weather-copy small {
+  font-size: 0.63rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-voucher-btn {
+  background: linear-gradient(180deg, #ffe399 0%, #f5b93d 100%);
+  border-color: #6b3b06;
+  color: #3d1f02;
+  font-weight: 900;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+/* ===== Lore Monument Discovery Sheet ===== */
+.lore-sheet {
+  max-height: 92dvh;
+  overflow-y: auto;
+}
+
+.lore-badge {
+  background: #f0dcff;
+  color: #4f1c75;
+  border-color: #6b2ca3;
+}
+
+.lore-parchment {
+  margin: 0;
+  padding: 13px 16px;
+  border-radius: 14px;
+  border: 2px solid #8a6434;
+  background: linear-gradient(180deg, #fffdf6 0%, #f7ebd0 100%);
+  box-shadow: inset 0 0 0 3px rgba(255, 252, 240, 0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lore-parchment p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.48;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.lore-tac-note {
+  font-size: 0.77rem;
+  font-weight: 800;
+  color: #2f5b1e;
+  background: #e9f6df;
+  border: 1.5px dashed #5d943c;
+  border-radius: 9px;
+  padding: 5px 10px;
+}
+
+.lore-pick-hint {
+  margin: 0;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.shrine-opt.forge-opt {
+  background: linear-gradient(180deg, #fff6ea 0%, #ffd8b0 100%);
+}
+
+/* ===== Storybook Chapter Intro Postcard ===== */
+.intro-backdrop {
+  z-index: 62;
+  background: rgba(20, 14, 10, 0.66);
+}
+
+.intro-postcard {
+  width: min(740px, 100%);
+  max-height: 92dvh;
+  overflow-y: auto;
+  padding: 22px 22px 20px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.intro-postcard.season-winter {
+  background: linear-gradient(180deg, #f3f9ff 0%, #dceaf6 100%);
+}
+
+.intro-postcard.season-autumn {
+  background: linear-gradient(180deg, #fff8ee 0%, #f5dfc0 100%);
+}
+
+.intro-postcard.season-summer {
+  background: linear-gradient(180deg, #fffdf0 0%, #f7e9b8 100%);
+}
+
+.intro-kicker-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.intro-act-badge {
+  background: #4e321a;
+  color: #ffe891;
+  border-color: #4e321a;
+}
+
+.intro-weather-chip {
+  font-size: 0.74rem;
+  font-weight: 900;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #fff9e5;
+  border: 1.8px solid var(--ink);
+  color: var(--ink);
+}
+
+.intro-title {
+  margin: 0;
+  text-align: center;
+  font-size: 1.44rem;
+  color: var(--ink);
+  line-height: 1.15;
+}
+
+.intro-subtitle {
+  margin: -4px 0 0;
+  text-align: center;
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: #7d4512;
+}
+
+.intro-body-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 205px;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.intro-story-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.intro-paragraph {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--ink);
+  font-weight: 600;
+  background: rgba(255, 253, 245, 0.86);
+  border: 1.8px solid rgba(74, 44, 23, 0.28);
+  border-radius: 13px;
+  padding: 12px 14px;
+}
+
+.intro-weather-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 2px dashed #5d8c3a;
+  background: rgba(235, 248, 224, 0.9);
+  color: #214a14;
+}
+
+.intro-weather-box strong {
+  font-size: 0.8rem;
+}
+
+.intro-weather-box small {
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.intro-boss-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 5px;
+  padding: 10px 10px 12px;
+  border-radius: 15px;
+  border: 2.5px solid #7c2015;
+  background: linear-gradient(180deg, #fff5e8 0%, #f2cfa6 100%);
+  box-shadow: 0 4px 0 #7c2015;
+}
+
+.intro-boss-kicker {
+  background: #8c2218;
+  color: #ffe8a3;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.intro-boss-card img {
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 8px rgba(42, 16, 6, 0.3));
+}
+
+.intro-boss-card strong {
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+
+.intro-boss-quote {
+  font-size: 0.7rem;
+  line-height: 1.28;
+  color: #5e2a14;
+  font-style: italic;
+  font-weight: 700;
+}
+
+.intro-go-btn {
+  width: 100%;
+  padding: 12px 18px;
+  font-size: 0.98rem;
+  font-weight: 900;
+  justify-content: center;
+}
+
+@media (max-width: 767px) {
+  .season-strip {
+    display: none;
+  }
+
+  .weather-dial {
+    padding: 4px 7px;
+  }
+
+  .intro-postcard {
+    padding: 16px 14px 14px;
+    gap: 9px;
+  }
+
+  .intro-title {
+    font-size: 1.18rem;
+  }
+
+  .intro-body-split {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .intro-boss-card {
+    flex-direction: row;
+    text-align: left;
+    gap: 10px;
+    padding: 8px 10px;
+  }
+
+  .intro-boss-card img {
+    width: 64px;
+    height: 64px;
+    flex-shrink: 0;
+  }
+
+  .intro-boss-kicker {
+    display: none;
   }
 }
 </style>

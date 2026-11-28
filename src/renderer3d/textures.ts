@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { BoardTheme, TerrainType } from '../engine/types';
+import { createEquippedWeaponRig, type EquippedWeaponPropRig } from './weaponProps';
 
 export const UNIT_WORLD_HEIGHTS: Record<string, number> = {
   potato: 1.05,
@@ -33,9 +34,12 @@ export const UNIT_WORLD_HEIGHTS: Record<string, number> = {
   blower: 1.24,
   sapper: 1.14,
   kettlebot: 1.52,
+  snowplow: 1.24,
+  frostblower: 1.28,
   scarecrow: 1.78,
   harvester: 1.84,
   tractor: 1.56,
+  frostboss: 1.88,
 };
 
 export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
@@ -70,15 +74,18 @@ export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   blower: 'left',
   sapper: 'left',
   kettlebot: 'left',
+  snowplow: 'left',
+  frostblower: 'left',
   scarecrow: 'left',
   harvester: 'left',
   tractor: 'left',
+  frostboss: 'left',
 };
 
 export type SpriteVariantKind = 'base' | 'cover' | 'action' | 'hit' | 'lowhp' | 'enraged';
 
 /**
- * Explicit registry of ALL 56 hand-crafted transparent pose & expression variant PNGs in /sprites/.
+ * Explicit registry of ALL hand-crafted transparent pose & expression variant PNGs in /sprites/.
  * Prevents any 404 requests for units that rely on procedural 3D paper-craft pose overlays.
  */
 export const AVAILABLE_VARIANT_SPRITES = new Set<string>([
@@ -135,9 +142,12 @@ export const AVAILABLE_VARIANT_SPRITES = new Set<string>([
   'blower_hit',
   'sapper_hit',
   'kettlebot_hit',
+  'snowplow_hit',
+  'frostblower_hit',
   'scarecrow_enraged',
   'tractor_enraged',
   'harvester_enraged',
+  'frostboss_enraged',
 ]);
 
 export function hasVariantSprite(
@@ -236,7 +246,8 @@ export type TreeFoliageVariant =
   | 'spring_blossom'
   | 'summer_citrus'
   | 'autumn_crimson'
-  | 'autumn_gold';
+  | 'autumn_gold'
+  | 'winter_pine';
 
 export class CraftTextureLibrary {
   private disposed = false;
@@ -577,36 +588,47 @@ export class CraftTextureLibrary {
     const { canvas, ctx } = makeCanvas(s, s);
     const isAutumn = theme === 'autumn';
     const isGreenhouse = theme === 'greenhouse';
+    const isWinter = theme === 'winter';
 
     // Refined subtle storybook watercolor palette harmonizing with Ghibli-style seasonal boards
-    let base = isAutumn
+    let base = isWinter
       ? checker
-        ? '#cfad62'
-        : '#c4a156'
-      : isGreenhouse
+        ? '#dce8f0'
+        : '#d0e0ea'
+      : isAutumn
         ? checker
-          ? '#8eb868'
-          : '#83ad5e'
-        : checker
-          ? '#9ec26a'
-          : '#92b65f';
+          ? '#cfad62'
+          : '#c4a156'
+        : isGreenhouse
+          ? checker
+            ? '#8eb868'
+            : '#83ad5e'
+          : checker
+            ? '#9ec26a'
+            : '#92b65f';
 
-    if (terrain === 'soil') base = checker ? '#c48c58' : '#b8804d';
+    if (terrain === 'soil') base = isWinter ? (checker ? '#8c7e74' : '#7f7268') : checker ? '#c48c58' : '#b8804d';
     else if (terrain === 'mud') base = checker ? '#75563f' : '#6b4d37';
     else if (terrain === 'compost') base = checker ? '#614831' : '#573f29';
     else if (terrain === 'gate') base = checker ? '#f0cf6c' : '#e3be54';
     else if (terrain === 'barn_floor') {
-      base = isGreenhouse
+      base = isWinter
         ? checker
-          ? '#cfa074'
-          : '#c49468'
-        : checker
-          ? '#c49866'
-          : '#b88c5b';
+          ? '#b8a99e'
+          : '#ab9c90'
+        : isGreenhouse
+          ? checker
+            ? '#cfa074'
+            : '#c49468'
+          : checker
+            ? '#c49866'
+            : '#b88c5b';
     } else if (terrain === 'sunbeam') {
       base = checker ? '#f5e28c' : '#ebd473';
     } else if (terrain === 'water') {
-      base = checker ? '#5caeb8' : '#51a2ad';
+      base = isWinter ? (checker ? '#4d8ca6' : '#438099') : checker ? '#5caeb8' : '#51a2ad';
+    } else if (terrain === 'ice') {
+      base = checker ? '#a9e2f5' : '#96d7ee';
     } else if (terrain === 'bridge') {
       base = checker ? '#bf8d5a' : '#b2804e';
     } else if (terrain === 'lava') {
@@ -635,13 +657,17 @@ export class CraftTextureLibrary {
         const g = ctx.createRadialGradient(px, py, 4, px, py, pr);
         g.addColorStop(
           0,
-          isAutumn
+          isWinter
             ? i % 2 === 0
-              ? 'rgba(244, 224, 168, 0.11)'
-              : 'rgba(156, 102, 46, 0.06)'
-            : i % 2 === 0
-              ? 'rgba(228, 240, 180, 0.11)'
-              : 'rgba(78, 114, 58, 0.06)'
+              ? 'rgba(255, 255, 255, 0.24)'
+              : 'rgba(130, 174, 206, 0.10)'
+            : isAutumn
+              ? i % 2 === 0
+                ? 'rgba(244, 224, 168, 0.11)'
+                : 'rgba(156, 102, 46, 0.06)'
+              : i % 2 === 0
+                ? 'rgba(228, 240, 180, 0.11)'
+                : 'rgba(78, 114, 58, 0.06)'
         );
         g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g;
@@ -650,18 +676,27 @@ export class CraftTextureLibrary {
         ctx.fill();
       }
 
-      // Whisper-soft grass wisps (subtle paper craft texture, zero busy clutter)
+      // Whisper-soft grass wisps or frosted snow drifts (subtle paper craft texture, zero busy clutter)
       ctx.lineCap = 'round';
-      ctx.strokeStyle = isAutumn ? 'rgba(120, 82, 36, 0.2)' : 'rgba(66, 98, 46, 0.19)';
+      ctx.strokeStyle = isWinter
+        ? 'rgba(128, 166, 194, 0.28)'
+        : isAutumn
+          ? 'rgba(120, 82, 36, 0.2)'
+          : 'rgba(66, 98, 46, 0.19)';
       ctx.lineWidth = 1.8;
       for (let i = 0; i < 3; i++) {
         const bx = 42 + rng() * (s - 84);
         const by = 42 + rng() * (s - 84);
         ctx.beginPath();
-        ctx.moveTo(bx - 4, by + 4);
-        ctx.quadraticCurveTo(bx - 6, by, bx - 7, by - 5);
-        ctx.moveTo(bx + 1, by + 4);
-        ctx.quadraticCurveTo(bx + 2, by - 1, bx + 3, by - 6);
+        if (isWinter) {
+          ctx.moveTo(bx - 12, by);
+          ctx.quadraticCurveTo(bx, by - 5, bx + 12, by + 1);
+        } else {
+          ctx.moveTo(bx - 4, by + 4);
+          ctx.quadraticCurveTo(bx - 6, by, bx - 7, by - 5);
+          ctx.moveTo(bx + 1, by + 4);
+          ctx.quadraticCurveTo(bx + 2, by - 1, bx + 3, by - 6);
+        }
         ctx.stroke();
       }
 
@@ -677,6 +712,18 @@ export class CraftTextureLibrary {
         ctx.ellipse(0, 0, 7, 3.2, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+      } else if (isWinter && checker) {
+        // Gentle winter pine needle sprig or snow-sparkle star
+        const sx = 64 + rng() * 128;
+        const sy = 64 + rng() * 128;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 6);
+        ctx.lineTo(sx + 2.5, sy);
+        ctx.lineTo(sx, sy + 6);
+        ctx.lineTo(sx - 2.5, sy);
+        ctx.closePath();
+        ctx.fill();
       }
     } else if (terrain === 'soil') {
       // Soft tilled garden furrows with warm watercolor wash & pebbles
@@ -979,13 +1026,60 @@ export class CraftTextureLibrary {
       ctx.beginPath();
       ctx.arc(s * 0.5, s * 0.5, s * 0.35, 0, Math.PI * 2);
       ctx.stroke();
+    } else if (terrain === 'ice') {
+      // Shimmering Winter Glaze Ice with diagonal specular streaks & delicate snow-frost corners!
+      const ig = ctx.createLinearGradient(0, 0, s, s);
+      ig.addColorStop(0, 'rgba(235, 250, 255, 0.72)');
+      ig.addColorStop(0.5, 'rgba(155, 220, 246, 0.25)');
+      ig.addColorStop(1, 'rgba(84, 168, 212, 0.35)');
+      ctx.fillStyle = ig;
+      ctx.fillRect(0, 0, s, s);
+
+      // Diagonal glossy mirror-sheen ribbons
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+      ctx.beginPath();
+      ctx.moveTo(22, 0);
+      ctx.lineTo(74, 0);
+      ctx.lineTo(0, 74);
+      ctx.lineTo(0, 22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(148, 0);
+      ctx.lineTo(188, 0);
+      ctx.lineTo(0, 188);
+      ctx.lineTo(0, 148);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      // Delicate crystalline hairline cracks & sparkle diamond
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.76)';
+      ctx.lineWidth = 2.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(s * 0.22, s * 0.34);
+      ctx.lineTo(s * 0.48, s * 0.46);
+      ctx.lineTo(s * 0.74, s * 0.38);
+      ctx.moveTo(s * 0.48, s * 0.46);
+      ctx.lineTo(s * 0.62, s * 0.74);
+      ctx.stroke();
     }
 
     // Crisp warm hand-inked paper tile bevel border
-    ctx.strokeStyle = terrain === 'lava' ? 'rgba(255, 190, 80, 0.45)' : 'rgba(72, 42, 18, 0.34)';
+    ctx.strokeStyle =
+      terrain === 'lava'
+        ? 'rgba(255, 190, 80, 0.45)'
+        : terrain === 'ice'
+          ? 'rgba(92, 162, 198, 0.55)'
+          : 'rgba(72, 42, 18, 0.34)';
     ctx.lineWidth = 6;
     ctx.strokeRect(3, 3, s - 6, s - 6);
-    ctx.strokeStyle = terrain === 'water' ? 'rgba(220, 252, 255, 0.35)' : 'rgba(255, 250, 230, 0.34)';
+    ctx.strokeStyle =
+      terrain === 'water' || terrain === 'ice'
+        ? 'rgba(235, 252, 255, 0.62)'
+        : 'rgba(255, 250, 230, 0.34)';
     ctx.lineWidth = 3;
     ctx.strokeRect(8, 8, s - 16, s - 16);
 
@@ -998,29 +1092,40 @@ export class CraftTextureLibrary {
     const { canvas, ctx } = makeCanvas(w, h);
     const isAutumn = theme === 'autumn';
     const isGreenhouse = theme === 'greenhouse';
+    const isWinter = theme === 'winter';
 
     // Rich layered earth-and-stone Paper Mario terrace cliff face
     const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, isAutumn ? '#a86f38' : '#a87442');
-    grad.addColorStop(0.5, '#8c5a30');
-    grad.addColorStop(1, '#683f1d');
+    grad.addColorStop(0, isWinter ? '#7d8fa3' : isAutumn ? '#a86f38' : '#a87442');
+    grad.addColorStop(0.5, isWinter ? '#617285' : '#8c5a30');
+    grad.addColorStop(1, isWinter ? '#465464' : '#683f1d');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
 
     // Warm hand-painted geological strata bands
-    ctx.fillStyle = 'rgba(54, 28, 12, 0.22)';
+    ctx.fillStyle = isWinter ? 'rgba(30, 46, 66, 0.25)' : 'rgba(54, 28, 12, 0.22)';
     ctx.fillRect(0, 74, w, 16);
     ctx.fillRect(0, 152, w, 20);
     ctx.fillRect(0, 214, w, 14);
 
     // Chunky hand-inked embedded river boulders & cobblestones
-    const rng = mulberry(isAutumn ? 7743 : isGreenhouse ? 7742 : 7741);
+    const rng = mulberry(isWinter ? 7744 : isAutumn ? 7743 : isGreenhouse ? 7742 : 7741);
     for (let i = 0; i < 16; i++) {
       const rx = 20 + rng() * 216;
       const ry = 54 + rng() * 176;
       const rw = 14 + rng() * 16;
       const rh = 9 + rng() * 9;
-      ctx.fillStyle = i % 3 === 0 ? '#c4b89c' : i % 3 === 1 ? '#998870' : '#7d5b3e';
+      ctx.fillStyle = isWinter
+        ? i % 3 === 0
+          ? '#c7d8e6'
+          : i % 3 === 1
+            ? '#8fa2b5'
+            : '#6c7e92'
+        : i % 3 === 0
+          ? '#c4b89c'
+          : i % 3 === 1
+            ? '#998870'
+            : '#7d5b3e';
       ctx.beginPath();
       ctx.ellipse(rx, ry, rw, rh, (rng() - 0.5) * 0.4, 0, Math.PI * 2);
       ctx.fill();
@@ -1029,28 +1134,32 @@ export class CraftTextureLibrary {
       ctx.beginPath();
       ctx.ellipse(rx - rw * 0.16, ry - rh * 0.25, rw * 0.55, rh * 0.35, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(78, 48, 24, 0.72)';
+      ctx.strokeStyle = isWinter ? 'rgba(42, 60, 82, 0.72)' : 'rgba(78, 48, 24, 0.72)';
       ctx.lineWidth = 2.4;
       ctx.beginPath();
       ctx.ellipse(rx, ry, rw, rh, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    // Dangling painted soil root tendrils tucked under the grassy overhang
-    ctx.strokeStyle = 'rgba(94, 56, 26, 0.78)';
-    ctx.lineWidth = 2.8;
+    // Dangling painted soil root tendrils or icicles tucked under overhang
+    ctx.strokeStyle = isWinter ? 'rgba(210, 242, 255, 0.85)' : 'rgba(94, 56, 26, 0.78)';
+    ctx.lineWidth = isWinter ? 3.8 : 2.8;
     ctx.lineCap = 'round';
     for (let i = 0; i < 6; i++) {
       const rx = 22 + i * 42 + rng() * 10;
       ctx.beginPath();
       ctx.moveTo(rx, 32);
-      ctx.quadraticCurveTo(rx + (i % 2 === 0 ? 8 : -8), 54, rx + (i % 2 === 0 ? -4 : 6), 72 + rng() * 22);
+      if (isWinter) {
+        ctx.lineTo(rx, 58 + rng() * 24);
+      } else {
+        ctx.quadraticCurveTo(rx + (i % 2 === 0 ? 8 : -8), 54, rx + (i % 2 === 0 ? -4 : 6), 72 + rng() * 22);
+      }
       ctx.stroke();
     }
 
-    // Harmonized subtle storybook watercolor scalloped turf overhang lip along top edge
-    const turfTop = isAutumn ? '#cfa85c' : isGreenhouse ? '#86b064' : '#96bc62';
-    const turfBot = isAutumn ? '#ad823a' : isGreenhouse ? '#648f48' : '#729947';
+    // Harmonized subtle storybook watercolor scalloped turf/snow overhang lip along top edge
+    const turfTop = isWinter ? '#f4f9fc' : isAutumn ? '#cfa85c' : isGreenhouse ? '#86b064' : '#96bc62';
+    const turfBot = isWinter ? '#c4dced' : isAutumn ? '#ad823a' : isGreenhouse ? '#648f48' : '#729947';
     const turfGrad = ctx.createLinearGradient(0, 0, 0, 44);
     turfGrad.addColorStop(0, turfTop);
     turfGrad.addColorStop(1, turfBot);
@@ -1532,6 +1641,15 @@ export class CraftTextureLibrary {
         accent: '#c7563a',
         accent2: '#f7ecc0',
       },
+      winter_pine: {
+        bg: '#4e7d6c',
+        dark: '#355c50',
+        mid: '#649482',
+        light: '#e8f4fa',
+        ink: 'rgba(34, 58, 66, 0.62)',
+        accent: '#ffffff',
+        accent2: '#c94a3c',
+      },
     };
     const p = palettes[variant];
     const grad = ctx.createLinearGradient(0, 0, 0, s);
@@ -1586,7 +1704,7 @@ export class CraftTextureLibrary {
         ctx.arc(ax, ay, 3.4, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        // Painted apples, oranges, or warm autumn berries/leaves
+        // Painted apples, oranges, holly berries, or warm autumn berries/leaves
         ctx.fillStyle = i % 3 === 0 ? p.accent2 : p.accent;
         ctx.strokeStyle = p.ink;
         ctx.lineWidth = 1.9;
@@ -1610,17 +1728,22 @@ export class CraftTextureLibrary {
     const { canvas, ctx } = makeCanvas(s, s);
     const isAutumn = theme === 'autumn';
     const isGreenhouse = theme === 'greenhouse';
+    const isWinter = theme === 'winter';
 
-    const topCol = isAutumn
-      ? ['#deb062', '#cf8948', '#b86842'][layerIdx % 3]
-      : isGreenhouse
-        ? ['#8db872', '#78a664', '#648f58'][layerIdx % 3]
-        : ['#a8c978', '#8eb668', '#78a05c'][layerIdx % 3];
-    const botCol = isAutumn
-      ? ['#bc843c', '#a35d32', '#87462c'][layerIdx % 3]
-      : isGreenhouse
-        ? ['#659150', '#547c46', '#44683c'][layerIdx % 3]
-        : ['#7ca454', '#678e48', '#567a3e'][layerIdx % 3];
+    const topCol = isWinter
+      ? ['#eef6fa', '#d8e9f2', '#c0d7e6'][layerIdx % 3]
+      : isAutumn
+        ? ['#deb062', '#cf8948', '#b86842'][layerIdx % 3]
+        : isGreenhouse
+          ? ['#8db872', '#78a664', '#648f58'][layerIdx % 3]
+          : ['#a8c978', '#8eb668', '#78a05c'][layerIdx % 3];
+    const botCol = isWinter
+      ? ['#9cbcd1', '#7ea3bd', '#658aa6'][layerIdx % 3]
+      : isAutumn
+        ? ['#bc843c', '#a35d32', '#87462c'][layerIdx % 3]
+        : isGreenhouse
+          ? ['#659150', '#547c46', '#44683c'][layerIdx % 3]
+          : ['#7ca454', '#678e48', '#567a3e'][layerIdx % 3];
 
     const grad = ctx.createLinearGradient(0, 0, 0, s);
     grad.addColorStop(0, topCol);
@@ -1629,7 +1752,7 @@ export class CraftTextureLibrary {
     ctx.fillRect(0, 0, s, s);
 
     // Sweeping sunlit watercolor contour washes across the hillside
-    ctx.fillStyle = 'rgba(255, 250, 214, 0.14)';
+    ctx.fillStyle = isWinter ? 'rgba(255, 255, 255, 0.24)' : 'rgba(255, 250, 214, 0.14)';
     for (let i = 0; i < 4; i++) {
       const y = 32 + i * 58;
       ctx.beginPath();
@@ -1642,23 +1765,27 @@ export class CraftTextureLibrary {
     }
 
     const rng = mulberry(theme.charCodeAt(0) * 55 + layerIdx * 97);
-    // Soft painted meadow wildflowers / autumn orchard specks
+    // Soft painted meadow wildflowers / autumn orchard specks / winter snowfall sparkles
     for (let i = 0; i < 20; i++) {
       const fx = 16 + rng() * 224;
       const fy = 20 + rng() * 216;
-      ctx.fillStyle = isAutumn
+      ctx.fillStyle = isWinter
         ? i % 2 === 0
-          ? 'rgba(245, 214, 128, 0.78)'
-          : 'rgba(198, 92, 62, 0.72)'
-        : isGreenhouse
+          ? 'rgba(255, 255, 255, 0.82)'
+          : 'rgba(182, 224, 248, 0.72)'
+        : isAutumn
           ? i % 2 === 0
-            ? 'rgba(252, 244, 194, 0.75)'
-            : 'rgba(202, 232, 168, 0.72)'
-          : i % 3 === 0
-            ? 'rgba(255, 252, 240, 0.78)'
-            : i % 3 === 1
-              ? 'rgba(245, 216, 132, 0.75)'
-              : 'rgba(238, 186, 200, 0.75)';
+            ? 'rgba(245, 214, 128, 0.78)'
+            : 'rgba(198, 92, 62, 0.72)'
+          : isGreenhouse
+            ? i % 2 === 0
+              ? 'rgba(252, 244, 194, 0.75)'
+              : 'rgba(202, 232, 168, 0.72)'
+            : i % 3 === 0
+              ? 'rgba(255, 252, 240, 0.78)'
+              : i % 3 === 1
+                ? 'rgba(245, 216, 132, 0.75)'
+                : 'rgba(238, 186, 200, 0.75)';
       ctx.beginPath();
       ctx.arc(fx, fy, 3.6 + rng() * 2.2, 0, Math.PI * 2);
       ctx.fill();
@@ -1945,6 +2072,7 @@ export interface StandeeStatusOverlay {
   shield: THREE.Group;
   boosted: THREE.Group;
   overwatch: THREE.Group;
+  frost: THREE.Group;
   lowHp: THREE.Group;
   bandAid: THREE.Group;
   enragedAura: THREE.Group;
@@ -1963,6 +2091,7 @@ export interface PaperStandeeRig {
   promoTrimMesh: THREE.Mesh;
   promoTrimMat: THREE.MeshStandardMaterial;
   statusOverlay: StandeeStatusOverlay;
+  equippedWeapon?: EquippedWeaponPropRig;
   height: number;
   currentSpriteKey: string;
   setSpriteKey: (spriteKey: string) => void;
@@ -1974,8 +2103,9 @@ export interface PaperStandeeRig {
 /**
  * Builds a genuine Paper Mario 3D thick cardstock standee:
  * - Front watercolor sprite plane + 3 inner kraft-cardstock thickness slices + mirrored back plane
+ * - Visually equipped 3D Paper Mario die-cut weapon prop mounted right onto player heroes!
  * - Dynamic variant sprite swapper (_hit / _lowhp / _enraged) with zero texture leaks
- * - Universal 3D paper-craft status effect overlays (Burn, Rooted, Acid, Feared, Shield, Boosted, Overwatch, Low-HP, Boss Phase 2 Aura)
+ * - Universal 3D paper-craft status effect overlays (Burn, Rooted, Acid, Feared, Shield, Boosted, Overwatch, Frost, Low-HP, Boss Phase 2 Aura)
  * - Slotted wooden/cardboard pedestal base with Promotion Tier trim (Ripe Bronze / Heirloom Gold) & animated selection ring
  */
 export function createPaperStandeeRig(
@@ -2134,6 +2264,14 @@ export function createPaperStandeeRig(
 
   flipGroup.add(cardStack);
 
+  // Visually Equipped 3D Paper Mario Die-Cut Weapon Prop for every playable hero!
+  let equippedWeapon: EquippedWeaponPropRig | undefined;
+  if (team === 'player' && visualKind !== 'seed_cart') {
+    equippedWeapon = createEquippedWeaponRig('blaster', 1);
+    equippedWeapon.root.position.set(baseRadius * 0.92, baseHeight + height * 0.46, 0.088);
+    flipGroup.add(equippedWeapon.root);
+  }
+
   // ===== Universal 3D Paper-Craft Status & State Overlays =====
   const statusRoot = new THREE.Group();
   tiltGroup.add(statusRoot);
@@ -2271,6 +2409,33 @@ export function createPaperStandeeRig(
   overwatch.add(owRing, owH, owV);
   statusRoot.add(overwatch);
 
+  // 7B. FROST: Chilly translucent cyan crystalline icicle shards ringing feet!
+  const frost = new THREE.Group();
+  frost.visible = false;
+  const frostMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: '#a3ebff',
+      emissive: '#3fa9d9',
+      emissiveIntensity: 0.42,
+      transparent: true,
+      opacity: 0.78,
+      roughness: 0.18,
+    })
+  );
+  const iceShardGeo = trackGeo(new THREE.ConeGeometry(0.085, 0.38, 5));
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.3;
+    const shard = new THREE.Mesh(iceShardGeo, frostMat);
+    shard.position.set(
+      Math.cos(a) * (baseRadius * 0.88),
+      baseHeight + 0.18,
+      Math.sin(a) * (baseRadius * 0.62) + 0.08
+    );
+    shard.rotation.z = (i % 2 === 0 ? 1 : -1) * 0.22;
+    frost.add(shard);
+  }
+  statusRoot.add(frost);
+
   // 8. LOW-HP: 2 animated comic cyan sweat droplets + toggleable 3D paper Band-Aid!
   const lowHp = new THREE.Group();
   lowHp.visible = false;
@@ -2340,6 +2505,7 @@ export function createPaperStandeeRig(
   };
 
   const dispose = () => {
+    equippedWeapon?.dispose();
     baseGeo.dispose();
     baseMat.dispose();
     promoTrimGeo.dispose();
@@ -2379,10 +2545,12 @@ export function createPaperStandeeRig(
       shield,
       boosted,
       overwatch,
+      frost,
       lowHp,
       bandAid,
       enragedAura,
     },
+    equippedWeapon,
     height,
     get currentSpriteKey() {
       return currentSpriteKey;

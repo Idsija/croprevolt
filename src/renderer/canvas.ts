@@ -2280,20 +2280,31 @@ export class PaperCraftRenderer {
 
     const isGreenhouse = battle.theme === 'greenhouse';
     const isAutumn = battle.theme === 'autumn';
-    let fill = isAutumn
+    const isWinter = battle.theme === 'winter';
+    let fill = isWinter
       ? checker
-        ? '#c4a046'
-        : '#b9943d'
-      : isGreenhouse
+        ? '#dce8f0'
+        : '#d0e0ea'
+      : isAutumn
         ? checker
-          ? '#7eb353'
-          : '#73a849'
-        : checker
-          ? '#8fb649'
-          : '#85ac41';
-    let topEdgeCol = isAutumn ? '#94702a' : isGreenhouse ? '#5c8c38' : '#6f9333';
+          ? '#c4a046'
+          : '#b9943d'
+        : isGreenhouse
+          ? checker
+            ? '#7eb353'
+            : '#73a849'
+          : checker
+            ? '#8fb649'
+            : '#85ac41';
+    let topEdgeCol = isWinter
+      ? '#9cb8cc'
+      : isAutumn
+        ? '#94702a'
+        : isGreenhouse
+          ? '#5c8c38'
+          : '#6f9333';
     if (tile.terrain === 'soil') {
-      fill = checker ? '#bf7d46' : '#b5743f';
+      fill = isWinter ? (checker ? '#8c7e74' : '#7f7268') : checker ? '#bf7d46' : '#b5743f';
       topEdgeCol = '#8a552a';
     } else if (tile.terrain === 'mud') {
       fill = checker ? '#75563e' : '#6a4d37';
@@ -2305,20 +2316,27 @@ export class PaperCraftRenderer {
       fill = checker ? '#f3cb5b' : '#e6b640';
       topEdgeCol = '#b58420';
     } else if (tile.terrain === 'barn_floor') {
-      fill = isGreenhouse
+      fill = isWinter
         ? checker
-          ? '#cf8d5d'
-          : '#c38151'
-        : checker
-          ? '#bc8753'
-          : '#b27d4a';
+          ? '#b8a99e'
+          : '#ab9c90'
+        : isGreenhouse
+          ? checker
+            ? '#cf8d5d'
+            : '#c38151'
+          : checker
+            ? '#bc8753'
+            : '#b27d4a';
       topEdgeCol = isGreenhouse ? '#9c5b31' : '#83562d';
     } else if (tile.terrain === 'sunbeam') {
       fill = checker ? '#f7dc6f' : '#f2cf57';
       topEdgeCol = '#c4961a';
     } else if (tile.terrain === 'water') {
-      fill = checker ? '#2d95bd' : '#2587ad';
+      fill = isWinter ? (checker ? '#4d8ca6' : '#438099') : checker ? '#2d95bd' : '#2587ad';
       topEdgeCol = '#195f7c';
+    } else if (tile.terrain === 'ice') {
+      fill = checker ? '#a9e2f5' : '#96d7ee';
+      topEdgeCol = '#58a8c9';
     } else if (tile.terrain === 'bridge') {
       fill = checker ? '#c68a4d' : '#b87d43';
       topEdgeCol = '#75441c';

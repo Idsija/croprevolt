@@ -24,6 +24,7 @@ import {
   startPhase,
   swapPrepHeroPositions,
   swapPrepHeroWithBench,
+  switchActiveWeapon,
   undoLastAction,
 } from '../engine/battle';
 import {
@@ -43,6 +44,7 @@ import {
   applyGraftToHero,
   applyTravelCardMove,
   buyMarketOffer,
+  claimLoreReward,
   claimRecruitReward,
   claimRelicReward,
   claimShrineBlessing,
@@ -54,10 +56,14 @@ import {
   createNewRun,
   equipHeroWeapon,
   finishRewardsAndReturnToMap,
+  forgeHeroWeapon,
   leaveEndlessBonusRoom,
+  leaveForgeNode,
   loadMetaProgress,
   loadSavedRun,
   openEndlessBonusRoom,
+  openForgeNode,
+  openLoreNode,
   openShrineNode,
   openVaultNode,
   purchaseHeroUnlock,
@@ -68,6 +74,7 @@ import {
   saveRun,
   setGuidedHintsEnabled,
   setHeroCoopOwner,
+  setHeroDefaultWeaponSlot,
   toggleHeroActiveSquad,
   unlockHeroPerk,
 } from '../engine/run';
@@ -79,6 +86,8 @@ import type {
   MetaProgress,
   RunState,
   SeasonId,
+  WeaponForgeBranch,
+  WeaponSlot,
 } from '../engine/types';
 import type { InteractionMode } from '../renderer/canvas';
 import type { BoardViewMode } from '../renderer/iso';
@@ -243,9 +252,13 @@ export function syncAdaptiveMusic(): void {
       theme = 'victory';
     } else if (b.objective === 'boss') {
       theme = (b.bossPhase ?? 1) >= 2 ? 'boss_enraged' : 'boss';
+    } else if (b.theme === 'winter' || b.seasonId === 'winter') {
+      theme = 'winter';
     } else {
       theme = 'battle';
     }
+  } else if (gameStore.run.seasonId === 'winter' || gameStore.run.act === 3) {
+    theme = 'winter';
   } else {
     theme = 'overworld';
   }
@@ -721,6 +734,20 @@ export function enterSeasonNode(nodeId: string, travelCardId?: string): void {
     return;
   }
 
+  if (node.type === 'lore') {
+    openLoreNode(run, nodeId, gameStore.meta);
+    saveRun(run);
+    syncAdaptiveMusic();
+    return;
+  }
+
+  if (node.type === 'forge') {
+    openForgeNode(run, nodeId);
+    saveRun(run);
+    syncAdaptiveMusic();
+    return;
+  }
+
   if (node.type === 'vault' || node.type === 'shop' || node.type === 'armory') {
     openVaultNode(run, nodeId);
     saveRun(run);
@@ -771,6 +798,7 @@ export function enterSeasonNode(nodeId: string, travelCardId?: string): void {
       heroOwnerByUid: run.heroOwnerByUid,
     }
   );
+  battle.seasonId = run.seasonId ?? ACTS[run.act]?.id ?? 'spring';
   // Consume one-battle Travel Card / Shrine boost once battle starts
   run.nextBattleBuff = null;
 
@@ -1793,20 +1821,74 @@ export function equipWeapon(heroUid: string, weaponId: string): boolean {
   if (!gameStore.run) return false;
   const ok = equipHeroWeapon(gameStore.run, heroUid, weaponId);
   if (ok) {
-    // Also update live battle unit weapon if currently in Pre-Battle Prep Phase!
-    const b = gameStore.battle;
-    if (b?.prepPhase) {
-      const hero = gameStore.run.roster.find((h) => h.uid === heroUid);
-      const unit = b.units.find((u) => u.rosterUid === heroUid);
-      if (hero && unit) {
-        unit.weapon = {
-          ...hero.weapon,
-          appliesStatus: hero.weapon.appliesStatus ? { ...hero.weapon.appliesStatus } : undefined,
-        };
-      }
-    }
+    syncPrepBattleUnitFromHero(heroUid);
     sfx.click();
     saveRun(gameStore.run);
+  }
+  return ok;
+}
+
+export function setDefaultWeaponSlot(heroUid: string, slot: WeaponSlot): boolean {
+  if (!gameStore.run) return false;
+  const ok = setHeroDefaultWeaponSlot(gameStore.run, heroUid, slot);
+  if (ok) {
+    syncPrepBattleUnitFromHero(heroUid);
+    sfx.click();
+    saveRun(gameStore.run);
+  }
+  return ok;
+}
+
+export function forgeWeapon(
+  heroUid: string,
+  slot: WeaponSlot,
+  branch: WeaponForgeBranch,
+  useVoucher = true
+): boolean {
+  if (!gameStore.run) return false;
+  const ok = forgeHeroWeapon(gameStore.run, heroUid, slot, branch, useVoucher);
+  if (ok) {
+    syncPrepBattleUnitFromHero(heroUid);
+    sfx.forgeClang();
+    saveRun(gameStore.run);
+  }
+  return ok;
+}
+
+/**
+ * In-Battle Free Dual-Weapon Swap ([W] or Action Dock toggle):
+ * Instantly flips the selected hero's visually equipped 3D weapon between Ranged Primary & Melee/Gimmick Secondary!
+ */
+export function toggleActiveWeapon(slot?: WeaponSlot): boolean {
+  const b = gameStore.battle;
+  const uid = gameStore.selectedUnitId;
+  if (!b || !uid || b.status !== 'ongoing' || b.phase !== 'player' || gameStore.enemyTurnRunning) {
+    return false;
+  }
+  if (b.prepPhase) {
+    const unit = getUnitById(b, uid);
+    if (!unit?.rosterUid) return false;
+    const nextSlot: WeaponSlot = slot ?? ((unit.activeWeaponSlot ?? 'primary') === 'primary' ? 'secondary' : 'primary');
+    const swapped = setDefaultWeaponSlot(unit.rosterUid, nextSlot);
+    if (swapped) sfx.weaponSwap();
+    return swapped;
+  }
+  const prevPreview = gameStore.previewTile ? { ...gameStore.previewTile } : null;
+  const ok = switchActiveWeapon(b, uid, slot);
+  if (ok) {
+    if (gameStore.mode === 'attack') {
+      const unit = getUnitById(b, uid);
+      if (unit && prevPreview && forecastAttack(b, unit, prevPreview).canAttack) {
+        gameStore.previewTile = prevPreview;
+      } else {
+        const targets = getAttackTargetsForSelected();
+        gameStore.previewTile = targets[0] ? { ...targets[0].pos } : null;
+      }
+    } else {
+      gameStore.previewTile = null;
+    }
+    sfx.weaponSwap();
+    flushBattleEvents();
   }
   return ok;
 }
@@ -1864,6 +1946,19 @@ function syncPrepBattleUnitFromHero(heroUid: string): void {
     unit.hp = Math.min(hero.maxHp, hero.hp);
     unit.moveRange = hero.moveRange;
     unit.dashDamage = hero.dashDamage;
+    unit.activeWeaponSlot = hero.activeWeaponSlot ?? 'primary';
+    if (hero.primaryWeapon) {
+      unit.primaryWeapon = {
+        ...hero.primaryWeapon,
+        appliesStatus: hero.primaryWeapon.appliesStatus ? { ...hero.primaryWeapon.appliesStatus } : undefined,
+      };
+    }
+    if (hero.secondaryWeapon) {
+      unit.secondaryWeapon = {
+        ...hero.secondaryWeapon,
+        appliesStatus: hero.secondaryWeapon.appliesStatus ? { ...hero.secondaryWeapon.appliesStatus } : undefined,
+      };
+    }
     unit.weapon = {
       ...hero.weapon,
       appliesStatus: hero.weapon.appliesStatus ? { ...hero.weapon.appliesStatus } : undefined,
@@ -1903,6 +1998,35 @@ export function pickShrineBlessing(choice: 'heal' | 'blessing' | 'seeds'): boole
     syncAdaptiveMusic();
   }
   return ok;
+}
+
+export function pickLoreReward(choice: 'sp' | 'voucher' | 'seeds'): boolean {
+  if (!gameStore.run) return false;
+  const ok = claimLoreReward(gameStore.run, choice);
+  if (ok) {
+    sfx.rescue();
+    saveRun(gameStore.run);
+    syncAdaptiveMusic();
+  }
+  return ok;
+}
+
+export function exitForgeStop(): void {
+  if (!gameStore.run) return;
+  sfx.click();
+  leaveForgeNode(gameStore.run);
+  saveRun(gameStore.run);
+  syncAdaptiveMusic();
+}
+
+export function dismissActIntro(seasonId: SeasonId): void {
+  if (!gameStore.run) return;
+  if (!Array.isArray(gameStore.run.seenActIntros)) gameStore.run.seenActIntros = [];
+  if (!gameStore.run.seenActIntros.includes(seasonId)) {
+    gameStore.run.seenActIntros.push(seasonId);
+    saveRun(gameStore.run);
+  }
+  sfx.click();
 }
 
 export function purchaseMarketOffer(offerId: string, targetHeroUid?: string): boolean {

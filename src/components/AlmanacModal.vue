@@ -2,15 +2,23 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { ENEMY_BLUEPRINTS } from '../data/enemies';
 import { GRAFT_REGISTRY } from '../data/grafts';
+import {
+  FACTION_DOSSIERS,
+  HERO_LORE_QUOTES,
+  SEASON_WEATHER_INFO,
+  WORLD_LORE_CHRONICLES,
+} from '../data/lore';
 import { HERO_UNLOCK_CATALOG, PRODUCE_BLUEPRINTS, STARTER_BLUEPRINT_IDS } from '../data/produce';
 import { RELIC_REGISTRY } from '../data/relics';
 import { getHeroSkillTree } from '../data/skills';
-import { ALT_WEAPONS, getSpeciesWeapons } from '../data/weapons';
+import { ALT_WEAPONS, getDualWeaponKit, getSpeciesWeapons } from '../data/weapons';
 import { activeStreak, loadDailyState } from '../engine/daily';
 import { ACHIEVEMENTS, loadHistory } from '../engine/history';
 import { getFamilyLabel } from '../engine/hooks';
 import { dailyKeyFor } from '../engine/score';
+import type { SeasonId, WeaponGimmickKind } from '../engine/types';
 import { hasVariantSprite, resolveVariantSpriteKey, type SpriteVariantKind } from '../renderer3d/textures';
+import { getWeaponCutoutDataUrl } from '../renderer3d/weaponProps';
 import { gameStore } from '../stores/gameStore';
 import CraftIcon from './CraftIcon.vue';
 
@@ -25,13 +33,34 @@ function onAlmanacKeyDown(e: KeyboardEvent): void {
 onMounted(() => window.addEventListener('keydown', onAlmanacKeyDown));
 onBeforeUnmount(() => window.removeEventListener('keydown', onAlmanacKeyDown));
 
-type AlmanacTab = 'heroes' | 'enemies' | 'weapons' | 'relics' | 'records';
+type AlmanacTab = 'heroes' | 'enemies' | 'weapons' | 'lore' | 'relics' | 'records';
 type HeroFilter = 'all' | 'starters' | 'barnyard' | 'root' | 'vine' | 'fruit';
 type EnemyFilter = 'all' | 'contraptions' | 'farmhands' | 'bosses';
 
-const CONTRAPTION_IDS = new Set(['barrow', 'blower', 'sapper', 'mower', 'kettlebot', 'tractor', 'harvester']);
+const CONTRAPTION_IDS = new Set([
+  'barrow',
+  'blower',
+  'sapper',
+  'mower',
+  'kettlebot',
+  'snowplow',
+  'frostblower',
+  'tractor',
+  'harvester',
+  'frostboss',
+]);
 const UNLOCK_COST_MAP = Object.fromEntries(HERO_UNLOCK_CATALOG.map((e) => [e.id, e.cost]));
 const STARTER_SET = new Set<string>(STARTER_BLUEPRINT_IDS);
+
+const GIMMICK_BADGE: Record<WeaponGimmickKind, string> = {
+  vacuum_pull: '🌀 Vacuum Pull',
+  hammer_cleave: '🔨 Cleave Sweep',
+  boomerang: '↪ Curves Cover',
+  grapple_yank: '🪝 Grapple Yank',
+  cone_bellows: '🔥 Bellows Cone',
+  sentry_pop: '⚡ Popper Burst',
+  lunge_skewer: '⚔️ Rapier Lunge',
+};
 
 const history = loadHistory();
 const dailyStreak = loadDailyState().streak;
@@ -55,10 +84,18 @@ const records = [
 const activeTab = ref<AlmanacTab>('heroes');
 const heroFilter = ref<HeroFilter>('all');
 const enemyFilter = ref<EnemyFilter>('all');
+const loreSeasonFilter = ref<'all' | SeasonId>('all');
 const heroesList = Object.values(PRODUCE_BLUEPRINTS);
 const enemiesList = Object.values(ENEMY_BLUEPRINTS);
 const relicsList = Object.values(RELIC_REGISTRY);
 const graftsList = Object.values(GRAFT_REGISTRY);
+const weatherList = Object.values(SEASON_WEATHER_INFO);
+const discoveredLoreSet = computed(() => new Set<string>(gameStore.meta.discoveredLoreIds ?? []));
+const filteredChronicles = computed(() =>
+  loreSeasonFilter.value === 'all'
+    ? WORLD_LORE_CHRONICLES
+    : WORLD_LORE_CHRONICLES.filter((c) => c.seasonId === loreSeasonFilter.value)
+);
 
 const unlockedHeroSet = computed(
   () => new Set<string>([...STARTER_BLUEPRINT_IDS, ...(gameStore.meta.unlockedHeroIds ?? [])])
@@ -143,6 +180,8 @@ const activeSpriteSrc = computed(() => {
 });
 
 const selectedHeroWeapons = computed(() => getSpeciesWeapons(selectedHero.value.species));
+const selectedHeroKit = computed(() => getDualWeaponKit(selectedHero.value.species));
+const selectedHeroQuote = computed(() => HERO_LORE_QUOTES[selectedHero.value.species] ?? '');
 const selectedHeroTree = computed(() => getHeroSkillTree(selectedHero.value.species));
 
 function selectHero(id: string): void {
@@ -191,7 +230,7 @@ const cardTransformStyle = computed(() => ({
       <header class="almanac-head">
         <div>
           <h2>📖 Storybook Field Almanac</h2>
-          <small>Inspect 3D-tiltable standee cards, live sprite expressions, Armory weapons &amp; relics</small>
+          <small>Inspect 3D standee cards, Dual Weapons, World Chronicles, Weather &amp; Relics</small>
         </div>
         <button class="paper-btn icon-only" aria-label="Close Almanac" @click="emit('close')">
           <CraftIcon name="close" :size="17" />
@@ -220,6 +259,13 @@ const cardTransformStyle = computed(() => ({
           @click="activeTab = 'weapons'"
         >
           ⚔️ Alt Weapons ({{ ALT_WEAPONS.length }})
+        </button>
+        <button
+          class="paper-btn tab-btn"
+          :class="{ gold: activeTab === 'lore' }"
+          @click="activeTab = 'lore'"
+        >
+          📜 World &amp; Lore ({{ discoveredLoreSet.size }}/{{ WORLD_LORE_CHRONICLES.length }})
         </button>
         <button
           class="paper-btn tab-btn"
@@ -365,6 +411,7 @@ const cardTransformStyle = computed(() => ({
                 🔒 Unlock in Greenhouse ({{ UNLOCK_COST_MAP[selectedHero.id] ?? 25 }} 🌱) or Barn Rescue
               </span>
             </div>
+            <p v-if="selectedHeroQuote" class="alm-hero-quote">{{ selectedHeroQuote }}</p>
             <p class="blurb">{{ selectedHero.blurb }}</p>
             <div class="stat-pills">
               <span class="paper-pill">❤️ {{ selectedHero.maxHp }} HP</span>
@@ -376,14 +423,44 @@ const cardTransformStyle = computed(() => ({
               <strong>🐾 Barnyard Passive</strong>
               <small>{{ selectedHero.coopPassive }}</small>
             </div>
-            <div class="info-box">
-              <strong>🎯 Base Weapon: {{ selectedHeroWeapons.base.name }}</strong>
-              <small>
-                {{ selectedHeroWeapons.base.damage }} DMG · Range {{ selectedHeroWeapons.base.minRange }}–{{ selectedHeroWeapons.base.maxRange }} ({{ selectedHeroWeapons.base.arc }}) — {{ selectedHeroWeapons.base.description }}
-              </small>
+            <div class="alm-dual-grid">
+              <div class="info-box alm-wpn-card primary">
+                <div class="alm-wpn-head">
+                  <img
+                    class="alm-wpn-art"
+                    :src="getWeaponCutoutDataUrl(selectedHeroKit.primary.visualKind ?? 'blaster', 1)"
+                    :alt="selectedHeroKit.primary.name"
+                  />
+                  <div>
+                    <span class="alm-slot-tag ranged">🎯 PRIMARY RANGED</span>
+                    <strong>{{ selectedHeroKit.primary.name }}</strong>
+                  </div>
+                </div>
+                <small>
+                  {{ selectedHeroKit.primary.damage }} DMG · R{{ selectedHeroKit.primary.minRange }}–{{ selectedHeroKit.primary.maxRange }} ({{ selectedHeroKit.primary.arc }}) — {{ selectedHeroKit.primary.description }}
+                </small>
+              </div>
+              <div class="info-box alm-wpn-card secondary">
+                <div class="alm-wpn-head">
+                  <img
+                    class="alm-wpn-art"
+                    :src="getWeaponCutoutDataUrl(selectedHeroKit.secondary.visualKind ?? 'hammer', 1)"
+                    :alt="selectedHeroKit.secondary.name"
+                  />
+                  <div>
+                    <span class="alm-slot-tag gimmick">
+                      {{ selectedHeroKit.secondary.gimmick ? GIMMICK_BADGE[selectedHeroKit.secondary.gimmick] : '🔨 SECONDARY' }}
+                    </span>
+                    <strong>{{ selectedHeroKit.secondary.name }}</strong>
+                  </div>
+                </div>
+                <small>
+                  {{ selectedHeroKit.secondary.damage }} DMG · R{{ selectedHeroKit.secondary.minRange }}–{{ selectedHeroKit.secondary.maxRange }} ({{ selectedHeroKit.secondary.arc }}) — {{ selectedHeroKit.secondary.description }}
+                </small>
+              </div>
             </div>
             <div class="info-box alt-wpn">
-              <strong>⚔️ Armory Alt Weapon: {{ selectedHeroWeapons.alt.weapon.name }}</strong>
+              <strong>⚒️ Armory Alt Primary: {{ selectedHeroWeapons.alt.weapon.name }}</strong>
               <small>
                 {{ selectedHeroWeapons.alt.weapon.damage }} DMG · Range {{ selectedHeroWeapons.alt.weapon.minRange }}–{{ selectedHeroWeapons.alt.weapon.maxRange }} ({{ selectedHeroWeapons.alt.weapon.arc }}) — {{ selectedHeroWeapons.alt.weapon.description }}
               </small>
@@ -393,7 +470,7 @@ const cardTransformStyle = computed(() => ({
               <small>{{ selectedHero.ability.description }}</small>
             </div>
             <div class="info-box tree-box">
-              <strong>🌿 Unique Skill Trees (3 Paths · 9 Perks)</strong>
+              <strong>🌿 Deep Botanical Skill Trees (3 Paths · 12 Perks · 4 Tiers + Capstones)</strong>
               <small>
                 <strong>{{ selectedHeroTree.pathA.icon }} {{ selectedHeroTree.pathA.name }}:</strong>
                 {{ selectedHeroTree.pathA.tagline }}
@@ -454,6 +531,84 @@ const cardTransformStyle = computed(() => ({
             </div>
             <p class="cat-desc">{{ entry.weapon.description }}</p>
           </div>
+        </div>
+      </div>
+
+      <!-- TAB 4: WORLD & LORE CHRONICLES, WEATHER & FACTIONS -->
+      <div v-else-if="activeTab === 'lore'" class="grid-pane scroll-soft">
+        <h3 class="sub-sec-head">🌦️ The Four Seasons &amp; Weather Passives</h3>
+        <div class="lore-weather-grid">
+          <div
+            v-for="w in weatherList"
+            :key="w.seasonId"
+            class="seed-packet lore-weather-card"
+            :style="{ '--w-accent': w.badgeColor }"
+          >
+            <strong>{{ w.icon }} {{ w.name }}</strong>
+            <small class="lw-rule">{{ w.shortRule }}</small>
+            <p class="cat-desc">{{ w.detail }}</p>
+          </div>
+        </div>
+
+        <h3 class="sub-sec-head" style="margin-top: 12px">🚩 Faction Dossiers</h3>
+        <div class="lore-faction-grid">
+          <div
+            v-for="fac in FACTION_DOSSIERS"
+            :key="fac.id"
+            class="seed-packet lore-faction-card"
+            :style="{ '--fac-accent': fac.accent }"
+          >
+            <strong>{{ fac.icon }} {{ fac.name }}</strong>
+            <em class="lf-motto">{{ fac.motto }}</em>
+            <p class="cat-desc">{{ fac.summary }}</p>
+          </div>
+        </div>
+
+        <div class="lore-chron-head">
+          <h3 class="sub-sec-head" style="margin: 0">
+            📜 Field Chronicles ({{ discoveredLoreSet.size }}/{{ WORLD_LORE_CHRONICLES.length }})
+          </h3>
+          <div class="almanac-filter-row" style="padding: 0">
+            <button
+              v-for="sf in [
+                { id: 'all', label: 'All' },
+                { id: 'spring', label: '🌸 Spring' },
+                { id: 'summer', label: '☀️ Summer' },
+                { id: 'autumn', label: '🍂 Autumn' },
+                { id: 'winter', label: '❄️ Winter' },
+              ] as const"
+              :key="sf.id"
+              class="alm-filter-pill"
+              :class="{ active: loreSeasonFilter === sf.id }"
+              @click="loreSeasonFilter = sf.id"
+            >
+              {{ sf.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="catalog-grid">
+          <article
+            v-for="entry in filteredChronicles"
+            :key="entry.id"
+            class="catalog-card seed-packet lore-entry-card"
+            :class="{ locked: !discoveredLoreSet.has(entry.id) }"
+          >
+            <div class="le-top">
+              <span class="le-num">#{{ entry.order }} · {{ entry.region }}</span>
+              <span class="le-season">{{ SEASON_WEATHER_INFO[entry.seasonId].icon }}</span>
+            </div>
+            <strong>
+              {{ discoveredLoreSet.has(entry.id) ? `${entry.icon} ${entry.title}` : `🔒 Undiscovered Monument` }}
+            </strong>
+            <template v-if="discoveredLoreSet.has(entry.id)">
+              <p class="cat-desc">{{ entry.body }}</p>
+              <small class="le-tip">🧭 {{ entry.tacticalNote }}</small>
+            </template>
+            <p v-else class="cat-desc">
+              Visit a 📜 Lore Monument in {{ entry.region }} ({{ SEASON_WEATHER_INFO[entry.seasonId].name }} Act) to unlock this page!
+            </p>
+          </article>
         </div>
       </div>
 
@@ -1030,5 +1185,125 @@ const cardTransformStyle = computed(() => ({
   background: #f5e6cf;
   border-color: #9e7346;
   color: #5f3a18;
+}
+.alm-hero-quote {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border-left: 4px solid #c98718;
+  background: #fff7e0;
+  font-size: 0.78rem;
+  font-style: italic;
+  font-weight: 700;
+  color: #633d12;
+}
+.alm-dual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.alm-wpn-card.primary {
+  background: #f4faff;
+  border-color: #3a75a8;
+}
+.alm-wpn-card.secondary {
+  background: #fff7ea;
+  border-color: #c26a23;
+}
+.alm-wpn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.alm-wpn-art {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 3px 4px rgba(42, 20, 6, 0.25));
+}
+.alm-slot-tag {
+  display: inline-block;
+  font-size: 0.61rem;
+  font-weight: 900;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-bottom: 2px;
+}
+.alm-slot-tag.ranged {
+  background: #d7ecff;
+  color: #164b78;
+}
+.alm-slot-tag.gimmick {
+  background: #ffe0bd;
+  color: #7d3607;
+}
+.lore-weather-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
+  gap: 8px;
+}
+.lore-weather-card {
+  padding: 10px 11px;
+  border-left: 5px solid var(--w-accent, #5ea342);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.lw-rule {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #3b5e1d;
+}
+.lore-faction-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+}
+.lore-faction-card {
+  padding: 10px 12px;
+  border-top: 4px solid var(--fac-accent, #4d9638);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lf-motto {
+  font-size: 0.73rem;
+  font-weight: 700;
+  color: #73441b;
+}
+.lore-chron-head {
+  margin: 14px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lore-entry-card.locked {
+  opacity: 0.68;
+  background: #f0e4cc;
+}
+.le-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #7a5832;
+}
+.le-tip {
+  font-size: 0.71rem;
+  font-weight: 800;
+  color: #295a19;
+  background: #eaf7df;
+  border: 1px dashed #60993e;
+  border-radius: 7px;
+  padding: 4px 7px;
+}
+@media (max-width: 640px) {
+  .alm-dual-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
