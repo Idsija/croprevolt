@@ -77,30 +77,20 @@ describe('overnight expansion: battle poses, heroes, enemies, maps, items, relic
     expect(tank.weapon.appliesStatus?.kind).toBe('acid');
   });
 
-  it('resolves _cover and _action pose sprites for posed heroes and falls back safely', () => {
-    const posedHeroes = [
-      'cow',
-      'lettuce',
-      'pea',
-      'lemon',
-      'strawberry',
-      'mushroom',
-      'duck',
-      'pumpkin',
-      'blueberry',
-      'owl',
-    ];
-    for (const kind of posedHeroes) {
+  it('resolves _cover, _action, and boss _enraged pose sprites for sculpted clay cast and falls back safely', () => {
+    const posedStarters = ['cow', 'pea', 'lemon', 'rooster'];
+    for (const kind of posedStarters) {
       expect(hasVariantSprite(kind, 'cover')).toBe(true);
       expect(hasVariantSprite(kind, 'action')).toBe(true);
       expect(resolveVariantSpriteKey(kind, 'cover')).toBe(`${kind}_cover`);
       expect(resolveVariantSpriteKey(kind, 'action')).toBe(`${kind}_action`);
     }
-    expect(AVAILABLE_VARIANT_SPRITES.has('barrow_hit')).toBe(true);
-    expect(AVAILABLE_VARIANT_SPRITES.has('blower_hit')).toBe(true);
-    expect(AVAILABLE_VARIANT_SPRITES.has('sapper_hit')).toBe(true);
-    expect(AVAILABLE_VARIANT_SPRITES.has('kettlebot_hit')).toBe(true);
+    for (const boss of ['scarecrow', 'tractor', 'harvester', 'frostboss']) {
+      expect(AVAILABLE_VARIANT_SPRITES.has(`${boss}_enraged`)).toBe(true);
+      expect(resolveVariantSpriteKey(boss, 'enraged')).toBe(`${boss}_enraged`);
+    }
     expect(resolveVariantSpriteKey('potato', 'cover')).toBe('potato');
+    expect(resolveVariantSpriteKey('barrow', 'hit')).toBe('barrow');
   });
 
   it('executes Patch Gourd Slam hybrid aoe_self (shields allies + smashes & knocks back adjacent enemies)', () => {

@@ -341,10 +341,10 @@ export class TacticalOverlaySystem3D {
         this.addTilePlate(
           b,
           node.pos,
-          isBounce ? 0xee4c88 : isBurrow ? 0x2de0cf : 0x27b0f5,
-          isFocused ? 0.54 : isBounce || isBurrow ? 0.42 : 0.34,
-          isFocused ? 0xc7f2ff : isBounce ? 0xffd1e6 : isBurrow ? 0xb5fff7 : 0x7adeff,
-          isFocused ? 1 : 0.85,
+          isBounce ? 0xee4c88 : isBurrow ? 0x2de0cf : 0x32ddd4,
+          isFocused ? 0.52 : isBounce || isBurrow ? 0.42 : 0.32,
+          isFocused ? 0xfff0a8 : isBounce ? 0xffd1e6 : isBurrow ? 0xb5fff7 : 0x8efaf2,
+          isFocused ? 1 : 0.9,
           0.026
         );
       }

@@ -70,7 +70,7 @@ export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   mower: 'left',
   beekeeper: 'left',
   barrow: 'left',
-  pitchfork: 'right',
+  pitchfork: 'left',
   blower: 'left',
   sapper: 'left',
   kettlebot: 'left',
@@ -85,65 +85,18 @@ export const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
 export type SpriteVariantKind = 'base' | 'cover' | 'action' | 'hit' | 'lowhp' | 'enraged';
 
 /**
- * Explicit registry of ALL hand-crafted transparent pose & expression variant PNGs in /sprites/.
- * Prevents any 404 requests for units that rely on procedural 3D paper-craft pose overlays.
+ * Explicit registry of ALL handcrafted matte clay/wood pose & enraged variant PNGs in /sprites/.
+ * Prevents any 404 requests for units that use procedural 3D paper-craft hit/cover/lowhp overlays.
  */
 export const AVAILABLE_VARIANT_SPRITES = new Set<string>([
-  'cow_hit',
-  'cow_lowhp',
-  'cow_cover',
   'cow_action',
-  'lettuce_hit',
-  'lettuce_lowhp',
-  'lettuce_cover',
-  'lettuce_action',
-  'pea_hit',
-  'pea_lowhp',
-  'pea_cover',
+  'cow_cover',
   'pea_action',
-  'lemon_hit',
-  'lemon_lowhp',
-  'lemon_cover',
+  'pea_cover',
   'lemon_action',
-  'potato_lowhp',
-  'chili_lowhp',
-  'carrot_lowhp',
-  'corn_lowhp',
-  'blackberry_lowhp',
-  'strawberry_lowhp',
-  'strawberry_cover',
-  'strawberry_action',
-  'mushroom_lowhp',
-  'mushroom_cover',
-  'mushroom_action',
-  'pumpkin_lowhp',
-  'pumpkin_cover',
-  'pumpkin_action',
-  'blueberry_lowhp',
-  'blueberry_cover',
-  'blueberry_action',
-  'pig_lowhp',
-  'rooster_lowhp',
-  'sheep_lowhp',
-  'goat_lowhp',
-  'duck_lowhp',
-  'duck_cover',
-  'duck_action',
-  'owl_lowhp',
-  'owl_cover',
-  'owl_action',
-  'digger_hit',
-  'trimmer_hit',
-  'sprayer_hit',
-  'mower_hit',
-  'beekeeper_hit',
-  'barrow_hit',
-  'pitchfork_hit',
-  'blower_hit',
-  'sapper_hit',
-  'kettlebot_hit',
-  'snowplow_hit',
-  'frostblower_hit',
+  'lemon_cover',
+  'rooster_action',
+  'rooster_cover',
   'scarecrow_enraged',
   'tractor_enraged',
   'harvester_enraged',
@@ -395,76 +348,72 @@ export class CraftTextureLibrary {
     const { canvas, ctx } = makeCanvas(w, h);
     ctx.clearRect(0, 0, w, h);
 
-    // Cream Paper Mario cut-paper sticker backing silhouette
-    ctx.fillStyle = '#fff8e6';
-    ctx.beginPath();
-    ctx.roundRect(24, 34, 272, 224, 42);
-    ctx.fill();
-    ctx.strokeStyle = '#5c3818';
-    ctx.lineWidth = 5;
-    ctx.stroke();
-
-    // Glowing heirloom golden seed mound peeking out the wagon bed
+    // Glowing heirloom golden seed mound peeking out the corrugated wagon bed
     const glow = ctx.createRadialGradient(160, 108, 12, 160, 108, 92);
     glow.addColorStop(0, '#fff7b0');
-    glow.addColorStop(0.55, '#f5c23b');
-    glow.addColorStop(1, '#c97e18');
+    glow.addColorStop(0.55, '#f2c144');
+    glow.addColorStop(1, '#c98824');
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.ellipse(160, 114, 86, 54, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#6b3e12';
-    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(110, 68, 22, 0.45)';
+    ctx.lineWidth = 3;
     ctx.stroke();
 
-    // Sprouting golden leaf emblem at top of pile
-    ctx.fillStyle = '#7bd148';
+    // Cut-felt sprouting leaf emblem at top of pile
+    ctx.fillStyle = '#6eb854';
     ctx.beginPath();
     ctx.ellipse(142, 62, 22, 11, -0.5, 0, Math.PI * 2);
     ctx.ellipse(178, 62, 22, 11, 0.5, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#2d5c1a';
-    ctx.lineWidth = 3;
-    ctx.stroke();
 
-    // Sturdy painted wooden wagon body
-    ctx.fillStyle = '#c47c38';
+    // Fluted corrugated-cardboard wagon body
+    ctx.save();
     ctx.beginPath();
     ctx.roundRect(52, 116, 216, 78, 12);
+    ctx.fillStyle = '#cfa06b';
     ctx.fill();
-    ctx.strokeStyle = '#4a2810';
-    ctx.lineWidth = 5;
-    ctx.stroke();
-
-    // Horizontal planks & gold trim rail
-    ctx.fillStyle = '#f5cb4c';
-    ctx.fillRect(54, 118, 212, 14);
-    ctx.strokeStyle = '#4a2810';
-    ctx.lineWidth = 3;
+    ctx.clip();
+    for (let x = 52; x < 268; x += 12) {
+      ctx.fillStyle = 'rgba(255, 242, 214, 0.24)';
+      ctx.fillRect(x, 116, 5, 78);
+      ctx.fillStyle = 'rgba(72, 42, 16, 0.20)';
+      ctx.fillRect(x + 6, 116, 4, 78);
+    }
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(78, 48, 22, 0.52)';
+    ctx.lineWidth = 3.5;
     ctx.beginPath();
-    ctx.moveTo(54, 152);
-    ctx.lineTo(266, 152);
-    ctx.moveTo(114, 118);
-    ctx.lineTo(114, 192);
-    ctx.moveTo(206, 118);
-    ctx.lineTo(206, 192);
+    ctx.roundRect(52, 116, 216, 78, 12);
     ctx.stroke();
 
-    // Twin red-spoked storybook wagon wheels
+    // Folded gold cardstock trim rail + kraft uprights
+    ctx.fillStyle = '#ecc054';
+    ctx.fillRect(54, 118, 212, 14);
+    ctx.fillStyle = '#b98650';
+    ctx.fillRect(110, 118, 10, 74);
+    ctx.fillRect(202, 118, 10, 74);
+
+    // Twin turned-birch & coral toy wheels with brass brads
     for (const wx of [100, 220]) {
-      ctx.fillStyle = '#9c3624';
+      ctx.fillStyle = '#cf5640';
       ctx.beginPath();
       ctx.arc(wx, 206, 36, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#3b1e0c';
-      ctx.lineWidth = 5;
+      ctx.strokeStyle = 'rgba(84, 34, 22, 0.55)';
+      ctx.lineWidth = 3.5;
       ctx.stroke();
 
-      ctx.fillStyle = '#f2c144';
+      ctx.fillStyle = '#f2dfc0';
       ctx.beginPath();
-      ctx.arc(wx, 206, 12, 0, Math.PI * 2);
+      ctx.arc(wx, 206, 22, 0, Math.PI * 2);
       ctx.fill();
-      ctx.stroke();
+
+      ctx.fillStyle = '#dfb244';
+      ctx.beginPath();
+      ctx.arc(wx, 206, 10, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     const front = finalizeTexture(canvas);
@@ -531,47 +480,55 @@ export class CraftTextureLibrary {
     const diff = makeCanvas(w, h);
     const bump = makeCanvas(w, h);
 
-    // Top paper ply
-    diff.ctx.fillStyle = '#cfa06b';
-    diff.ctx.fillRect(0, 0, w, 16);
-    // Bottom paper ply
-    diff.ctx.fillStyle = '#b4814d';
-    diff.ctx.fillRect(0, h - 18, w, 18);
-    // Middle corrugated flute channel
-    diff.ctx.fillStyle = '#8f5d30';
-    diff.ctx.fillRect(0, 16, w, h - 34);
-
-    bump.ctx.fillStyle = '#909090';
+    // Warm sunlit multi-ply kraft corrugated cardboard (2 stacked plies with recessed flute waves!)
+    diff.ctx.fillStyle = '#d7b07e';
+    diff.ctx.fillRect(0, 0, w, h);
+    bump.ctx.fillStyle = '#929292';
     bump.ctx.fillRect(0, 0, w, h);
 
-    // Corrugated waves
-    const flutes = 16;
+    const bands: Array<[number, number]> = [
+      [14, 56],
+      [72, 114],
+    ];
+    const flutes = 18;
     const step = w / flutes;
-    for (let i = 0; i < flutes; i++) {
-      const x = i * step;
-      const g = diff.ctx.createLinearGradient(x, 0, x + step, 0);
-      g.addColorStop(0, '#5a3618');
-      g.addColorStop(0.28, '#ba8852');
-      g.addColorStop(0.55, '#d4a672');
-      g.addColorStop(0.82, '#69401f');
-      g.addColorStop(1, '#5a3618');
-      diff.ctx.fillStyle = g;
-      diff.ctx.fillRect(x, 16, step + 0.5, h - 34);
+    for (const [y0, y1] of bands) {
+      const bh = y1 - y0;
+      for (let i = 0; i < flutes; i++) {
+        const x = i * step;
+        const g = diff.ctx.createLinearGradient(x, 0, x + step, 0);
+        g.addColorStop(0, '#5a3a1e');
+        g.addColorStop(0.26, '#bd905d');
+        g.addColorStop(0.54, '#ddb888');
+        g.addColorStop(0.84, '#6e4724');
+        g.addColorStop(1, '#5a3a1e');
+        diff.ctx.fillStyle = g;
+        diff.ctx.fillRect(x, y0, step + 0.5, bh);
 
-      const bg = bump.ctx.createLinearGradient(x, 0, x + step, 0);
-      bg.addColorStop(0, '#2a2a2a');
-      bg.addColorStop(0.5, '#eaeaea');
-      bg.addColorStop(1, '#2a2a2a');
-      bump.ctx.fillStyle = bg;
-      bump.ctx.fillRect(x, 16, step + 0.5, h - 34);
+        const bg = bump.ctx.createLinearGradient(x, 0, x + step, 0);
+        bg.addColorStop(0, '#222222');
+        bg.addColorStop(0.5, '#f0f0f0');
+        bg.addColorStop(1, '#222222');
+        bump.ctx.fillStyle = bg;
+        bump.ctx.fillRect(x, y0, step + 0.5, bh);
+      }
     }
 
-    // Crisp ink ply dividers
-    diff.ctx.fillStyle = '#4a2c17';
-    diff.ctx.fillRect(0, 14, w, 3);
-    diff.ctx.fillRect(0, h - 19, w, 3);
+    // Crisp kraft liner plies (top, center divider, bottom)
+    diff.ctx.fillStyle = '#deb98a';
+    diff.ctx.fillRect(0, 0, w, 13);
+    diff.ctx.fillStyle = '#d2a876';
+    diff.ctx.fillRect(0, 57, w, 14);
+    diff.ctx.fillStyle = '#c29460';
+    diff.ctx.fillRect(0, 115, w, 13);
 
-    paintPaperGrain(diff.ctx, w, h, 4242, 0.06);
+    diff.ctx.fillStyle = 'rgba(78, 48, 22, 0.55)';
+    diff.ctx.fillRect(0, 13, w, 2);
+    diff.ctx.fillRect(0, 56, w, 2);
+    diff.ctx.fillRect(0, 71, w, 2);
+    diff.ctx.fillRect(0, 114, w, 2);
+
+    paintPaperGrain(diff.ctx, w, h, 4242, 0.055);
 
     return {
       map: finalizeTexture(diff.canvas, { repeat: [4, 1] }),
@@ -590,53 +547,68 @@ export class CraftTextureLibrary {
     const isGreenhouse = theme === 'greenhouse';
     const isWinter = theme === 'winter';
 
-    // Refined subtle storybook watercolor palette harmonizing with Ghibli-style seasonal boards
+    // Crisp mid-century color-blocked matte construction paper squares (harmonizing with approved 1+4 mockups!)
     let base = isWinter
       ? checker
-        ? '#dce8f0'
-        : '#d0e0ea'
+        ? '#edf4f8'
+        : '#dfe9f1'
       : isAutumn
         ? checker
-          ? '#cfad62'
-          : '#c4a156'
+          ? '#dfb254'
+          : '#d2a146'
         : isGreenhouse
           ? checker
-            ? '#8eb868'
-            : '#83ad5e'
+            ? '#94c082'
+            : '#86b475'
           : checker
-            ? '#9ec26a'
-            : '#92b65f';
+            ? '#91b67f'
+            : '#7ea873';
 
-    if (terrain === 'soil') base = isWinter ? (checker ? '#8c7e74' : '#7f7268') : checker ? '#c48c58' : '#b8804d';
-    else if (terrain === 'mud') base = checker ? '#75563f' : '#6b4d37';
-    else if (terrain === 'compost') base = checker ? '#614831' : '#573f29';
-    else if (terrain === 'gate') base = checker ? '#f0cf6c' : '#e3be54';
+    if (terrain === 'soil') {
+      base = isWinter
+        ? checker
+          ? '#a3978c'
+          : '#95897e'
+        : isAutumn
+          ? checker
+            ? '#cc7848'
+            : '#be6c3e'
+          : checker
+            ? '#d9ba62'
+            : '#ccac54';
+    } else if (terrain === 'mud') base = checker ? '#8a684d' : '#7d5d43';
+    else if (terrain === 'compost') base = checker ? '#6f553c' : '#634a33';
+    else if (terrain === 'gate') base = checker ? '#f2cf68' : '#e4be52';
     else if (terrain === 'barn_floor') {
       base = isWinter
         ? checker
-          ? '#b8a99e'
-          : '#ab9c90'
+          ? '#c7b9ac'
+          : '#b9aba0'
         : isGreenhouse
           ? checker
-            ? '#cfa074'
-            : '#c49468'
-          : checker
-            ? '#c49866'
-            : '#b88c5b';
+            ? '#d9a476'
+            : '#cd9668'
+          : isAutumn
+            ? checker
+              ? '#c97e52'
+              : '#bc7146'
+            : checker
+              ? '#cfa472'
+              : '#c39765';
     } else if (terrain === 'sunbeam') {
-      base = checker ? '#f5e28c' : '#ebd473';
+      base = checker ? '#f6e28b' : '#ebd473';
     } else if (terrain === 'water') {
-      base = isWinter ? (checker ? '#4d8ca6' : '#438099') : checker ? '#5caeb8' : '#51a2ad';
+      base = isWinter ? (checker ? '#5297b2' : '#488ca6') : checker ? '#4dbcc3' : '#42afb7';
     } else if (terrain === 'ice') {
-      base = checker ? '#a9e2f5' : '#96d7ee';
+      base = checker ? '#b8e8f8' : '#a3ddf2';
     } else if (terrain === 'bridge') {
-      base = checker ? '#bf8d5a' : '#b2804e';
+      base = checker ? '#cf9f68' : '#c3925c';
     } else if (terrain === 'lava') {
-      base = checker ? '#c43e1c' : '#ae3315';
+      base = checker ? '#d64c24' : '#c23f1b';
     } else if (terrain === 'ramp') {
-      base = checker ? '#c29763' : '#b58a57';
+      base = checker ? '#cfa26b' : '#c1945d';
     } else if (terrain === 'burrow') {
-      base = checker ? '#8f6b47' : '#835f3d';
+      base = checker ? '#9c7852' : '#8e6b47';
     }
 
     ctx.fillStyle = base;
@@ -644,179 +616,94 @@ export class CraftTextureLibrary {
 
     const seed =
       theme.charCodeAt(0) * 101 + terrain.charCodeAt(0) * 37 + (checker ? 11 : 23);
-    paintPaperGrain(ctx, s, s, seed, terrain === 'grass' ? 0.055 : 0.11);
+    paintPaperGrain(ctx, s, s, seed, terrain === 'grass' ? 0.045 : 0.075);
 
     const rng = mulberry(seed + 99);
 
     if (terrain === 'grass') {
-      // Calm, low-contrast watercolor washes so characters and tactical highlights pop effortlessly
-      for (let i = 0; i < 3; i++) {
-        const px = 36 + rng() * (s - 72);
-        const py = 36 + rng() * (s - 72);
-        const pr = 56 + rng() * 54;
-        const g = ctx.createRadialGradient(px, py, 4, px, py, pr);
-        g.addColorStop(
-          0,
-          isWinter
-            ? i % 2 === 0
-              ? 'rgba(255, 255, 255, 0.24)'
-              : 'rgba(130, 174, 206, 0.10)'
-            : isAutumn
-              ? i % 2 === 0
-                ? 'rgba(244, 224, 168, 0.11)'
-                : 'rgba(156, 102, 46, 0.06)'
-              : i % 2 === 0
-                ? 'rgba(228, 240, 180, 0.11)'
-                : 'rgba(78, 114, 58, 0.06)'
-        );
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(px, py, pr, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      // Subtle matte cardstock tonal breath + minimal clean mid-century paper motif
+      const g = ctx.createLinearGradient(0, 0, s, s);
+      g.addColorStop(0, 'rgba(255, 253, 244, 0.08)');
+      g.addColorStop(1, 'rgba(42, 32, 16, 0.06)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, s, s);
 
-      // Whisper-soft grass wisps or frosted snow drifts (subtle paper craft texture, zero busy clutter)
-      ctx.lineCap = 'round';
-      ctx.strokeStyle = isWinter
-        ? 'rgba(128, 166, 194, 0.28)'
-        : isAutumn
-          ? 'rgba(120, 82, 36, 0.2)'
-          : 'rgba(66, 98, 46, 0.19)';
-      ctx.lineWidth = 1.8;
-      for (let i = 0; i < 3; i++) {
-        const bx = 42 + rng() * (s - 84);
-        const by = 42 + rng() * (s - 84);
-        ctx.beginPath();
-        if (isWinter) {
-          ctx.moveTo(bx - 12, by);
-          ctx.quadraticCurveTo(bx, by - 5, bx + 12, by + 1);
-        } else {
-          ctx.moveTo(bx - 4, by + 4);
-          ctx.quadraticCurveTo(bx - 6, by, bx - 7, by - 5);
-          ctx.moveTo(bx + 1, by + 4);
-          ctx.quadraticCurveTo(bx + 2, by - 1, bx + 3, by - 6);
-        }
-        ctx.stroke();
-      }
-
-      // Quiet seasonal hint on alternate tiles only (no dark outlines or busy flower dots)
       if (isAutumn && checker) {
-        const lx = 64 + rng() * 128;
-        const ly = 64 + rng() * 128;
+        // Tiny scissor-cut paper autumn leaf resting flat on cardstock
+        const lx = 70 + rng() * 116;
+        const ly = 70 + rng() * 116;
         ctx.save();
         ctx.translate(lx, ly);
         ctx.rotate(rng() * Math.PI);
-        ctx.fillStyle = 'rgba(196, 102, 54, 0.26)';
+        ctx.fillStyle = 'rgba(196, 86, 48, 0.34)';
         ctx.beginPath();
-        ctx.ellipse(0, 0, 7, 3.2, 0, 0, Math.PI * 2);
+        ctx.moveTo(-10, 0);
+        ctx.quadraticCurveTo(0, -7, 10, 0);
+        ctx.quadraticCurveTo(0, 7, -10, 0);
         ctx.fill();
         ctx.restore();
       } else if (isWinter && checker) {
-        // Gentle winter pine needle sprig or snow-sparkle star
-        const sx = 64 + rng() * 128;
-        const sy = 64 + rng() * 128;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+        const sx = 72 + rng() * 112;
+        const sy = 72 + rng() * 112;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
         ctx.beginPath();
-        ctx.moveTo(sx, sy - 6);
+        ctx.moveTo(sx, sy - 7);
         ctx.lineTo(sx + 2.5, sy);
-        ctx.lineTo(sx, sy + 6);
+        ctx.lineTo(sx, sy + 7);
         ctx.lineTo(sx - 2.5, sy);
         ctx.closePath();
         ctx.fill();
       }
     } else if (terrain === 'soil') {
-      // Soft tilled garden furrows with warm watercolor wash & pebbles
-      for (let y = 24; y < s; y += 44) {
-        ctx.fillStyle = 'rgba(78, 44, 18, 0.22)';
+      // Clean parallel pressed-paper garden furrow bands (zero muddy noise!)
+      for (let y = 26; y < s; y += 44) {
+        ctx.fillStyle = 'rgba(84, 52, 22, 0.14)';
         ctx.beginPath();
-        ctx.roundRect(14, y, s - 28, 13, 6);
+        ctx.roundRect(18, y, s - 36, 12, 6);
         ctx.fill();
-        ctx.fillStyle = 'rgba(250, 228, 194, 0.2)';
+        ctx.fillStyle = 'rgba(255, 246, 224, 0.16)';
         ctx.beginPath();
-        ctx.roundRect(16, y + 13, s - 32, 6, 3);
-        ctx.fill();
-      }
-      for (let i = 0; i < 16; i++) {
-        const px = 22 + rng() * 212;
-        const py = 22 + rng() * 212;
-        ctx.fillStyle = i % 4 === 0 ? '#dfd0b4' : 'rgba(78, 46, 22, 0.36)';
-        ctx.beginPath();
-        ctx.ellipse(px, py, 5.2, 3.2, rng(), 0, Math.PI * 2);
-        ctx.fill();
-      }
-      if (checker) {
-        ctx.strokeStyle = 'rgba(66, 102, 42, 0.72)';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(s * 0.72, s * 0.34);
-        ctx.lineTo(s * 0.72, s * 0.26);
-        ctx.stroke();
-        ctx.fillStyle = '#99c96b';
-        ctx.beginPath();
-        ctx.ellipse(s * 0.68, s * 0.25, 7.5, 4.2, -0.5, 0, Math.PI * 2);
-        ctx.ellipse(s * 0.76, s * 0.25, 7.5, 4.2, 0.5, 0, Math.PI * 2);
+        ctx.roundRect(20, y + 12, s - 40, 5, 2.5);
         ctx.fill();
       }
     } else if (terrain === 'mud') {
-      // Glossy mud puddle rings + wet pebbles
-      const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 16, s * 0.5, s * 0.5, s * 0.45);
-      g.addColorStop(0, 'rgba(54, 34, 20, 0.72)');
-      g.addColorStop(0.75, 'rgba(88, 60, 38, 0.4)');
+      const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 16, s * 0.5, s * 0.5, s * 0.44);
+      g.addColorStop(0, 'rgba(54, 34, 20, 0.58)');
+      g.addColorStop(0.75, 'rgba(88, 60, 38, 0.30)');
       g.addColorStop(1, 'rgba(88, 60, 38, 0)');
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.ellipse(s * 0.5, s * 0.52, s * 0.42, s * 0.35, 0.12, 0, Math.PI * 2);
+      ctx.ellipse(s * 0.5, s * 0.52, s * 0.40, s * 0.34, 0.12, 0, Math.PI * 2);
       ctx.fill();
-
-      ctx.strokeStyle = 'rgba(255, 246, 224, 0.42)';
-      ctx.lineWidth = 4.5;
+      ctx.strokeStyle = 'rgba(255, 248, 232, 0.36)';
+      ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.arc(s * 0.44, s * 0.46, 38, Math.PI * 1.12, Math.PI * 1.68);
-      ctx.stroke();
-      ctx.lineWidth = 2.8;
-      ctx.beginPath();
-      ctx.arc(s * 0.58, s * 0.58, 22, Math.PI * 0.1, Math.PI * 0.55);
+      ctx.arc(s * 0.44, s * 0.46, 36, Math.PI * 1.12, Math.PI * 1.68);
       ctx.stroke();
     } else if (terrain === 'compost') {
-      // Rich dark soil + soft painted healing sprout emblem
-      for (let i = 0; i < 24; i++) {
-        ctx.fillStyle = i % 3 === 0 ? 'rgba(146, 198, 96, 0.48)' : 'rgba(38, 22, 10, 0.42)';
+      for (let i = 0; i < 18; i++) {
+        ctx.fillStyle = i % 3 === 0 ? 'rgba(146, 202, 102, 0.48)' : 'rgba(42, 24, 12, 0.32)';
         ctx.beginPath();
-        ctx.arc(24 + rng() * 208, 24 + rng() * 208, 3 + rng() * 5, 0, Math.PI * 2);
+        ctx.arc(26 + rng() * 204, 26 + rng() * 204, 3.5 + rng() * 4.5, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.strokeStyle = '#3f6e28';
-      ctx.lineWidth = 5.5;
-      ctx.lineCap = 'round';
+      ctx.fillStyle = '#93cf6e';
       ctx.beginPath();
-      ctx.moveTo(s / 2, s * 0.66);
-      ctx.lineTo(s / 2, s * 0.44);
-      ctx.stroke();
-      ctx.fillStyle = '#97cf6e';
-      ctx.strokeStyle = '#3f6e28';
-      ctx.lineWidth = 2.8;
-      ctx.beginPath();
-      ctx.ellipse(s * 0.42, s * 0.44, 19, 9.5, -0.45, 0, Math.PI * 2);
+      ctx.ellipse(s * 0.43, s * 0.46, 18, 9, -0.45, 0, Math.PI * 2);
+      ctx.ellipse(s * 0.57, s * 0.46, 18, 9, 0.45, 0, Math.PI * 2);
       ctx.fill();
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.ellipse(s * 0.58, s * 0.44, 19, 9.5, 0.45, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
     } else if (terrain === 'barn_floor') {
-      // Warm hand-inked greenhouse terracotta pavers OR golden barn planks with grain & knots
       if (isGreenhouse) {
         const cell = 64;
         for (let gy = 0; gy < 4; gy++) {
           for (let gx = 0; gx < 4; gx++) {
-            ctx.fillStyle = (gx + gy) % 2 === 0 ? 'rgba(255,238,210,0.12)' : 'rgba(92,50,24,0.08)';
+            ctx.fillStyle = (gx + gy) % 2 === 0 ? 'rgba(255,244,224,0.14)' : 'rgba(92,50,24,0.08)';
             ctx.fillRect(gx * cell + 3, gy * cell + 3, cell - 6, cell - 6);
           }
         }
-        ctx.strokeStyle = 'rgba(78, 44, 22, 0.38)';
-        ctx.lineWidth = 3.2;
+        ctx.strokeStyle = 'rgba(94, 58, 30, 0.22)';
+        ctx.lineWidth = 2.4;
         for (let i = 0; i <= s; i += cell) {
           ctx.beginPath();
           ctx.moveTo(0, i);
@@ -827,33 +714,19 @@ export class CraftTextureLibrary {
         }
       } else {
         for (let y = 0; y < s; y += 64) {
-          ctx.fillStyle = (y / 64) % 2 === 0 ? 'rgba(255,242,210,0.1)' : 'rgba(78,44,18,0.07)';
+          ctx.fillStyle = (y / 64) % 2 === 0 ? 'rgba(255,246,224,0.12)' : 'rgba(78,44,18,0.06)';
           ctx.fillRect(0, y, s, 64);
-          ctx.strokeStyle = 'rgba(78, 44, 18, 0.15)';
-          ctx.lineWidth = 2.2;
-          ctx.beginPath();
-          ctx.moveTo(0, y + 22);
-          ctx.bezierCurveTo(s * 0.3, y + 14, s * 0.7, y + 32, s, y + 20);
-          ctx.moveTo(0, y + 46);
-          ctx.bezierCurveTo(s * 0.4, y + 52, s * 0.7, y + 38, s, y + 48);
-          ctx.stroke();
-          ctx.strokeStyle = 'rgba(70, 40, 18, 0.4)';
-          ctx.lineWidth = 3.2;
+          ctx.strokeStyle = 'rgba(84, 52, 24, 0.24)';
+          ctx.lineWidth = 2.4;
           ctx.beginPath();
           ctx.moveTo(0, y);
           ctx.lineTo(s, y);
           ctx.stroke();
-          ctx.fillStyle = '#4a2b14';
-          ctx.beginPath();
-          ctx.arc(22, y + 32, 3.8, 0, Math.PI * 2);
-          ctx.arc(s - 22, y + 32, 3.8, 0, Math.PI * 2);
-          ctx.fill();
         }
       }
     } else if (terrain === 'gate') {
-      // Golden victory chevron tile
-      ctx.strokeStyle = 'rgba(128, 78, 18, 0.56)';
-      ctx.lineWidth = 11;
+      ctx.strokeStyle = 'rgba(138, 86, 22, 0.46)';
+      ctx.lineWidth = 10;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
@@ -861,92 +734,63 @@ export class CraftTextureLibrary {
       ctx.lineTo(s * 0.5, s * 0.34);
       ctx.lineTo(s * 0.72, s * 0.62);
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(255, 252, 232, 0.85)';
+      ctx.strokeStyle = 'rgba(255, 252, 236, 0.9)';
       ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(s * 0.28, s * 0.62);
-      ctx.lineTo(s * 0.5, s * 0.34);
-      ctx.lineTo(s * 0.72, s * 0.62);
       ctx.stroke();
     } else if (terrain === 'sunbeam') {
       const g = ctx.createRadialGradient(s / 2, s / 2, 12, s / 2, s / 2, s * 0.46);
-      g.addColorStop(0, 'rgba(255, 254, 224, 0.85)');
-      g.addColorStop(0.7, 'rgba(248, 214, 96, 0.26)');
+      g.addColorStop(0, 'rgba(255, 254, 228, 0.85)');
+      g.addColorStop(0.7, 'rgba(248, 214, 96, 0.24)');
       g.addColorStop(1, 'rgba(248, 214, 96, 0)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
     } else if (terrain === 'water') {
-      // Tranquil muted cerulean-teal storybook watercolor brook matching the new seasonal boards!
-      const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 10, s * 0.5, s * 0.5, s * 0.68);
-      g.addColorStop(0, 'rgba(162, 228, 232, 0.52)');
-      g.addColorStop(0.65, 'rgba(82, 166, 178, 0.24)');
-      g.addColorStop(1, 'rgba(42, 106, 124, 0.38)');
+      // Glossy turquoise/teal cut-paper river with crisp white folded paper wave strips!
+      const g = ctx.createLinearGradient(0, 0, s, s);
+      g.addColorStop(0, 'rgba(182, 244, 246, 0.36)');
+      g.addColorStop(0.55, 'rgba(66, 186, 194, 0.08)');
+      g.addColorStop(1, 'rgba(32, 118, 134, 0.28)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, s, s);
 
-      // Gentle delicate watercolor ripple ribbons & soft glints
-      ctx.strokeStyle = 'rgba(242, 252, 252, 0.65)';
-      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(244, 254, 255, 0.68)';
+      ctx.lineWidth = 3.5;
       ctx.lineCap = 'round';
       for (let row = 0; row < 4; row++) {
         const wy = 40 + row * 56;
         ctx.beginPath();
         ctx.moveTo(22, wy);
-        ctx.quadraticCurveTo(s * 0.32, wy - 12, s * 0.52, wy);
-        ctx.quadraticCurveTo(s * 0.72, wy + 12, s - 22, wy - 4);
+        ctx.quadraticCurveTo(s * 0.32, wy - 10, s * 0.52, wy);
+        ctx.quadraticCurveTo(s * 0.72, wy + 10, s - 22, wy - 3);
         ctx.stroke();
-      }
-      ctx.fillStyle = 'rgba(255, 255, 250, 0.72)';
-      for (let i = 0; i < 3; i++) {
-        const sx = 38 + rng() * 180;
-        const sy = 38 + rng() * 180;
-        ctx.beginPath();
-        ctx.moveTo(sx, sy - 6);
-        ctx.lineTo(sx + 3.2, sy);
-        ctx.lineTo(sx, sy + 6);
-        ctx.lineTo(sx - 3.2, sy);
-        ctx.closePath();
-        ctx.fill();
       }
     } else if (terrain === 'bridge') {
-      // Weathered honey-oak cross-plank bridge decking with soft ink seams & iron rivets
-      for (let i = 0; i < 5; i++) {
-        const py = i * (s / 5);
-        ctx.fillStyle = i % 2 === 0 ? '#cc9760' : '#bc8650';
-        ctx.fillRect(6, py + 3, s - 12, s / 5 - 6);
-        ctx.strokeStyle = 'rgba(92, 52, 22, 0.18)';
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        ctx.moveTo(16, py + s / 10);
-        ctx.quadraticCurveTo(s * 0.5, py + s / 10 + (i % 2 === 0 ? 5 : -5), s - 16, py + s / 10);
-        ctx.stroke();
-        ctx.strokeStyle = '#523018';
-        ctx.lineWidth = 3.5;
-        ctx.strokeRect(6, py + 3, s - 12, s / 5 - 6);
-        ctx.fillStyle = '#472914';
-        ctx.beginPath();
-        ctx.arc(24, py + s / 10, 4.5, 0, Math.PI * 2);
-        ctx.arc(s - 24, py + s / 10, 4.5, 0, Math.PI * 2);
-        ctx.fill();
+      // Authentic fluted corrugated-cardboard bridge ribs + clean kraft edge rails!
+      const fluteStep = 16;
+      for (let y = 0; y < s; y += fluteStep) {
+        const fg = ctx.createLinearGradient(0, y, 0, y + fluteStep);
+        fg.addColorStop(0, '#a67442');
+        fg.addColorStop(0.35, '#dfba88');
+        fg.addColorStop(0.7, '#c7955c');
+        fg.addColorStop(1, '#8c5d30');
+        ctx.fillStyle = fg;
+        ctx.fillRect(14, y, s - 28, fluteStep);
       }
-      ctx.fillStyle = '#87572c';
-      ctx.fillRect(0, 0, 15, s);
-      ctx.fillRect(s - 15, 0, 15, s);
-      ctx.strokeStyle = '#4a2a14';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(1.5, 1.5, 13, s - 3);
-      ctx.strokeRect(s - 14.5, 1.5, 13, s - 3);
+      // Folded corrugated side lip edges
+      ctx.fillStyle = '#b9864f';
+      ctx.fillRect(0, 0, 14, s);
+      ctx.fillRect(s - 14, 0, 14, s);
+      ctx.fillStyle = 'rgba(72, 42, 18, 0.32)';
+      ctx.fillRect(14, 0, 2.5, s);
+      ctx.fillRect(s - 16.5, 0, 2.5, s);
     } else if (terrain === 'lava') {
-      // Glowing molten magma rivers threading through dark basalt crusts
       const lg = ctx.createRadialGradient(s * 0.5, s * 0.5, 10, s * 0.5, s * 0.5, s * 0.55);
       lg.addColorStop(0, '#ffe052');
       lg.addColorStop(0.45, '#ff6d1f');
-      lg.addColorStop(1, '#7a1608');
+      lg.addColorStop(1, '#8a1e0c');
       ctx.fillStyle = lg;
       ctx.fillRect(0, 0, s, s);
-
-      // Floating dark volcanic crust islands
-      ctx.fillStyle = 'rgba(46, 18, 12, 0.78)';
+      ctx.fillStyle = 'rgba(54, 24, 14, 0.72)';
       for (let i = 0; i < 6; i++) {
         ctx.beginPath();
         ctx.ellipse(
@@ -960,27 +804,16 @@ export class CraftTextureLibrary {
         );
         ctx.fill();
       }
-      // Hot yellow magma veins
-      ctx.strokeStyle = 'rgba(255, 240, 140, 0.8)';
-      ctx.lineWidth = 5;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(20, s * 0.25);
-      ctx.quadraticCurveTo(s * 0.5, s * 0.45, s - 20, s * 0.3);
-      ctx.moveTo(28, s * 0.75);
-      ctx.quadraticCurveTo(s * 0.55, s * 0.6, s - 26, s * 0.78);
-      ctx.stroke();
     } else if (terrain === 'ramp') {
-      // Sloped timber step-boards with subtle climb treads
-      for (let i = 0; i < 6; i++) {
-        const py = i * (s / 6);
-        ctx.fillStyle = i % 2 === 0 ? '#cfa062' : '#bf8e52';
-        ctx.fillRect(10, py + 2, s - 20, s / 6 - 4);
-        ctx.fillStyle = 'rgba(64, 34, 14, 0.35)';
-        ctx.fillRect(10, py + s / 6 - 5, s - 20, 4);
+      // Ribbed corrugated-cardboard ramp treads with crisp cream chevron!
+      for (let i = 0; i < 8; i++) {
+        const py = i * (s / 8);
+        ctx.fillStyle = i % 2 === 0 ? '#dab582' : '#c69862';
+        ctx.fillRect(8, py + 1, s - 16, s / 8 - 2);
+        ctx.fillStyle = 'rgba(76, 46, 20, 0.22)';
+        ctx.fillRect(8, py + s / 8 - 3, s - 16, 3);
       }
-      // Subtle painted upward climb chevron so ramp direction reads clearly
-      ctx.strokeStyle = 'rgba(255, 248, 224, 0.55)';
+      ctx.strokeStyle = 'rgba(255, 250, 234, 0.78)';
       ctx.lineWidth = 7;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -990,18 +823,15 @@ export class CraftTextureLibrary {
       ctx.lineTo(s * 0.68, s * 0.62);
       ctx.stroke();
     } else if (terrain === 'burrow') {
-      // Cozy ringed gopher burrow dirt mound with deep dark tunnel & glowing teal warp ring!
       const g = ctx.createRadialGradient(s * 0.5, s * 0.5, 16, s * 0.5, s * 0.5, s * 0.46);
-      g.addColorStop(0, '#1e1208');
-      g.addColorStop(0.55, '#3b2412');
-      g.addColorStop(0.75, '#a06e3f');
+      g.addColorStop(0, '#22140a');
+      g.addColorStop(0.55, '#462c18');
+      g.addColorStop(0.75, '#ad7b4a');
       g.addColorStop(1, 'rgba(138, 98, 60, 0)');
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(s * 0.5, s * 0.5, s * 0.46, 0, Math.PI * 2);
       ctx.fill();
-
-      // Painted glowing teal portal halo so warp pipe pairs stand out immediately!
       ctx.strokeStyle = 'rgba(56, 228, 212, 0.88)';
       ctx.lineWidth = 7;
       ctx.setLineDash([18, 10]);
@@ -1010,7 +840,6 @@ export class CraftTextureLibrary {
       ctx.stroke();
       ctx.setLineDash([]);
     } else if (terrain === 'bounce_pad') {
-      // Storybook mossy meadow ring around a bouncy red-spotted launchpad mushroom!
       const mg = ctx.createRadialGradient(s * 0.5, s * 0.5, 16, s * 0.5, s * 0.5, s * 0.48);
       mg.addColorStop(0, '#ff688c');
       mg.addColorStop(0.55, '#d63358');
@@ -1020,23 +849,18 @@ export class CraftTextureLibrary {
       ctx.beginPath();
       ctx.arc(s * 0.5, s * 0.5, s * 0.46, 0, Math.PI * 2);
       ctx.fill();
-
       ctx.strokeStyle = 'rgba(255, 240, 178, 0.92)';
       ctx.lineWidth = 6;
       ctx.beginPath();
       ctx.arc(s * 0.5, s * 0.5, s * 0.35, 0, Math.PI * 2);
       ctx.stroke();
     } else if (terrain === 'ice') {
-      // Shimmering Winter Glaze Ice with diagonal specular streaks & delicate snow-frost corners!
       const ig = ctx.createLinearGradient(0, 0, s, s);
-      ig.addColorStop(0, 'rgba(235, 250, 255, 0.72)');
-      ig.addColorStop(0.5, 'rgba(155, 220, 246, 0.25)');
-      ig.addColorStop(1, 'rgba(84, 168, 212, 0.35)');
+      ig.addColorStop(0, 'rgba(240, 252, 255, 0.72)');
+      ig.addColorStop(0.5, 'rgba(165, 225, 248, 0.24)');
+      ig.addColorStop(1, 'rgba(84, 168, 212, 0.32)');
       ctx.fillStyle = ig;
       ctx.fillRect(0, 0, s, s);
-
-      // Diagonal glossy mirror-sheen ribbons
-      ctx.save();
       ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
       ctx.beginPath();
       ctx.moveTo(22, 0);
@@ -1052,36 +876,23 @@ export class CraftTextureLibrary {
       ctx.lineTo(0, 148);
       ctx.closePath();
       ctx.fill();
-      ctx.restore();
-
-      // Delicate crystalline hairline cracks & sparkle diamond
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.76)';
-      ctx.lineWidth = 2.6;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(s * 0.22, s * 0.34);
-      ctx.lineTo(s * 0.48, s * 0.46);
-      ctx.lineTo(s * 0.74, s * 0.38);
-      ctx.moveTo(s * 0.48, s * 0.46);
-      ctx.lineTo(s * 0.62, s * 0.74);
-      ctx.stroke();
     }
 
-    // Crisp warm hand-inked paper tile bevel border
+    // Crisp subtle mitered cardstock tile edge (NO heavy brown ink cartoon borders!)
     ctx.strokeStyle =
       terrain === 'lava'
-        ? 'rgba(255, 190, 80, 0.45)'
-        : terrain === 'ice'
-          ? 'rgba(92, 162, 198, 0.55)'
-          : 'rgba(72, 42, 18, 0.34)';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(3, 3, s - 6, s - 6);
+        ? 'rgba(255, 198, 92, 0.45)'
+        : terrain === 'water' || terrain === 'ice'
+          ? 'rgba(224, 252, 255, 0.45)'
+          : 'rgba(66, 48, 28, 0.14)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(1.5, 1.5, s - 3, s - 3);
     ctx.strokeStyle =
       terrain === 'water' || terrain === 'ice'
-        ? 'rgba(235, 252, 255, 0.62)'
-        : 'rgba(255, 250, 230, 0.34)';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(8, 8, s - 16, s - 16);
+        ? 'rgba(242, 254, 255, 0.45)'
+        : 'rgba(255, 252, 240, 0.26)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(5, 5, s - 10, s - 10);
 
     return finalizeTexture(canvas);
   }
@@ -1094,190 +905,140 @@ export class CraftTextureLibrary {
     const isGreenhouse = theme === 'greenhouse';
     const isWinter = theme === 'winter';
 
-    // Rich layered earth-and-stone Paper Mario terrace cliff face
-    const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, isWinter ? '#7d8fa3' : isAutumn ? '#a86f38' : '#a87442');
-    grad.addColorStop(0.5, isWinter ? '#617285' : '#8c5a30');
-    grad.addColorStop(1, isWinter ? '#465464' : '#683f1d');
-    ctx.fillStyle = grad;
+    // Authentic 3-ply stacked fluted corrugated-cardboard elevation risers (matching our 1+4 dioramas!)
+    ctx.fillStyle = isWinter ? '#cbbba4' : '#d2a876';
     ctx.fillRect(0, 0, w, h);
 
-    // Warm hand-painted geological strata bands
-    ctx.fillStyle = isWinter ? 'rgba(30, 46, 66, 0.25)' : 'rgba(54, 28, 12, 0.22)';
-    ctx.fillRect(0, 74, w, 16);
-    ctx.fillRect(0, 152, w, 20);
-    ctx.fillRect(0, 214, w, 14);
-
-    // Chunky hand-inked embedded river boulders & cobblestones
-    const rng = mulberry(isWinter ? 7744 : isAutumn ? 7743 : isGreenhouse ? 7742 : 7741);
-    for (let i = 0; i < 16; i++) {
-      const rx = 20 + rng() * 216;
-      const ry = 54 + rng() * 176;
-      const rw = 14 + rng() * 16;
-      const rh = 9 + rng() * 9;
-      ctx.fillStyle = isWinter
-        ? i % 3 === 0
-          ? '#c7d8e6'
-          : i % 3 === 1
-            ? '#8fa2b5'
-            : '#6c7e92'
-        : i % 3 === 0
-          ? '#c4b89c'
-          : i % 3 === 1
-            ? '#998870'
-            : '#7d5b3e';
-      ctx.beginPath();
-      ctx.ellipse(rx, ry, rw, rh, (rng() - 0.5) * 0.4, 0, Math.PI * 2);
-      ctx.fill();
-      // Top highlight crescent
-      ctx.fillStyle = 'rgba(255, 248, 224, 0.28)';
-      ctx.beginPath();
-      ctx.ellipse(rx - rw * 0.16, ry - rh * 0.25, rw * 0.55, rh * 0.35, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = isWinter ? 'rgba(42, 60, 82, 0.72)' : 'rgba(78, 48, 24, 0.72)';
-      ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      ctx.ellipse(rx, ry, rw, rh, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // Dangling painted soil root tendrils or icicles tucked under overhang
-    ctx.strokeStyle = isWinter ? 'rgba(210, 242, 255, 0.85)' : 'rgba(94, 56, 26, 0.78)';
-    ctx.lineWidth = isWinter ? 3.8 : 2.8;
-    ctx.lineCap = 'round';
-    for (let i = 0; i < 6; i++) {
-      const rx = 22 + i * 42 + rng() * 10;
-      ctx.beginPath();
-      ctx.moveTo(rx, 32);
-      if (isWinter) {
-        ctx.lineTo(rx, 58 + rng() * 24);
-      } else {
-        ctx.quadraticCurveTo(rx + (i % 2 === 0 ? 8 : -8), 54, rx + (i % 2 === 0 ? -4 : 6), 72 + rng() * 22);
+    // 3 stacked corrugated cardboard strata layers
+    const layerBounds: Array<[number, number]> = [
+      [34, 96],
+      [110, 172],
+      [186, 244],
+    ];
+    const flutes = 16;
+    const step = w / flutes;
+    for (let li = 0; li < layerBounds.length; li++) {
+      const [y0, y1] = layerBounds[li];
+      const bh = y1 - y0;
+      const darkShift = li * 10;
+      for (let i = 0; i < flutes; i++) {
+        const x = i * step;
+        const g = ctx.createLinearGradient(x, 0, x + step, 0);
+        g.addColorStop(0, `rgb(${Math.max(48, 92 - darkShift)}, ${Math.max(30, 58 - darkShift)}, ${Math.max(16, 30 - darkShift)})`);
+        g.addColorStop(0.28, `rgb(${194 - darkShift}, ${152 - darkShift}, ${102 - darkShift})`);
+        g.addColorStop(0.56, `rgb(${222 - darkShift}, ${184 - darkShift}, ${134 - darkShift})`);
+        g.addColorStop(0.84, `rgb(${Math.max(54, 108 - darkShift)}, ${Math.max(36, 70 - darkShift)}, ${Math.max(20, 36 - darkShift)})`);
+        g.addColorStop(1, `rgb(${Math.max(48, 92 - darkShift)}, ${Math.max(30, 58 - darkShift)}, ${Math.max(16, 30 - darkShift)})`);
+        ctx.fillStyle = g;
+        ctx.fillRect(x, y0, step + 0.5, bh);
       }
-      ctx.stroke();
+
+      // Warm kraft liner strip separating corrugated tiers
+      ctx.fillStyle = li === 0 ? '#dfc092' : li === 1 ? '#d2ad7b' : '#c49b68';
+      ctx.fillRect(0, y1, w, 14);
+      ctx.fillStyle = 'rgba(66, 38, 16, 0.42)';
+      ctx.fillRect(0, y0 - 2, w, 2.5);
+      ctx.fillRect(0, y1, w, 2.5);
     }
 
-    // Harmonized subtle storybook watercolor scalloped turf/snow overhang lip along top edge
-    const turfTop = isWinter ? '#f4f9fc' : isAutumn ? '#cfa85c' : isGreenhouse ? '#86b064' : '#96bc62';
-    const turfBot = isWinter ? '#c4dced' : isAutumn ? '#ad823a' : isGreenhouse ? '#648f48' : '#729947';
-    const turfGrad = ctx.createLinearGradient(0, 0, 0, 44);
-    turfGrad.addColorStop(0, turfTop);
-    turfGrad.addColorStop(1, turfBot);
+    // Crisp flat-cut matte construction-paper top cap lip matching the season cardstock!
+    const capColor = isWinter ? '#edf4f8' : isAutumn ? '#d9aa4e' : isGreenhouse ? '#8dba7b' : '#8cb37a';
+    ctx.fillStyle = capColor;
+    ctx.fillRect(0, 0, w, 24);
+    ctx.fillStyle = '#e5c699';
+    ctx.fillRect(0, 24, w, 10);
+    ctx.fillStyle = 'rgba(62, 38, 18, 0.28)';
+    ctx.fillRect(0, 23, w, 2.5);
 
-    ctx.fillStyle = turfGrad;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(w, 0);
-    ctx.lineTo(w, 26);
-    for (let x = w; x > 0; x -= 32) {
-      ctx.arc(x - 16, 26, 16, 0, Math.PI, false);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    // Delicate warm-sepia ink scalloped turf edge
-    ctx.strokeStyle = 'rgba(72, 42, 20, 0.72)';
-    ctx.lineWidth = 3.4;
-    ctx.beginPath();
-    for (let x = 0; x < w; x += 32) {
-      ctx.arc(x + 16, 26, 16, 0, Math.PI, false);
-    }
-    ctx.stroke();
-
-    paintPaperGrain(ctx, w, h, 8821, 0.09);
-    ctx.strokeStyle = 'rgba(72, 42, 20, 0.36)';
-    ctx.lineWidth = 5;
-    ctx.strokeRect(3, 3, w - 6, h - 6);
-
+    paintPaperGrain(ctx, w, h, 8821, 0.06);
     return finalizeTexture(canvas);
   }
 
   private buildCrateTexture(damaged: boolean): THREE.CanvasTexture {
     const s = 256;
     const { canvas, ctx } = makeCanvas(s, s);
-    ctx.fillStyle = '#cf9149';
+    // Genuine miniature fluted corrugated-cardboard tactical cover crate!
+    ctx.fillStyle = '#c89b66';
     ctx.fillRect(0, 0, s, s);
 
-    // Horizontal inner slats with warm wood grain streaks
-    for (let i = 0; i < 4; i++) {
-      const y = 32 + i * 48;
-      ctx.fillStyle = i % 2 === 0 ? '#dea258' : '#cc8d43';
-      ctx.fillRect(28, y, s - 56, 46);
-      ctx.strokeStyle = 'rgba(92, 50, 18, 0.16)';
-      ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      ctx.moveTo(32, y + 18);
-      ctx.bezierCurveTo(s * 0.35, y + 12, s * 0.65, y + 26, s - 32, y + 16);
-      ctx.stroke();
-      ctx.fillStyle = '#5d3416';
-      ctx.fillRect(28, y + 44, s - 56, 3.5);
+    // Recessed vertical corrugated kraft flutes inside the crate panel
+    const flutes = 14;
+    const step = (s - 52) / flutes;
+    for (let i = 0; i < flutes; i++) {
+      const x = 26 + i * step;
+      const g = ctx.createLinearGradient(x, 0, x + step, 0);
+      g.addColorStop(0, '#784e28');
+      g.addColorStop(0.32, '#c89a64');
+      g.addColorStop(0.6, '#dec090');
+      g.addColorStop(0.88, '#875a30');
+      g.addColorStop(1, '#784e28');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, 26, step + 0.5, s - 52);
     }
 
-    // Outer mitered wooden frame
-    const frame = 30;
-    ctx.fillStyle = '#e6ac5f';
+    // Subtle inset panel drop shadow
+    ctx.strokeStyle = 'rgba(54, 30, 12, 0.36)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(28, 28, s - 56, s - 56);
+
+    // Mitered thick kraft cardstock outer frame strips
+    const frame = 28;
+    ctx.fillStyle = '#dcba8a';
     ctx.fillRect(0, 0, s, frame);
     ctx.fillRect(0, s - frame, s, frame);
     ctx.fillRect(0, 0, frame, s);
     ctx.fillRect(s - frame, 0, frame, s);
 
-    // Diagonal brace
+    // Diagonal corrugated reinforcement strap
     ctx.save();
-    ctx.strokeStyle = '#d9984c';
-    ctx.lineWidth = 24;
+    ctx.shadowColor = 'rgba(44, 24, 10, 0.28)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 3;
+    ctx.strokeStyle = '#d4af7c';
+    ctx.lineWidth = 22;
     ctx.beginPath();
     ctx.moveTo(26, s - 26);
     ctx.lineTo(s - 26, 26);
     ctx.stroke();
-    ctx.strokeStyle = '#4a2a14';
-    ctx.lineWidth = 4.5;
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(72, 44, 18, 0.36)';
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
-    ctx.moveTo(30, s - 42);
-    ctx.lineTo(s - 42, 30);
-    ctx.moveTo(42, s - 30);
-    ctx.lineTo(s - 30, 42);
+    ctx.moveTo(30, s - 41);
+    ctx.lineTo(s - 41, 30);
+    ctx.moveTo(41, s - 30);
+    ctx.lineTo(s - 30, 41);
     ctx.stroke();
-    ctx.restore();
 
-    // Cute faded farm-crate leaf stencil stamp in center
-    ctx.save();
-    ctx.translate(s / 2, s / 2);
-    ctx.fillStyle = 'rgba(94, 52, 20, 0.24)';
-    ctx.beginPath();
-    ctx.arc(0, 0, 26, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(122, 178, 64, 0.55)';
-    ctx.beginPath();
-    ctx.ellipse(-7, -2, 11, 6, -0.5, 0, Math.PI * 2);
-    ctx.ellipse(7, -2, 11, 6, 0.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    paintPaperGrain(ctx, s, s, damaged ? 999 : 501, 0.07);
 
-    paintPaperGrain(ctx, s, s, damaged ? 999 : 501, 0.09);
-
-    // Inked frame borders & iron corner rivets
-    ctx.strokeStyle = '#452611';
-    ctx.lineWidth = 7.5;
-    ctx.strokeRect(3.5, 3.5, s - 7, s - 7);
+    // Clean cut-cardboard edges & tiny metallic brass corner brads
+    ctx.strokeStyle = 'rgba(72, 44, 20, 0.42)';
     ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, s - 4, s - 4);
+    ctx.lineWidth = 2.5;
     ctx.strokeRect(frame, frame, s - frame * 2, s - frame * 2);
 
-    ctx.fillStyle = '#452611';
     for (const [nx, ny] of [
-      [15, 15],
-      [s - 15, 15],
-      [15, s - 15],
-      [s - 15, s - 15],
+      [14, 14],
+      [s - 14, 14],
+      [14, s - 14],
+      [s - 14, s - 14],
     ]) {
+      const bg = ctx.createRadialGradient(nx - 2, ny - 2, 1, nx, ny, 5.5);
+      bg.addColorStop(0, '#fff0b8');
+      bg.addColorStop(0.6, '#cfa03c');
+      bg.addColorStop(1, '#7c5416');
+      ctx.fillStyle = bg;
       ctx.beginPath();
-      ctx.arc(nx, ny, 5, 0, Math.PI * 2);
+      ctx.arc(nx, ny, 5.5, 0, Math.PI * 2);
       ctx.fill();
     }
 
     if (damaged) {
-      // Hand-inked splinter cracks!
-      ctx.strokeStyle = '#321708';
-      ctx.lineWidth = 6.5;
+      // Torn kraft cardboard creases & exposed dark flute rip!
+      ctx.strokeStyle = '#4e2c14';
+      ctx.lineWidth = 6;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(56, 44);
@@ -1546,46 +1307,25 @@ export class CraftTextureLibrary {
   private buildTreeBarkTexture(): THREE.CanvasTexture {
     const s = 256;
     const { canvas, ctx } = makeCanvas(s, s);
+    // Pale lathe-turned Scandinavian birch wooden dowel trunk (matching our 1+4 cardboard mockups!)
     const grad = ctx.createLinearGradient(0, 0, s, 0);
-    grad.addColorStop(0, '#784724');
-    grad.addColorStop(0.45, '#965c32');
-    grad.addColorStop(1, '#6e401f');
+    grad.addColorStop(0, '#c69e6d');
+    grad.addColorStop(0.38, '#e3c393');
+    grad.addColorStop(0.7, '#d4af7d');
+    grad.addColorStop(1, '#b98f5e');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, s, s);
 
-    // Chunky hand-inked vertical bark ridges
-    const rng = mulberry(4512);
     ctx.lineCap = 'round';
-    for (let x = 14; x < s; x += 26) {
-      ctx.strokeStyle = 'rgba(72, 40, 20, 0.72)';
-      ctx.lineWidth = 3.2;
+    for (let x = 14; x < s; x += 28) {
+      ctx.strokeStyle = 'rgba(130, 88, 48, 0.22)';
+      ctx.lineWidth = 2.2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
-      ctx.bezierCurveTo(x + 8, s * 0.35, x - 9, s * 0.68, x + 3, s);
-      ctx.stroke();
-
-      ctx.strokeStyle = 'rgba(232, 188, 136, 0.28)';
-      ctx.lineWidth = 2.6;
-      ctx.beginPath();
-      ctx.moveTo(x + 6, 0);
-      ctx.bezierCurveTo(x + 14, s * 0.35, x - 3, s * 0.68, x + 9, s);
+      ctx.bezierCurveTo(x + 5, s * 0.35, x - 5, s * 0.68, x + 2, s);
       ctx.stroke();
     }
-
-    // Storybook wood knot oval
-    for (let i = 0; i < 3; i++) {
-      const kx = 40 + rng() * 176;
-      const ky = 40 + rng() * 176;
-      ctx.fillStyle = '#5c341a';
-      ctx.strokeStyle = 'rgba(60, 30, 14, 0.72)';
-      ctx.lineWidth = 2.8;
-      ctx.beginPath();
-      ctx.ellipse(kx, ky, 14, 22, 0.08, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-
-    paintPaperGrain(ctx, s, s, 4513, 0.09);
+    paintPaperGrain(ctx, s, s, 4513, 0.05);
     return finalizeTexture(canvas, { repeat: [2, 1] });
   }
 
@@ -1594,132 +1334,92 @@ export class CraftTextureLibrary {
     const { canvas, ctx } = makeCanvas(s, s);
     const palettes: Record<
       TreeFoliageVariant,
-      { bg: string; dark: string; mid: string; light: string; ink: string; accent: string; accent2: string }
+      { bg: string; dark: string; mid: string; light: string; accent: string; accent2: string }
     > = {
       spring_green: {
-        bg: '#74a652',
-        dark: '#56843d',
-        mid: '#84b45c',
-        light: '#aecf76',
-        ink: 'rgba(58, 86, 36, 0.62)',
-        accent: '#d65d54',
-        accent2: '#f7ebb8',
+        bg: '#55966a',
+        dark: '#3b7352',
+        mid: '#5da06d',
+        light: '#8bc07d',
+        accent: '#e0664e',
+        accent2: '#f5dc84',
       },
       spring_blossom: {
-        bg: '#e6a8bc',
-        dark: '#c98099',
-        mid: '#efb9ca',
-        light: '#fae0e8',
-        ink: 'rgba(122, 62, 84, 0.56)',
+        bg: '#ebafc0',
+        dark: '#cf8ba0',
+        mid: '#f2c0ce',
+        light: '#fce1e8',
         accent: '#fff9fb',
         accent2: '#f5dc8c',
       },
       summer_citrus: {
-        bg: '#659c56',
-        dark: '#4a7a42',
-        mid: '#79b064',
-        light: '#a2cc7c',
-        ink: 'rgba(46, 80, 42, 0.62)',
-        accent: '#e69b45',
-        accent2: '#f5dc78',
+        bg: '#5aa068',
+        dark: '#3f7c4f',
+        mid: '#6eb473',
+        light: '#9acc82',
+        accent: '#ea9942',
+        accent2: '#f7df7c',
       },
       autumn_crimson: {
-        bg: '#c76042',
-        dark: '#9c402c',
-        mid: '#d6784e',
-        light: '#e8a264',
-        ink: 'rgba(98, 38, 22, 0.6)',
-        accent: '#f0c462',
-        accent2: '#e6845c',
+        bg: '#c85a3a',
+        dark: '#9c3e26',
+        mid: '#d66d42',
+        light: '#e89658',
+        accent: '#f0c458',
+        accent2: '#e67848',
       },
       autumn_gold: {
-        bg: '#d99e44',
-        dark: '#b0782c',
-        mid: '#e6b458',
-        light: '#f5d682',
-        ink: 'rgba(104, 62, 22, 0.6)',
-        accent: '#c7563a',
-        accent2: '#f7ecc0',
+        bg: '#dfa844',
+        dark: '#bc852c',
+        mid: '#eab954',
+        light: '#f7d87c',
+        accent: '#cf5638',
+        accent2: '#fbf0c4',
       },
       winter_pine: {
-        bg: '#4e7d6c',
-        dark: '#355c50',
-        mid: '#649482',
-        light: '#e8f4fa',
-        ink: 'rgba(34, 58, 66, 0.62)',
+        bg: '#588882',
+        dark: '#3f6865',
+        mid: '#6c9c94',
+        light: '#eef6fa',
         accent: '#ffffff',
-        accent2: '#c94a3c',
+        accent2: '#d65242',
       },
     };
     const p = palettes[variant];
     const grad = ctx.createLinearGradient(0, 0, 0, s);
     grad.addColorStop(0, p.light);
-    grad.addColorStop(0.5, p.mid);
+    grad.addColorStop(0.55, p.mid);
     grad.addColorStop(1, p.dark);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, s, s);
 
+    // Crisp mid-century cut-paper chevron / scalloped foliage pleats (NO dark cartoon ink!)
+    for (let row = 0; row < 5; row++) {
+      const y = row * 52 + 12;
+      ctx.fillStyle = row % 2 === 0 ? 'rgba(255, 252, 240, 0.11)' : 'rgba(34, 24, 14, 0.08)';
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 0; x <= s; x += 32) {
+        ctx.lineTo(x + 16, y + 18);
+        ctx.lineTo(x + 32, y);
+      }
+      ctx.lineTo(s, y + 32);
+      ctx.lineTo(0, y + 32);
+      ctx.closePath();
+      ctx.fill();
+    }
+
     const rng = mulberry(variant.charCodeAt(7) * 317 + 41);
-
-    // Layered storybook watercolor leaf puffs with delicate sepia-tinted ink arcs
-    for (let row = 0; row < 6; row++) {
-      const y = row * 44 + 14;
-      for (let col = -1; col < 7; col++) {
-        const x = col * 42 + (row % 2 === 0 ? 0 : 21);
-        const r = 24 + rng() * 6;
-        ctx.fillStyle = row < 2 ? p.light : row < 4 ? p.mid : p.dark;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Soft sunlit watercolor wash dab on upper crown
-        ctx.fillStyle = 'rgba(255, 250, 228, 0.14)';
-        ctx.beginPath();
-        ctx.arc(x - r * 0.2, y - r * 0.22, r * 0.52, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Delicate storybook scallop ink arc
-        ctx.strokeStyle = p.ink;
-        ctx.lineWidth = 2.4;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0.18 * Math.PI, 0.82 * Math.PI);
-        ctx.stroke();
-      }
+    for (let i = 0; i < 8; i++) {
+      const ax = 24 + rng() * 208;
+      const ay = 24 + rng() * 208;
+      ctx.fillStyle = i % 2 === 0 ? p.accent : p.accent2;
+      ctx.beginPath();
+      ctx.arc(ax, ay, 6.2, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    // Subtle seasonal storybook fruit / blossom / leaf accents
-    for (let i = 0; i < 11; i++) {
-      const ax = 20 + rng() * 216;
-      const ay = 20 + rng() * 216;
-      if (variant === 'spring_blossom') {
-        ctx.fillStyle = p.accent;
-        for (let k = 0; k < 5; k++) {
-          const a = (k / 5) * Math.PI * 2;
-          ctx.beginPath();
-          ctx.arc(ax + Math.cos(a) * 5.5, ay + Math.sin(a) * 5.5, 4, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.fillStyle = p.accent2;
-        ctx.beginPath();
-        ctx.arc(ax, ay, 3.4, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        // Painted apples, oranges, holly berries, or warm autumn berries/leaves
-        ctx.fillStyle = i % 3 === 0 ? p.accent2 : p.accent;
-        ctx.strokeStyle = p.ink;
-        ctx.lineWidth = 1.9;
-        ctx.beginPath();
-        ctx.arc(ax, ay, 6.8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = 'rgba(255,252,240,0.55)';
-        ctx.beginPath();
-        ctx.arc(ax - 2.1, ay - 2.1, 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    paintPaperGrain(ctx, s, s, 9123, 0.1);
+    paintPaperGrain(ctx, s, s, 9123, 0.065);
     return finalizeTexture(canvas, { repeat: [2, 1] });
   }
 
@@ -1730,20 +1430,21 @@ export class CraftTextureLibrary {
     const isGreenhouse = theme === 'greenhouse';
     const isWinter = theme === 'winter';
 
+    // Crisp flat-faceted mid-century cut-paper horizon hill cardstock colors
     const topCol = isWinter
-      ? ['#eef6fa', '#d8e9f2', '#c0d7e6'][layerIdx % 3]
+      ? ['#eef6fa', '#d8eaf4', '#bed8e8'][layerIdx % 3]
       : isAutumn
-        ? ['#deb062', '#cf8948', '#b86842'][layerIdx % 3]
+        ? ['#e6ba5e', '#d6894a', '#be6a44'][layerIdx % 3]
         : isGreenhouse
-          ? ['#8db872', '#78a664', '#648f58'][layerIdx % 3]
-          : ['#a8c978', '#8eb668', '#78a05c'][layerIdx % 3];
+          ? ['#98c688', '#7cb274', '#639b66'][layerIdx % 3]
+          : ['#9fc48a', '#7eb07c', '#639b74'][layerIdx % 3];
     const botCol = isWinter
-      ? ['#9cbcd1', '#7ea3bd', '#658aa6'][layerIdx % 3]
+      ? ['#bcd5e6', '#9abbd1', '#7ea4be'][layerIdx % 3]
       : isAutumn
-        ? ['#bc843c', '#a35d32', '#87462c'][layerIdx % 3]
+        ? ['#cc9542', '#b86834', '#984d30'][layerIdx % 3]
         : isGreenhouse
-          ? ['#659150', '#547c46', '#44683c'][layerIdx % 3]
-          : ['#7ca454', '#678e48', '#567a3e'][layerIdx % 3];
+          ? ['#76a868', '#5e9158', '#4d7c4e'][layerIdx % 3]
+          : ['#7ea96a', '#639464', '#4d7f5c'][layerIdx % 3];
 
     const grad = ctx.createLinearGradient(0, 0, 0, s);
     grad.addColorStop(0, topCol);
@@ -1751,128 +1452,95 @@ export class CraftTextureLibrary {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, s, s);
 
-    // Sweeping sunlit watercolor contour washes across the hillside
-    ctx.fillStyle = isWinter ? 'rgba(255, 255, 255, 0.24)' : 'rgba(255, 250, 214, 0.14)';
-    for (let i = 0; i < 4; i++) {
-      const y = 32 + i * 58;
+    // Subtle matte construction-paper contour bands
+    ctx.fillStyle = isWinter ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 252, 234, 0.12)';
+    for (let i = 0; i < 3; i++) {
+      const y = 44 + i * 68;
       ctx.beginPath();
       ctx.moveTo(0, y);
-      ctx.quadraticCurveTo(s * 0.5, y - 24, s, y + 6);
-      ctx.lineTo(s, y + 26);
-      ctx.quadraticCurveTo(s * 0.5, y - 4, 0, y + 20);
+      ctx.quadraticCurveTo(s * 0.5, y - 20, s, y + 6);
+      ctx.lineTo(s, y + 24);
+      ctx.quadraticCurveTo(s * 0.5, y - 2, 0, y + 18);
       ctx.closePath();
       ctx.fill();
     }
 
-    const rng = mulberry(theme.charCodeAt(0) * 55 + layerIdx * 97);
-    // Soft painted meadow wildflowers / autumn orchard specks / winter snowfall sparkles
-    for (let i = 0; i < 20; i++) {
-      const fx = 16 + rng() * 224;
-      const fy = 20 + rng() * 216;
-      ctx.fillStyle = isWinter
-        ? i % 2 === 0
-          ? 'rgba(255, 255, 255, 0.82)'
-          : 'rgba(182, 224, 248, 0.72)'
-        : isAutumn
-          ? i % 2 === 0
-            ? 'rgba(245, 214, 128, 0.78)'
-            : 'rgba(198, 92, 62, 0.72)'
-          : isGreenhouse
-            ? i % 2 === 0
-              ? 'rgba(252, 244, 194, 0.75)'
-              : 'rgba(202, 232, 168, 0.72)'
-            : i % 3 === 0
-              ? 'rgba(255, 252, 240, 0.78)'
-              : i % 3 === 1
-                ? 'rgba(245, 216, 132, 0.75)'
-                : 'rgba(238, 186, 200, 0.75)';
-      ctx.beginPath();
-      ctx.arc(fx, fy, 3.6 + rng() * 2.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    paintPaperGrain(ctx, s, s, 3030 + layerIdx, 0.11);
+    paintPaperGrain(ctx, s, s, 3030 + layerIdx, 0.065);
     return finalizeTexture(canvas, { repeat: [1, 1] });
   }
 
   private buildBarnWallTexture(): THREE.CanvasTexture {
     const s = 256;
     const { canvas, ctx } = makeCanvas(s, s);
-    ctx.fillStyle = '#cf4434';
+    // Folded fluted corrugated coral-red cardboard barn walls (matching our approved Spring & Autumn mockups!)
+    ctx.fillStyle = '#cf5a44';
     ctx.fillRect(0, 0, s, s);
 
-    // Vertical storybook painted red barn planks with chocolate-ink seams
-    for (let x = 0; x < s; x += 32) {
-      ctx.fillStyle = (x / 32) % 2 === 0 ? '#d94b38' : '#c43d2d';
-      ctx.fillRect(x, 0, 32, s);
-      ctx.strokeStyle = 'rgba(255, 210, 180, 0.14)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(x + 6, 0);
-      ctx.lineTo(x + 6, s);
-      ctx.stroke();
-      ctx.strokeStyle = '#521d15';
-      ctx.lineWidth = 3.5;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, s);
-      ctx.stroke();
+    const flutes = 16;
+    const step = s / flutes;
+    for (let i = 0; i < flutes; i++) {
+      const x = i * step;
+      const g = ctx.createLinearGradient(x, 0, x + step, 0);
+      g.addColorStop(0, '#963828');
+      g.addColorStop(0.32, '#d8644c');
+      g.addColorStop(0.58, '#e67d62');
+      g.addColorStop(0.88, '#a84230');
+      g.addColorStop(1, '#963828');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, 0, step + 0.5, s);
     }
 
-    // Cream corner trim border
-    ctx.fillStyle = '#fff5dc';
-    ctx.fillRect(0, 0, 14, s);
-    ctx.fillRect(s - 14, 0, 14, s);
-    ctx.fillRect(0, 0, s, 12);
-    ctx.strokeStyle = '#472213';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(2, 2, s - 4, s - 4);
+    // Warm folded kraft paper corner trim
+    ctx.fillStyle = '#e8cda2';
+    ctx.fillRect(0, 0, 12, s);
+    ctx.fillRect(s - 12, 0, 12, s);
+    ctx.fillRect(0, 0, s, 10);
 
-    paintPaperGrain(ctx, s, s, 5511, 0.08);
+    paintPaperGrain(ctx, s, s, 5511, 0.06);
     return finalizeTexture(canvas);
   }
 
   private buildBarnRoofTexture(): THREE.CanvasTexture {
     const s = 256;
     const { canvas, ctx } = makeCanvas(s, s);
-    ctx.fillStyle = '#75462a';
+    // Warm sunlit corrugated kraft / ochre folded paper roof (like our Spring/Autumn mockups!)
+    ctx.fillStyle = '#d49a4c';
     ctx.fillRect(0, 0, s, s);
 
-    // Scalloped overlapping storybook cedar roof shingles!
-    for (let row = 0; row < 8; row++) {
-      const y = row * 32;
-      for (let col = -1; col < 8; col++) {
-        const x = col * 36 + (row % 2 === 0 ? 0 : 18);
-        ctx.fillStyle = (row + col) % 2 === 0 ? '#8a5534' : '#734427';
-        ctx.beginPath();
-        ctx.roundRect(x, y, 36, 34, [0, 0, 14, 14]);
-        ctx.fill();
-        ctx.strokeStyle = '#3d2010';
-        ctx.lineWidth = 3.5;
-        ctx.stroke();
-      }
+    const flutes = 14;
+    const step = s / flutes;
+    for (let i = 0; i < flutes; i++) {
+      const x = i * step;
+      const g = ctx.createLinearGradient(x, 0, x + step, 0);
+      g.addColorStop(0, '#a36e2c');
+      g.addColorStop(0.36, '#dca554');
+      g.addColorStop(0.65, '#ebc074');
+      g.addColorStop(1, '#a36e2c');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, 0, step + 0.5, s);
     }
-    paintPaperGrain(ctx, s, s, 5512, 0.08);
+
+    paintPaperGrain(ctx, s, s, 5512, 0.06);
     return finalizeTexture(canvas, { repeat: [2, 2] });
   }
 
   private buildFenceWoodTexture(): THREE.CanvasTexture {
     const s = 128;
     const { canvas, ctx } = makeCanvas(s, s);
-    ctx.fillStyle = '#f5ead2';
+    ctx.fillStyle = '#e8cfa6';
     ctx.fillRect(0, 0, s, s);
-    ctx.strokeStyle = 'rgba(138, 102, 62, 0.24)';
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(138, 98, 56, 0.22)';
+    ctx.lineWidth = 2;
     for (let x = 14; x < s; x += 22) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
-      ctx.bezierCurveTo(x + 4, s * 0.4, x - 4, s * 0.7, x, s);
+      ctx.bezierCurveTo(x + 3, s * 0.4, x - 3, s * 0.7, x, s);
       ctx.stroke();
     }
-    ctx.strokeStyle = '#5c3b1e';
-    ctx.lineWidth = 5;
-    ctx.strokeRect(2.5, 2.5, s - 5, s - 5);
-    paintPaperGrain(ctx, s, s, 5513, 0.08);
+    ctx.strokeStyle = 'rgba(104, 70, 38, 0.28)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(1.5, 1.5, s - 3, s - 3);
+    paintPaperGrain(ctx, s, s, 5513, 0.055);
     return finalizeTexture(canvas);
   }
 
@@ -1880,12 +1548,12 @@ export class CraftTextureLibrary {
     const s = 128;
     const { canvas, ctx } = makeCanvas(s, s);
     const grad = ctx.createLinearGradient(0, 0, 0, s);
-    grad.addColorStop(0, '#fffdf7');
-    grad.addColorStop(0.68, '#f7f2e4');
-    grad.addColorStop(1, '#cfe4f2');
+    grad.addColorStop(0, '#fffef9');
+    grad.addColorStop(0.72, '#faf5e8');
+    grad.addColorStop(1, '#ede6d4');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, s, s);
-    paintPaperGrain(ctx, s, s, 5514, 0.07);
+    paintPaperGrain(ctx, s, s, 5514, 0.055);
     return finalizeTexture(canvas);
   }
 
@@ -2123,27 +1791,41 @@ export function createPaperStandeeRig(
   const height = UNIT_WORLD_HEIGHTS[visualKind] ?? 1.12;
   const { front, back, aspect } = textures.getSpriteTexturePair(visualKind);
 
-  // Slotted wooden cardboard standee base disc with turned wood grain!
-  const baseRadius = isBoss ? 0.54 : 0.4;
-  const baseHeight = 0.085;
-  const baseGeo = new THREE.CylinderGeometry(baseRadius * 0.94, baseRadius, baseHeight, 24);
-  const baseColor = isBoss ? '#e0a22b' : team === 'player' ? '#6cb548' : '#d14f3f';
+  // Thin team-color painted collar rim underneath the natural pale birch coin!
+  const baseRadius = isBoss ? 0.56 : 0.41;
+  const baseHeight = 0.09;
+  const baseGeo = new THREE.CylinderGeometry(baseRadius * 1.0, baseRadius * 1.04, 0.036, 28);
+  const baseColor = isBoss ? '#e5ae32' : team === 'player' ? '#58ad58' : '#d65240';
   const baseMat = new THREE.MeshStandardMaterial({
     map: textures.woodTokenMap,
     color: new THREE.Color(baseColor),
-    roughness: 0.78,
+    roughness: 0.74,
     metalness: 0.04,
-    bumpMap: textures.paperBump,
-    bumpScale: 0.015,
   });
   const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-  baseMesh.position.y = baseHeight / 2;
+  baseMesh.position.y = 0.018;
   baseMesh.castShadow = true;
   baseMesh.receiveShadow = true;
   root.add(baseMesh);
 
+  // Natural pale Scandinavian lathe-turned birch wood coin base (matching our 1+5 clay figurines!)
+  const innerDiscGeo = new THREE.CylinderGeometry(baseRadius * 0.94, baseRadius * 0.97, 0.062, 28);
+  const innerDiscMat = new THREE.MeshStandardMaterial({
+    map: textures.woodTokenMap,
+    color: '#f5e4c6',
+    roughness: 0.76,
+    metalness: 0.02,
+    bumpMap: textures.paperBump,
+    bumpScale: 0.008,
+  });
+  const innerDisc = new THREE.Mesh(innerDiscGeo, innerDiscMat);
+  innerDisc.position.y = 0.062;
+  innerDisc.castShadow = true;
+  innerDisc.receiveShadow = true;
+  root.add(innerDisc);
+
   // Promotion Tier Pedestal Collar Ring (hidden for seedling; Bronze for ripe; shimmering Gold for heirloom!)
-  const promoTrimGeo = new THREE.TorusGeometry(baseRadius * 0.97, 0.032, 8, 28);
+  const promoTrimGeo = new THREE.TorusGeometry(baseRadius * 0.97, 0.028, 8, 28);
   promoTrimGeo.rotateX(Math.PI / 2);
   const promoTrimMat = new THREE.MeshStandardMaterial({
     color: '#e5b242',
@@ -2153,31 +1835,12 @@ export function createPaperStandeeRig(
     metalness: 0.62,
   });
   const promoTrimMesh = new THREE.Mesh(promoTrimGeo, promoTrimMat);
-  promoTrimMesh.position.y = baseHeight * 0.72;
+  promoTrimMesh.position.y = baseHeight * 0.56;
   promoTrimMesh.visible = false;
   root.add(promoTrimMesh);
 
-  // Inner cream craft-wood disc top
-  const innerDiscGeo = new THREE.CylinderGeometry(baseRadius * 0.8, baseRadius * 0.8, 0.018, 24);
-  const innerDiscMat = new THREE.MeshStandardMaterial({
-    map: textures.woodTokenMap,
-    color: '#f2dfb8',
-    roughness: 0.86,
-  });
-  const innerDisc = new THREE.Mesh(innerDiscGeo, innerDiscMat);
-  innerDisc.position.y = baseHeight + 0.004;
-  innerDisc.receiveShadow = true;
-  root.add(innerDisc);
-
-  // Wooden card slot groove across the disc
-  const slotGeo = new THREE.BoxGeometry(baseRadius * 1.15, 0.025, 0.075);
-  const slotMat = new THREE.MeshStandardMaterial({ color: '#5a361a', roughness: 0.95 });
-  const slotMesh = new THREE.Mesh(slotGeo, slotMat);
-  slotMesh.position.y = baseHeight + 0.01;
-  flipGroup.add(slotMesh);
-
   // Glowing tactical selection / dash / attack floor ring around base
-  const ringGeo = new THREE.RingGeometry(baseRadius * 1.06, baseRadius * 1.28, 32);
+  const ringGeo = new THREE.RingGeometry(baseRadius * 1.08, baseRadius * 1.3, 32);
   ringGeo.rotateX(-Math.PI / 2);
   const ringMat = new THREE.MeshBasicMaterial({
     color: '#ffe066',
@@ -2187,40 +1850,40 @@ export function createPaperStandeeRig(
     depthWrite: false,
   });
   const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-  ringMesh.position.y = 0.025;
+  ringMesh.position.y = 0.022;
   root.add(ringMesh);
 
-  // Thick Paper Mario cutout stack!
+  // Sculpted Matte Clay & Wood Toy Figurine Card-Stack (with soft matte finish & subtle warm edge core)
   const planeGeo = new THREE.PlaneGeometry(1, 1);
 
   const frontMat = new THREE.MeshStandardMaterial({
     map: front,
     alphaTest: 0.42,
-    roughness: 0.84,
+    roughness: 0.72,
     metalness: 0.02,
     side: THREE.FrontSide,
     bumpMap: textures.paperBump,
-    bumpScale: 0.008,
+    bumpScale: 0.004,
   });
 
   const backMat = new THREE.MeshStandardMaterial({
     map: back,
-    color: new THREE.Color('#fffaf0'),
+    color: new THREE.Color('#fffcf5'),
     alphaTest: 0.42,
-    roughness: 0.85,
+    roughness: 0.74,
     metalness: 0.02,
     side: THREE.FrontSide,
     bumpMap: textures.paperBump,
-    bumpScale: 0.008,
+    bumpScale: 0.004,
   });
 
   const coreMat = new THREE.MeshStandardMaterial({
     map: front,
-    color: new THREE.Color('#d8b482'),
-    emissive: new THREE.Color('#3b2410'),
-    emissiveIntensity: 0.14,
+    color: new THREE.Color('#dfd0bc'),
+    emissive: new THREE.Color('#3a2c1e'),
+    emissiveIntensity: 0.1,
     alphaTest: 0.42,
-    roughness: 0.95,
+    roughness: 0.9,
     side: THREE.DoubleSide,
   });
 
@@ -2232,24 +1895,24 @@ export function createPaperStandeeRig(
   });
 
   const cardStack = new THREE.Group();
-  cardStack.position.y = baseHeight + height * 0.47;
+  cardStack.position.y = baseHeight + height * 0.485;
 
   const frontMesh = new THREE.Mesh(planeGeo, frontMat);
-  frontMesh.position.z = 0.022;
+  frontMesh.position.z = 0.02;
   frontMesh.castShadow = true;
   frontMesh.receiveShadow = true;
   frontMesh.customDepthMaterial = depthMat;
   cardStack.add(frontMesh);
 
-  // 3 stacked inner cardboard slices for tangible edge thickness when orbiting or paper-flipping!
-  for (const zOff of [0.011, 0, -0.011]) {
+  // Inner subtle sculpted silhouette thickness slices for tactile camera orbit & paper-flip depth
+  for (const zOff of [0.01, 0, -0.01]) {
     const slice = new THREE.Mesh(planeGeo, coreMat);
     slice.position.z = zOff;
     cardStack.add(slice);
   }
 
   const backMesh = new THREE.Mesh(planeGeo, backMat);
-  backMesh.position.z = -0.022;
+  backMesh.position.z = -0.02;
   backMesh.rotation.y = Math.PI;
   backMesh.castShadow = false;
   backMesh.receiveShadow = true;
@@ -2264,11 +1927,11 @@ export function createPaperStandeeRig(
 
   flipGroup.add(cardStack);
 
-  // Visually Equipped 3D Paper Mario Die-Cut Weapon Prop for every playable hero!
+  // Visually Equipped 3D Papercraft & Corrugated-Cardboard Weapon Prop mounted beside every playable hero!
   let equippedWeapon: EquippedWeaponPropRig | undefined;
   if (team === 'player' && visualKind !== 'seed_cart') {
     equippedWeapon = createEquippedWeaponRig('blaster', 1);
-    equippedWeapon.root.position.set(baseRadius * 0.92, baseHeight + height * 0.46, 0.088);
+    equippedWeapon.root.position.set(baseRadius * 0.96, baseHeight + height * 0.44, 0.085);
     flipGroup.add(equippedWeapon.root);
   }
 
@@ -2512,8 +2175,6 @@ export function createPaperStandeeRig(
     promoTrimMat.dispose();
     innerDiscGeo.dispose();
     innerDiscMat.dispose();
-    slotGeo.dispose();
-    slotMat.dispose();
     ringGeo.dispose();
     ringMat.dispose();
     planeGeo.dispose();

@@ -1016,7 +1016,7 @@ onBeforeUnmount(() => {
   height: 100dvh;
   position: relative;
   overflow: hidden;
-  background: #5a3a20;
+  background: #8ec6c8;
 }
 
 .overworld-canvas {

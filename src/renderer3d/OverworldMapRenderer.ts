@@ -169,12 +169,12 @@ export class OverworldMapRenderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.06;
+    this.renderer.toneMappingExposure = 1.03;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#633e20');
-    this.scene.fog = new THREE.FogExp2('#633e20', 0.011);
+    this.scene.background = new THREE.Color('#8ec6c8');
+    this.scene.fog = new THREE.FogExp2('#8ec6c8', 0.0055);
 
     this.camera = new THREE.PerspectiveCamera(35, 16 / 9, 0.2, 120);
     this.textures = new CraftTextureLibrary();
@@ -198,11 +198,11 @@ export class OverworldMapRenderer {
   }
 
   private setupLights(): void {
-    const hemi = new THREE.HemisphereLight(0xfffaf0, 0x8a5d36, 1.08);
+    const hemi = new THREE.HemisphereLight(0xfffdf6, 0xd8c2a0, 1.15);
     this.scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xfff3d4, 1.38);
-    sun.position.set(8, 20, 10);
+    const sun = new THREE.DirectionalLight(0xfff6e2, 1.45);
+    sun.position.set(8, 22, 10);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 2;
@@ -215,7 +215,7 @@ export class OverworldMapRenderer {
     sun.shadow.bias = -0.0004;
     this.scene.add(sun);
 
-    const rim = new THREE.DirectionalLight(0xcbe6ff, 0.35);
+    const rim = new THREE.DirectionalLight(0xd4f0ff, 0.42);
     rim.position.set(-10, 10, -8);
     this.scene.add(rim);
   }
@@ -371,25 +371,26 @@ export class OverworldMapRenderer {
     this.bossRig = null;
     this.previewPathSig = '';
 
-    // Seasonal tabletop ambiance
+    // Bright Scandinavian craft studio seasonal backdrop (harmonizing with our physical corrugated cardboard boards!)
     const bgHex =
       snap.theme === 'winter'
-        ? '#2d4459'
+        ? '#a8cce0'
         : snap.theme === 'autumn'
-          ? '#4a2b1a'
+          ? '#e4ce9e'
           : snap.theme === 'greenhouse'
-            ? '#5e4326'
-            : '#664324';
+            ? '#96d0c2'
+            : '#8ec6c8';
     this.scene.background = new THREE.Color(bgHex);
-    this.scene.fog = new THREE.FogExp2(bgHex, 0.011);
+    this.scene.fog = new THREE.FogExp2(bgHex, 0.0055);
 
-    // 1. Warm Sunlit Oak Tabletop
+    // 1. Sunlit Pale Scandinavian Birch Craft Tabletop
     const table = new THREE.Mesh(
       new THREE.PlaneGeometry(74, 62),
       new THREE.MeshStandardMaterial({
         map: this.textures.woodDeskMap,
-        roughness: 0.78,
-        metalness: 0.04,
+        color: '#ffffff',
+        roughness: 0.8,
+        metalness: 0.02,
       })
     );
     table.rotation.x = -Math.PI / 2;
@@ -397,36 +398,38 @@ export class OverworldMapRenderer {
     table.receiveShadow = true;
     this.worldGroup.add(table);
 
-    // Soft drop shadow skirt under the folding board
+    // Soft natural studio drop shadow skirt under the stacked corrugated cardboard board
     const shadowSkirt = new THREE.Mesh(
-      new THREE.PlaneGeometry(BOARD_W + 0.7, BOARD_H + 0.7),
+      new THREE.PlaneGeometry(BOARD_W + 0.65, BOARD_H + 0.65),
       new THREE.MeshBasicMaterial({
-        color: 0x1d0d04,
+        color: 0x3b2a1a,
         transparent: true,
-        opacity: 0.38,
+        opacity: 0.22,
         depthWrite: false,
       })
     );
     shadowSkirt.rotation.x = -Math.PI / 2;
-    shadowSkirt.position.set(0.14, 0.005, 0.18);
+    shadowSkirt.position.set(0.14, 0.004, 0.18);
     this.worldGroup.add(shadowSkirt);
 
-    // 2. Chunky Folding Watercolor Tabletop Game Board!
+    // 2. Chunky Stacked Multi-Ply Corrugated Cardboard Seasonal Overworld Board!
     const actDef = ACTS[snap.actIndex] ?? ACTS[0];
     const boardArtTex = this.getBoardTexture(actDef.boardArt);
     const sideMat = new THREE.MeshStandardMaterial({
       map: this.textures.corrugatedMap,
-      color: '#c9a67a',
-      roughness: 0.9,
+      bumpMap: this.textures.corrugatedBump,
+      bumpScale: 0.055,
+      color: '#ffffff',
+      roughness: 0.88,
     });
     const topMat = new THREE.MeshStandardMaterial({
       map: boardArtTex,
       bumpMap: this.textures.paperBump,
-      bumpScale: 0.009,
-      roughness: 0.84,
+      bumpScale: 0.008,
+      roughness: 0.82,
       metalness: 0.01,
     });
-    const bottomMat = new THREE.MeshStandardMaterial({ color: '#7a5230', roughness: 0.92 });
+    const bottomMat = new THREE.MeshStandardMaterial({ color: '#a87d4e', roughness: 0.92 });
 
     const boardSlab = compactMultiMaterialMesh(new THREE.BoxGeometry(BOARD_W, BOARD_TOP_Y, BOARD_H), [
       sideMat,
@@ -441,24 +444,24 @@ export class OverworldMapRenderer {
     boardSlab.receiveShadow = true;
     this.worldGroup.add(boardSlab);
 
-    // Subtle tabletop center fold seam (gives authentic folding-board tactility!)
+    // Subtle tabletop center fold crease seam (authentic folding corrugated craft board!)
     const foldSeam = new THREE.Mesh(
-      new THREE.BoxGeometry(0.035, 0.008, BOARD_H - 0.14),
-      new THREE.MeshBasicMaterial({ color: 0x5c3e24, transparent: true, opacity: 0.24 })
+      new THREE.BoxGeometry(0.03, 0.006, BOARD_H - 0.14),
+      new THREE.MeshBasicMaterial({ color: 0x6b4b2c, transparent: true, opacity: 0.16 })
     );
-    foldSeam.position.set(0, BOARD_TOP_Y + 0.005, 0);
+    foldSeam.position.set(0, BOARD_TOP_Y + 0.004, 0);
     this.worldGroup.add(foldSeam);
 
-    // Four shiny brass corner rivets on the folding game board
+    // Four brushed-brass split-pin paper brads pinning the cardboard board corners
     const brassMat = new THREE.MeshStandardMaterial({
-      color: '#dfb24a',
-      metalness: 0.45,
-      roughness: 0.32,
+      color: '#e0b44e',
+      metalness: 0.42,
+      roughness: 0.34,
     });
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const rivet = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 0.05, 14), brassMat);
-        rivet.position.set(sx * (BOARD_W / 2 - 0.28), BOARD_TOP_Y + 0.025, sz * (BOARD_H / 2 - 0.28));
+        const rivet = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.045, 16), brassMat);
+        rivet.position.set(sx * (BOARD_W / 2 - 0.28), BOARD_TOP_Y + 0.022, sz * (BOARD_H / 2 - 0.28));
         rivet.castShadow = true;
         this.worldGroup.add(rivet);
       }
@@ -811,10 +814,17 @@ export class OverworldMapRenderer {
     const windmill = new THREE.Group();
     windmill.position.set(mx, BOARD_TOP_Y, mz);
     windmill.rotation.y = mx < 0 ? 0.45 : -0.45;
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, 1.05, 10), creamMat);
+    const corrTowerMat = new THREE.MeshStandardMaterial({
+      map: this.textures.corrugatedMap,
+      bumpMap: this.textures.corrugatedBump,
+      bumpScale: 0.03,
+      color: '#f2d9b2',
+      roughness: 0.86,
+    });
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, 1.05, 12), corrTowerMat);
     tower.position.y = 0.525;
     tower.castShadow = true;
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(0.44, 0.48, 10), roofMat);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(0.44, 0.48, 12), roofMat);
     roof.position.y = 1.24;
     roof.castShadow = true;
     windmill.add(tower, roof);

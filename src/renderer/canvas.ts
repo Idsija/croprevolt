@@ -2283,63 +2283,73 @@ export class PaperCraftRenderer {
     const isWinter = battle.theme === 'winter';
     let fill = isWinter
       ? checker
-        ? '#dce8f0'
-        : '#d0e0ea'
+        ? '#edf4f8'
+        : '#dfe9f1'
       : isAutumn
         ? checker
-          ? '#c4a046'
-          : '#b9943d'
+          ? '#dfb254'
+          : '#d2a146'
         : isGreenhouse
           ? checker
-            ? '#7eb353'
-            : '#73a849'
+            ? '#94c082'
+            : '#86b475'
           : checker
-            ? '#8fb649'
-            : '#85ac41';
+            ? '#91b67f'
+            : '#7ea873';
     let topEdgeCol = isWinter
-      ? '#9cb8cc'
+      ? '#b8cedd'
       : isAutumn
-        ? '#94702a'
+        ? '#ad7d34'
         : isGreenhouse
-          ? '#5c8c38'
-          : '#6f9333';
+          ? '#65965c'
+          : '#668f60';
     if (tile.terrain === 'soil') {
-      fill = isWinter ? (checker ? '#8c7e74' : '#7f7268') : checker ? '#bf7d46' : '#b5743f';
-      topEdgeCol = '#8a552a';
+      fill = isWinter
+        ? checker
+          ? '#a3978c'
+          : '#95897e'
+        : isAutumn
+          ? checker
+            ? '#cc7848'
+            : '#be6c3e'
+          : checker
+            ? '#d9ba62'
+            : '#ccac54';
+      topEdgeCol = '#9e763a';
     } else if (tile.terrain === 'mud') {
-      fill = checker ? '#75563e' : '#6a4d37';
-      topEdgeCol = '#4c3625';
+      fill = checker ? '#8a684d' : '#7d5d43';
+      topEdgeCol = '#5c422c';
     } else if (tile.terrain === 'compost') {
-      fill = checker ? '#674b31' : '#5c422a';
-      topEdgeCol = '#432f1e';
+      fill = checker ? '#6f553c' : '#634a33';
+      topEdgeCol = '#4a3522';
     } else if (tile.terrain === 'gate') {
-      fill = checker ? '#f3cb5b' : '#e6b640';
+      fill = checker ? '#f2cf68' : '#e4be52';
       topEdgeCol = '#b58420';
     } else if (tile.terrain === 'barn_floor') {
       fill = isWinter
         ? checker
-          ? '#b8a99e'
-          : '#ab9c90'
+          ? '#c7b9ac'
+          : '#b9aba0'
         : isGreenhouse
           ? checker
-            ? '#cf8d5d'
-            : '#c38151'
+            ? '#d9a476'
+            : '#cd9668'
           : checker
-            ? '#bc8753'
-            : '#b27d4a';
-      topEdgeCol = isGreenhouse ? '#9c5b31' : '#83562d';
+            ? '#cfa472'
+            : '#c39765';
+      topEdgeCol = isGreenhouse ? '#a66b42' : '#966b42';
     } else if (tile.terrain === 'sunbeam') {
-      fill = checker ? '#f7dc6f' : '#f2cf57';
+      fill = checker ? '#f6e28b' : '#ebd473';
       topEdgeCol = '#c4961a';
     } else if (tile.terrain === 'water') {
-      fill = isWinter ? (checker ? '#4d8ca6' : '#438099') : checker ? '#2d95bd' : '#2587ad';
-      topEdgeCol = '#195f7c';
+      fill = isWinter ? (checker ? '#5297b2' : '#488ca6') : checker ? '#4dbcc3' : '#42afb7';
+      topEdgeCol = '#2a8490';
     } else if (tile.terrain === 'ice') {
-      fill = checker ? '#a9e2f5' : '#96d7ee';
-      topEdgeCol = '#58a8c9';
+      fill = checker ? '#b8e8f8' : '#a3ddf2';
+      topEdgeCol = '#68b6d6';
     } else if (tile.terrain === 'bridge') {
-      fill = checker ? '#c68a4d' : '#b87d43';
-      topEdgeCol = '#75441c';
+      fill = checker ? '#cf9f68' : '#c3925c';
+      topEdgeCol = '#8c6034';
     } else if (tile.terrain === 'lava') {
       fill = checker ? '#df4b18' : '#c93a10';
       topEdgeCol = '#7c1a08';

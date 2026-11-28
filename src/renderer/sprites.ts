@@ -213,7 +213,7 @@ const SPRITE_DEFAULT_FACING: Record<string, 'left' | 'right'> = {
   mower: 'left',
   beekeeper: 'left',
   barrow: 'left',
-  pitchfork: 'right',
+  pitchfork: 'left',
   blower: 'left',
   sapper: 'left',
   kettlebot: 'left',

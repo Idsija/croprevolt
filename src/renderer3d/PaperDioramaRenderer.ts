@@ -265,12 +265,12 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.02;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#6b4222');
-    this.scene.fog = new THREE.FogExp2('#6b4222', 0.02);
+    this.scene.background = new THREE.Color('#8ac4c7');
+    this.scene.fog = new THREE.FogExp2('#8ac4c7', 0.008);
 
     this.cameraCtrl = new TacticalCameraController(
       1.6,
@@ -327,13 +327,13 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
   }
 
   private setupLights(): void {
-    // Cozy warm diorama sky + oak desk bounce
-    const hemi = new THREE.HemisphereLight(0xfff7e2, 0x8f6239, 0.96);
+    // Bright sunlit craft-studio sky + pale Scandinavian birch desk bounce
+    const hemi = new THREE.HemisphereLight(0xf8fcfd, 0xdfd0b6, 1.08);
     this.hemiLight = hemi;
     this.scene.add(hemi);
 
-    // Golden afternoon sun casting Paper Mario standee & 3D crate shadows!
-    const sun = new THREE.DirectionalLight(0xfff1cf, 1.55);
+    // Warm crisp daylight sun casting clean soft figurine & cardboard shadows!
+    const sun = new THREE.DirectionalLight(0xfff7e4, 1.58);
     sun.position.set(8.5, 15.5, 9.5);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -349,8 +349,8 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
     this.sunLight = sun;
     this.scene.add(sun);
 
-    // Cool sky rim light so thick cardboard edges & crates separate crisply
-    const rim = new THREE.DirectionalLight(0xc8e4ff, 0.42);
+    // Soft airy sky rim light so fluted corrugated edges & clay figurines pop crisply
+    const rim = new THREE.DirectionalLight(0xd2efff, 0.42);
     rim.position.set(-9, 7, -8);
     this.rimLight = rim;
     this.scene.add(rim);
@@ -2828,48 +2828,50 @@ export class PaperDioramaRenderer implements BattleRendererHandle {
       );
       const bgHex =
         b.theme === 'winter'
-          ? '#2a4158'
+          ? '#a8cce0'
           : b.theme === 'greenhouse'
-            ? '#496352'
+            ? '#94cfc4'
             : b.theme === 'autumn'
-              ? '#4d2b22'
-              : '#664022';
+              ? '#e6cfa0'
+              : '#8ac4c7';
       this.scene.background = new THREE.Color(bgHex);
-      (this.scene.fog as THREE.FogExp2).color.set(bgHex);
+      const fog = this.scene.fog as THREE.FogExp2;
+      fog.color.set(bgHex);
+      fog.density = 0.0075;
 
-      // Act-specific Paper Mario stage lighting!
+      // Act-specific Mid-Century Craft Studio Daylight Lighting!
       if (this.sunLight && this.hemiLight && this.rimLight) {
         if (b.theme === 'winter') {
-          this.sunLight.color.set('#e0f3ff');
-          this.sunLight.intensity = 1.52;
-          this.hemiLight.color.set('#eef8ff');
-          this.hemiLight.groundColor.set('#536d8a');
-          this.hemiLight.intensity = 1.02;
-          this.rimLight.color.set('#ffbe6b');
-          this.rimLight.intensity = 0.68;
+          this.sunLight.color.set('#f4faff');
+          this.sunLight.intensity = 1.54;
+          this.hemiLight.color.set('#f5fbff');
+          this.hemiLight.groundColor.set('#bfd2e0');
+          this.hemiLight.intensity = 1.1;
+          this.rimLight.color.set('#ffd28e');
+          this.rimLight.intensity = 0.54;
         } else if (b.theme === 'autumn') {
-          this.sunLight.color.set('#ffbe78');
-          this.sunLight.intensity = 1.48;
-          this.hemiLight.color.set('#ffd6a6');
-          this.hemiLight.groundColor.set('#4f3548');
-          this.hemiLight.intensity = 0.88;
-          this.rimLight.color.set('#a8b8ff');
-          this.rimLight.intensity = 0.52;
-        } else if (b.theme === 'greenhouse') {
-          this.sunLight.color.set('#fff5d6');
-          this.sunLight.intensity = 1.62;
-          this.hemiLight.color.set('#f2ffec');
-          this.hemiLight.groundColor.set('#756640');
-          this.hemiLight.intensity = 1.0;
-          this.rimLight.color.set('#d2f5e3');
+          this.sunLight.color.set('#ffebca');
+          this.sunLight.intensity = 1.56;
+          this.hemiLight.color.set('#fff5de');
+          this.hemiLight.groundColor.set('#d2ae82');
+          this.hemiLight.intensity = 1.04;
+          this.rimLight.color.set('#d6e6ff');
           this.rimLight.intensity = 0.44;
+        } else if (b.theme === 'greenhouse') {
+          this.sunLight.color.set('#fff8e0');
+          this.sunLight.intensity = 1.62;
+          this.hemiLight.color.set('#f4fff6');
+          this.hemiLight.groundColor.set('#dacaa8');
+          this.hemiLight.intensity = 1.08;
+          this.rimLight.color.set('#d2f5ee');
+          this.rimLight.intensity = 0.42;
         } else {
-          this.sunLight.color.set('#fff1cf');
-          this.sunLight.intensity = 1.55;
-          this.hemiLight.color.set('#fff7e2');
-          this.hemiLight.groundColor.set('#8f6239');
-          this.hemiLight.intensity = 0.96;
-          this.rimLight.color.set('#c8e4ff');
+          this.sunLight.color.set('#fff7e4');
+          this.sunLight.intensity = 1.58;
+          this.hemiLight.color.set('#f8fcfd');
+          this.hemiLight.groundColor.set('#dfd0b6');
+          this.hemiLight.intensity = 1.08;
+          this.rimLight.color.set('#d2efff');
           this.rimLight.intensity = 0.42;
         }
       }

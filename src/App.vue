@@ -51,7 +51,7 @@ const activeSceneKey = computed(() => {
   height: 100dvh;
   perspective: 1400px;
   overflow: hidden;
-  background: #3d2412;
+  background: #d8c6a8;
 }
 
 .origami-page {
